@@ -44,7 +44,7 @@ export function GlassButton({
     <motion.button
       whileHover={{ scale: 1.025, y: -1 }}
       whileTap={{ scale: 0.97 }}
-      transition={{ type: "spring", stiffness: 400, damping: 24 }}
+      transition={{ type: "spring", stiffness: 260, damping: 24 }}
       {...rest}
       className={`relative font-medium tracking-tight text-white/95 ${SIZES[size]} ${className}`}
       style={{

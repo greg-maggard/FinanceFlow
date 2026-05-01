@@ -5,6 +5,7 @@ import { useStore } from "../state/store";
 import { GRAPH_BY_ID } from "../graph/flowchart";
 import { PHASE_COLORS } from "../theme/phaseColors";
 import { IDENTITY, MEDALS } from "../theme/identity";
+import { EASE_FLOW, M } from "../theme/motion";
 
 const PARTICLE_COUNT = 26;
 
@@ -30,7 +31,7 @@ export function CelebrationLayer() {
 
   useEffect(() => {
     if (!pendingCelebration) return;
-    const t = setTimeout(() => clearCelebration(), 1200);
+    const t = setTimeout(() => clearCelebration(), 1900);
     return () => clearTimeout(t);
   }, [pendingCelebration, clearCelebration]);
 
@@ -62,12 +63,12 @@ export function CelebrationLayer() {
           >
             <motion.div
               initial={{ scale: 0.5, opacity: 0 }}
-              animate={{ scale: [0.5, 1.4, 1.0], opacity: [0, 1, 0] }}
-              transition={{ duration: 1.0, ease: "easeOut" }}
+              animate={{ scale: [0.5, 1.5, 1.05], opacity: [0, 1, 0] }}
+              transition={{ duration: 1.6, ease: EASE_FLOW }}
               className="absolute h-72 w-72 rounded-full"
               style={{
                 background: `radial-gradient(circle, ${phaseColor.glow}, transparent 70%)`,
-                filter: "blur(8px)",
+                filter: "blur(10px)",
               }}
             />
             {particles.map((p, i) => (
@@ -75,22 +76,22 @@ export function CelebrationLayer() {
                 key={i}
                 initial={{ x: 0, y: 0, opacity: 0, scale: 0.5 }}
                 animate={{ x: p.x, y: p.y, opacity: [0, 1, 0], scale: [0.5, 1, 0.4] }}
-                transition={{ duration: 0.95, delay: p.delay, ease: [0.2, 0.8, 0.2, 1] }}
+                transition={{ duration: 1.4, delay: p.delay, ease: EASE_FLOW }}
                 className="absolute rounded-full"
                 style={{
                   width: p.size,
                   height: p.size,
                   background: phaseColor.base,
-                  boxShadow: `0 0 12px ${phaseColor.glow}`,
+                  boxShadow: `0 0 14px ${phaseColor.glow}`,
                 }}
               />
             ))}
             {identity && (
               <motion.div
-                initial={{ y: 18, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                exit={{ y: -12, opacity: 0 }}
-                transition={{ delay: 0.15, type: "spring", stiffness: 200, damping: 22 }}
+                initial={{ y: 22, opacity: 0, scale: 0.96 }}
+                animate={{ y: 0, opacity: 1, scale: 1 }}
+                exit={{ y: -16, opacity: 0, scale: 0.98 }}
+                transition={{ ...M.flow, delay: 0.18 }}
                 className="absolute top-[28%] rounded-2xl px-5 py-2.5 text-sm font-semibold"
                 style={{
                   background: "rgba(12,14,22,0.65)",
@@ -131,10 +132,10 @@ function MedalCard({ phase, onClose }: { phase: keyof typeof MEDALS; onClose: ()
   const m = MEDALS[phase];
   return (
     <motion.div
-      initial={{ scale: 0.7, opacity: 0, y: 24 }}
+      initial={{ scale: 0.7, opacity: 0, y: 26 }}
       animate={{ scale: 1, opacity: 1, y: 0 }}
-      exit={{ scale: 0.85, opacity: 0 }}
-      transition={{ type: "spring", stiffness: 200, damping: 20 }}
+      exit={{ scale: 0.86, opacity: 0 }}
+      transition={M.flow}
       onClick={(e) => e.stopPropagation()}
       className="relative max-w-sm rounded-3xl px-8 py-9 text-center"
       style={{
@@ -147,7 +148,7 @@ function MedalCard({ phase, onClose }: { phase: keyof typeof MEDALS; onClose: ()
     >
       <motion.div
         animate={{ rotate: [0, -6, 6, 0] }}
-        transition={{ duration: 1.4, ease: "easeInOut" }}
+        transition={{ duration: 2.2, ease: "easeInOut" }}
         className="mx-auto mb-5 flex h-28 w-28 items-center justify-center rounded-full text-5xl"
         style={{
           background: `radial-gradient(circle, ${c.glow}, ${c.tint})`,
