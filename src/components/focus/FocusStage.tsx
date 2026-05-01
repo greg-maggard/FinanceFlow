@@ -5,9 +5,9 @@ import { useStore } from "../../state/store";
 import { useUI } from "../../state/uiStore";
 import { neighbors } from "../../graph/path";
 import type { NodeId } from "../../state/schema";
-import { M, SWIPE_THRESHOLD } from "../../theme/motion";
+import { M, SWIPE_THRESHOLD, type Direction } from "../../theme/motion";
 
-function Chevron({ dir, onClick }: { dir: "prev" | "next"; onClick: () => void }) {
+function Arrow({ dir, onClick }: { dir: "prev" | "next"; onClick: () => void }) {
   return (
     <motion.button
       type="button"
@@ -15,28 +15,20 @@ function Chevron({ dir, onClick }: { dir: "prev" | "next"; onClick: () => void }
         e.stopPropagation();
         onClick();
       }}
-      initial={{ opacity: 0, x: dir === "prev" ? -8 : 8 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: dir === "prev" ? -8 : 8 }}
-      transition={M.flow}
-      whileHover={{ scale: 1.08 }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 0.32 }}
+      whileHover={{ opacity: 0.95, scale: 1.12 }}
       whileTap={{ scale: 0.92 }}
+      exit={{ opacity: 0 }}
+      transition={M.fadeQuick}
       aria-label={dir === "prev" ? "Previous step" : "Next step"}
-      className="hidden h-12 w-12 shrink-0 items-center justify-center rounded-full text-white/85 sm:flex"
-      style={{
-        background: "rgba(255,255,255,0.05)",
-        border: "1px solid rgba(255,255,255,0.12)",
-        backdropFilter: "blur(20px) saturate(180%)",
-        WebkitBackdropFilter: "blur(20px) saturate(180%)",
-        boxShadow:
-          "inset 0 1px 0 rgba(255,255,255,0.18), 0 8px 22px rgba(0,0,0,0.30)",
-      }}
+      className="hidden h-11 w-11 shrink-0 items-center justify-center text-white sm:flex"
     >
-      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none">
+      <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none">
         <path
-          d={dir === "prev" ? "M14 18 L8 12 L14 6" : "M10 6 L16 12 L10 18"}
+          d={dir === "prev" ? "M15 18 L9 12 L15 6" : "M9 6 L15 12 L9 18"}
           stroke="currentColor"
-          strokeWidth="2.2"
+          strokeWidth="1.6"
           strokeLinecap="round"
           strokeLinejoin="round"
         />
@@ -45,20 +37,37 @@ function Chevron({ dir, onClick }: { dir: "prev" | "next"; onClick: () => void }
   );
 }
 
+const variants = {
+  enter: (dir: Direction) => ({
+    x: dir === "forward" ? 70 : dir === "backward" ? -70 : 0,
+    opacity: 0,
+    scale: dir === "none" ? 0.94 : 1,
+    filter: dir === "none" ? "blur(6px)" : "blur(0px)",
+  }),
+  center: { x: 0, opacity: 1, scale: 1, filter: "blur(0px)" },
+  exit: (dir: Direction) => ({
+    x: dir === "forward" ? -70 : dir === "backward" ? 70 : 0,
+    opacity: 0,
+    scale: dir === "none" ? 0.94 : 1,
+    filter: dir === "none" ? "blur(10px)" : "blur(0px)",
+  }),
+};
+
 export function FocusStage({ activeId }: { activeId: NodeId }) {
   const setFocus = useUI((s) => s.setFocus);
   const setView = useUI((s) => s.setView);
   const view = useUI((s) => s.view);
+  const direction = useUI((s) => s.direction);
   const state = useStore();
 
   const { prev, next } = useMemo(() => neighbors(state, activeId), [state, activeId]);
 
   const goPrev = useCallback(() => {
-    if (prev) setFocus(prev);
+    if (prev) setFocus(prev, "backward");
   }, [prev, setFocus]);
 
   const goNext = useCallback(() => {
-    if (next) setFocus(next);
+    if (next) setFocus(next, "forward");
   }, [next, setFocus]);
 
   useEffect(() => {
@@ -74,15 +83,13 @@ export function FocusStage({ activeId }: { activeId: NodeId }) {
   }, [view, goPrev, goNext, setView]);
 
   return (
-    <div
-      className="flex w-full flex-1 items-center justify-center px-3 sm:gap-4 sm:px-5"
-    >
+    <div className="relative flex w-full flex-1 items-center justify-center px-2 sm:gap-2 sm:px-4">
       <AnimatePresence>
-        {prev ? <Chevron key="prev" dir="prev" onClick={goPrev} /> : null}
+        {prev ? <Arrow key="prev" dir="prev" onClick={goPrev} /> : null}
       </AnimatePresence>
 
       <motion.div
-        className="w-full max-w-xl"
+        className="relative w-full max-w-xl"
         drag="x"
         dragConstraints={{ left: 0, right: 0 }}
         dragElastic={0.18}
@@ -93,13 +100,23 @@ export function FocusStage({ activeId }: { activeId: NodeId }) {
           else if (info.offset.x > SWIPE_THRESHOLD && prev) goPrev();
         }}
       >
-        <AnimatePresence mode="wait" initial={false}>
-          <FocusCard key={activeId} nodeId={activeId} />
+        <AnimatePresence mode="popLayout" initial={false} custom={direction}>
+          <motion.div
+            key={activeId}
+            custom={direction}
+            variants={variants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={M.cardSlide}
+          >
+            <FocusCard nodeId={activeId} />
+          </motion.div>
         </AnimatePresence>
       </motion.div>
 
       <AnimatePresence>
-        {next ? <Chevron key="next" dir="next" onClick={goNext} /> : null}
+        {next ? <Arrow key="next" dir="next" onClick={goNext} /> : null}
       </AnimatePresence>
     </div>
   );

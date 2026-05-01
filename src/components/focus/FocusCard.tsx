@@ -1,12 +1,13 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { GRAPH_BY_ID, PHASE_LABELS } from "../../graph/flowchart";
 import { PHASE_COLORS } from "../../theme/phaseColors";
 import { IDENTITY, RECURRING } from "../../theme/identity";
-import { M } from "../../theme/motion";
+import { EASE_FLOW, M } from "../../theme/motion";
 import type { NodeId } from "../../state/schema";
 import { useStore } from "../../state/store";
 import { useUI } from "../../state/uiStore";
+import { deriveStatus } from "../../graph/derive";
 import { GlassCard } from "../glass/GlassCard";
 import { GlassButton } from "../glass/GlassButton";
 import { GoalBar } from "../glass/GoalBar";
@@ -14,12 +15,14 @@ import { GlassTextarea } from "../glass/GlassInput";
 import { progressOf } from "./progressOf";
 import { FORM_BY_NODE } from "./forms";
 import { StreakBadge } from "./StreakBadge";
-import { advanceFromCurrent } from "./advance";
+import { advanceFromCurrent, findCurrentNode } from "./advance";
 
 export function FocusCard({ nodeId }: { nodeId: NodeId }) {
   const node = GRAPH_BY_ID[nodeId];
   const state = useStore();
   const triggerCelebration = useUI((s) => s.triggerCelebration);
+  const setFocus = useUI((s) => s.setFocus);
+  const pendingCelebration = useUI((s) => s.pendingCelebration);
   const phaseColor = PHASE_COLORS[node.phase];
   const [showForm, setShowForm] = useState(true);
   const [showNotes, setShowNotes] = useState(false);
@@ -29,6 +32,16 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
   const progress = progressOf(state, nodeId);
   const recurring = RECURRING.has(nodeId);
   const identity = IDENTITY[nodeId];
+
+  const status = useMemo(() => deriveStatus(state), [state]);
+  const isOnPath = status[nodeId] === "current";
+  const isFreshCelebration = pendingCelebration === nodeId;
+  const fullCelebration = isFreshCelebration && isOnPath;
+  const upNextId = useMemo(() => {
+    if (isOnPath || nodeState.completed) return null;
+    const cur = findCurrentNode();
+    return cur === nodeId ? null : cur;
+  }, [nodeId, isOnPath, nodeState.completed]);
 
   const onComplete = () => {
     if (!nodeState.completed) {
@@ -52,22 +65,38 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
     (progress.kind === "goal" && progress.ready) ||
     progress.kind === "none";
 
+  const buttonGlow = ready && !nodeState.completed && isOnPath;
+
   return (
-    <motion.div
-      layoutId="focus-card"
-      key={nodeId}
-      initial={{ opacity: 0, scale: 0.92, y: 28, filter: "blur(8px)" }}
-      animate={{ opacity: 1, scale: 1, y: 0, filter: "blur(0px)" }}
-      exit={{ opacity: 0, scale: 0.94, y: -22, filter: "blur(14px)" }}
-      transition={M.flow}
-      onClick={(e) => e.stopPropagation()}
-      className="mx-auto w-full max-w-xl"
-    >
+    <div className="mx-auto w-full max-w-xl">
       <GlassCard
         intensity="strong"
         tint={phaseColor.tint}
-        className="px-7 py-7 sm:px-8 sm:py-8"
+        className="relative px-7 py-7 sm:px-8 sm:py-8"
       >
+        {/* Specular sweep on fresh in-order completion */}
+        <AnimatePresence>
+          {fullCelebration && (
+            <motion.div
+              key={`sweep-${nodeState.completedAt ?? nodeId}`}
+              aria-hidden
+              className="pointer-events-none absolute inset-0 overflow-hidden"
+              style={{ borderRadius: "inherit" }}
+            >
+              <motion.div
+                className="absolute inset-y-[-20%] w-[42%] -skew-x-12"
+                initial={{ x: "-180%", opacity: 0 }}
+                animate={{ x: "260%", opacity: [0, 0.85, 0] }}
+                transition={{ duration: 1.4, ease: EASE_FLOW }}
+                style={{
+                  background: `linear-gradient(90deg, transparent, ${phaseColor.glow} 45%, ${phaseColor.glow} 55%, transparent)`,
+                  filter: "blur(10px)",
+                }}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <span
@@ -82,14 +111,14 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
             </span>
             {nodeState.completed && (
               <motion.span
-                initial={{ scale: 0, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                transition={{ type: "spring", stiffness: 320, damping: 20 }}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={M.fade}
                 className="rounded-full px-2 py-0.5 text-[10px] font-semibold"
                 style={{
-                  background: "rgba(52, 211, 153, 0.18)",
+                  background: "rgba(52, 211, 153, 0.14)",
                   color: "#a7f3d0",
-                  border: "1px solid rgba(52, 211, 153, 0.4)",
+                  border: "1px solid rgba(52, 211, 153, 0.32)",
                 }}
               >
                 Complete
@@ -100,26 +129,34 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
             {node.label}
           </h1>
           {node.sublabel && (
-            <p className="text-sm italic text-white/60">{node.sublabel}</p>
+            <p className="text-sm italic text-white/55">{node.sublabel}</p>
           )}
-          {identity && nodeState.completed && (
-            <motion.p
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.15 }}
-              className="pt-2 text-sm font-medium"
-              style={{ color: phaseColor.text }}
-            >
-              {identity}
-            </motion.p>
-          )}
+          <AnimatePresence>
+            {identity && nodeState.completed && (
+              <motion.p
+                key={fullCelebration ? `identity-fresh-${nodeState.completedAt}` : "identity-static"}
+                initial={fullCelebration ? { opacity: 0, y: 6 } : false}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                transition={
+                  fullCelebration
+                    ? { duration: 0.7, ease: EASE_FLOW, delay: 0.55 }
+                    : M.fadeQuick
+                }
+                className="pt-3 text-[13px] italic leading-relaxed"
+                style={{ color: phaseColor.text, opacity: 0.85 }}
+              >
+                {identity}
+              </motion.p>
+            )}
+          </AnimatePresence>
         </div>
 
-        <div className="my-6 h-px bg-gradient-to-r from-transparent via-white/15 to-transparent" />
+        <div className="my-6 h-px bg-gradient-to-r from-transparent via-white/12 to-transparent" />
 
         {node.kind === "decision" ? (
           <div className="space-y-4">
-            <p className="text-sm text-white/70">Choose to continue.</p>
+            <p className="text-sm text-white/65">Choose to continue.</p>
             <div className="grid grid-cols-2 gap-3">
               <GlassButton variant="yes" size="lg" onClick={() => onDecide("yes")}>
                 Yes
@@ -129,8 +166,12 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
               </GlassButton>
             </div>
             {state.decisions[node.decisionId!] && (
-              <p className="text-center text-xs text-white/50">
-                Currently: <span className="font-semibold uppercase">{state.decisions[node.decisionId!]}</span>. Re-answer to change route.
+              <p className="text-center text-xs text-white/45">
+                Currently:{" "}
+                <span className="font-semibold uppercase">
+                  {state.decisions[node.decisionId!]}
+                </span>
+                . Re-answer to change route.
               </p>
             )}
           </div>
@@ -166,7 +207,7 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: "auto" }}
                       exit={{ opacity: 0, height: 0 }}
-                      transition={{ duration: 0.25, ease: "easeOut" }}
+                      transition={M.fadeQuick}
                       className="overflow-hidden"
                     >
                       <div className="pt-4">
@@ -193,7 +234,7 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: "auto" }}
                     exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.25, ease: "easeOut" }}
+                    transition={M.fadeQuick}
                     className="overflow-hidden"
                   >
                     <div className="pt-3">
@@ -201,9 +242,7 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
                         rows={3}
                         value={nodeState.notes}
                         placeholder="Anything you want to remember…"
-                        onChange={(e) =>
-                          useStore.getState().setNotes(nodeId, e.target.value)
-                        }
+                        onChange={(e) => useStore.getState().setNotes(nodeId, e.target.value)}
                       />
                     </div>
                   </motion.div>
@@ -211,7 +250,7 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
               </AnimatePresence>
             </div>
 
-            <div className="flex items-center justify-between gap-3 pt-2">
+            <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:items-center sm:justify-between">
               {nodeState.completed ? (
                 <GlassButton
                   variant="secondary"
@@ -223,7 +262,7 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
               ) : (
                 <span className="text-xs text-white/45">
                   {progress.kind === "goal" && !progress.ready
-                    ? `${Math.max(0, Math.round(progress.max - progress.value)).toLocaleString()} to target — but you can mark complete anytime.`
+                    ? `${Math.max(0, Math.round(progress.max - progress.value)).toLocaleString()} to target`
                     : recurring
                       ? "Recurring — keep your streak."
                       : "Mark complete when ready."}
@@ -232,17 +271,35 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
               <GlassButton
                 variant="primary"
                 size="lg"
-                tint={phaseColor.tint}
-                glow={ready && !nodeState.completed}
+                tint={isOnPath ? phaseColor.tint : "rgba(255,255,255,0.06)"}
+                glow={buttonGlow}
                 onClick={onComplete}
                 style={{ minWidth: 140 }}
               >
                 {nodeState.completed ? "Continue →" : "Mark complete"}
               </GlassButton>
             </div>
+
+            {upNextId && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={M.fadeQuick}
+                className="flex items-center justify-center gap-1.5 pt-1 text-[11px] text-white/45"
+              >
+                <span>You're ahead of yourself.</span>
+                <button
+                  type="button"
+                  onClick={() => setFocus(upNextId, "backward")}
+                  className="font-medium text-white/65 hover:text-white/95"
+                >
+                  Back to {GRAPH_BY_ID[upNextId].label.split(/[\n,]/)[0]}
+                </button>
+              </motion.div>
+            )}
           </div>
         )}
       </GlassCard>
-    </motion.div>
+    </div>
   );
 }
