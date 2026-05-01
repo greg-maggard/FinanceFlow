@@ -46,16 +46,18 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
         </div>
       </div>
       <div className="flex items-center gap-1.5">
-        <button
-          onClick={() => setView(view === "overview" ? "focus" : "overview")}
-          className="rounded-full px-3 py-1.5 text-[11px] font-medium text-white/70 hover:text-white/95"
-          style={{
-            background: "rgba(255,255,255,0.05)",
-            border: "1px solid rgba(255,255,255,0.10)",
-          }}
-        >
-          {view === "overview" ? "Focus" : "Overview"}
-        </button>
+        {view !== "overview" && (
+          <button
+            onClick={() => setView("overview")}
+            className="rounded-full px-3 py-1.5 text-[11px] font-medium text-white/70 hover:text-white/95"
+            style={{
+              background: "rgba(255,255,255,0.05)",
+              border: "1px solid rgba(255,255,255,0.10)",
+            }}
+          >
+            Overview
+          </button>
+        )}
         <button
           onClick={onOpenSettings}
           className="rounded-full px-3 py-1.5 text-[11px] font-medium text-white/70 hover:text-white/95"

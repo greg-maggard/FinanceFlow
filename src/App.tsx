@@ -51,7 +51,9 @@ export default function App() {
       </main>
 
       <OverviewSheet />
-      <PhaseTrail activePhase={activePhase} />
+      <AnimatePresence>
+        {view === "focus" && <PhaseTrail key="trail" activePhase={activePhase} />}
+      </AnimatePresence>
       <CelebrationLayer />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>

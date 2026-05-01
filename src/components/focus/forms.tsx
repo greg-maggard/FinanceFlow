@@ -1,4 +1,5 @@
 import { FieldLabel, GlassInput, GlassSelect } from "../glass/GlassInput";
+import { NumberField } from "../glass/NumberField";
 import { useStore } from "../../state/store";
 import type { Debt, NodeId } from "../../state/schema";
 import { emergencyFundTarget, bigEmergencyFundTarget } from "../../state/schema";
@@ -24,12 +25,11 @@ export function SmallEFFields() {
         Target: <span className="font-semibold text-white/85">${target.toLocaleString()}</span>
       </div>
       <Field label="Current balance">
-        <GlassInput
-          type="number"
+        <NumberField
           value={data.balance.value}
-          onChange={(e) =>
+          onChange={(v) =>
             useStore.getState().setNodeData("SmallEF", {
-              balance: { value: Number(e.target.value), source: "manual" },
+              balance: { value: v, source: "manual" },
             })
           }
         />
@@ -63,12 +63,11 @@ export function BigEFFields() {
           </GlassSelect>
         </Field>
         <Field label="Balance">
-          <GlassInput
-            type="number"
+          <NumberField
             value={data.balance.value}
-            onChange={(e) =>
+            onChange={(v) =>
               useStore.getState().patchNodeData("BigEF", {
-                balance: { value: Number(e.target.value), source: "manual" },
+                balance: { value: v, source: "manual" },
               })
             }
           />
@@ -93,24 +92,20 @@ export function MatchFields() {
   return (
     <div className="grid grid-cols-2 gap-3">
       <Field label="Match cap %">
-        <GlassInput
-          type="number"
+        <NumberField
           step="0.5"
           value={data.matchPct}
-          onChange={(e) =>
-            useStore.getState().patchNodeData("Match", { matchPct: Number(e.target.value) })
+          onChange={(v) =>
+            useStore.getState().patchNodeData("Match", { matchPct: v })
           }
         />
       </Field>
       <Field label="Your %">
-        <GlassInput
-          type="number"
+        <NumberField
           step="0.5"
           value={data.currentContribPct}
-          onChange={(e) =>
-            useStore.getState().patchNodeData("Match", {
-              currentContribPct: Number(e.target.value),
-            })
+          onChange={(v) =>
+            useStore.getState().patchNodeData("Match", { currentContribPct: v })
           }
         />
       </Field>
@@ -148,22 +143,20 @@ export function IRAFields() {
       </Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="YTD">
-          <GlassInput
-            type="number"
+          <NumberField
             value={data.ytdContribution.value}
-            onChange={(e) =>
+            onChange={(v) =>
               useStore.getState().patchNodeData("IRA", {
-                ytdContribution: { value: Number(e.target.value), source: "manual" },
+                ytdContribution: { value: v, source: "manual" },
               })
             }
           />
         </Field>
         <Field label="Annual limit">
-          <GlassInput
-            type="number"
+          <NumberField
             value={data.annualLimit}
-            onChange={(e) =>
-              useStore.getState().patchNodeData("IRA", { annualLimit: Number(e.target.value) })
+            onChange={(v) =>
+              useStore.getState().patchNodeData("IRA", { annualLimit: v })
             }
           />
         </Field>
@@ -205,22 +198,20 @@ export function HSAFields() {
       </Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="YTD">
-          <GlassInput
-            type="number"
+          <NumberField
             value={data.ytdContribution.value}
-            onChange={(e) =>
+            onChange={(v) =>
               useStore.getState().patchNodeData("HSA", {
-                ytdContribution: { value: Number(e.target.value), source: "manual" },
+                ytdContribution: { value: v, source: "manual" },
               })
             }
           />
         </Field>
         <Field label="Annual limit">
-          <GlassInput
-            type="number"
+          <NumberField
             value={data.annualLimit}
-            onChange={(e) =>
-              useStore.getState().patchNodeData("HSA", { annualLimit: Number(e.target.value) })
+            onChange={(v) =>
+              useStore.getState().patchNodeData("HSA", { annualLimit: v })
             }
           />
         </Field>
@@ -237,26 +228,20 @@ export function Increase401kFields() {
   return (
     <div className="grid grid-cols-2 gap-3">
       <Field label="Your %">
-        <GlassInput
-          type="number"
+        <NumberField
           step="0.5"
           value={data.currentPct}
-          onChange={(e) =>
-            useStore
-              .getState()
-              .patchNodeData("Increase401k", { currentPct: Number(e.target.value) })
+          onChange={(v) =>
+            useStore.getState().patchNodeData("Increase401k", { currentPct: v })
           }
         />
       </Field>
       <Field label="Target %">
-        <GlassInput
-          type="number"
+        <NumberField
           step="0.5"
           value={data.targetPct}
-          onChange={(e) =>
-            useStore
-              .getState()
-              .patchNodeData("Increase401k", { targetPct: Number(e.target.value) })
+          onChange={(v) =>
+            useStore.getState().patchNodeData("Increase401k", { targetPct: v })
           }
         />
       </Field>
@@ -286,21 +271,19 @@ export function SavePurchaseFields() {
       </Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Target $">
-          <GlassInput
-            type="number"
+          <NumberField
             value={data.target}
-            onChange={(e) =>
-              useStore.getState().patchNodeData("SavePurchase", { target: Number(e.target.value) })
+            onChange={(v) =>
+              useStore.getState().patchNodeData("SavePurchase", { target: v })
             }
           />
         </Field>
         <Field label="Saved $">
-          <GlassInput
-            type="number"
+          <NumberField
             value={data.saved.value}
-            onChange={(e) =>
+            onChange={(v) =>
               useStore.getState().patchNodeData("SavePurchase", {
-                saved: { value: Number(e.target.value), source: "manual" },
+                saved: { value: v, source: "manual" },
               })
             }
           />
@@ -322,23 +305,19 @@ export function CollegeFields() {
   return (
     <div className="grid grid-cols-2 gap-3">
       <Field label="Monthly $">
-        <GlassInput
-          type="number"
+        <NumberField
           value={data.monthlyContribution}
-          onChange={(e) =>
-            useStore
-              .getState()
-              .patchNodeData("College", { monthlyContribution: Number(e.target.value) })
+          onChange={(v) =>
+            useStore.getState().patchNodeData("College", { monthlyContribution: v })
           }
         />
       </Field>
       <Field label="Balance $">
-        <GlassInput
-          type="number"
+        <NumberField
           value={data.balance.value}
-          onChange={(e) =>
+          onChange={(v) =>
             useStore.getState().patchNodeData("College", {
-              balance: { value: Number(e.target.value), source: "manual" },
+              balance: { value: v, source: "manual" },
             })
           }
         />
@@ -396,25 +375,22 @@ export function DebtFields({ nodeId, aprThreshold }: { nodeId: "HighDebt" | "Mod
           </div>
           <div className="grid grid-cols-3 gap-2">
             <Field label="Balance">
-              <GlassInput
-                type="number"
+              <NumberField
                 value={d.balance}
-                onChange={(e) => patch(d.id, { balance: Number(e.target.value) })}
+                onChange={(v) => patch(d.id, { balance: v })}
               />
             </Field>
             <Field label="APR %">
-              <GlassInput
-                type="number"
+              <NumberField
                 step="0.1"
                 value={d.apr}
-                onChange={(e) => patch(d.id, { apr: Number(e.target.value) })}
+                onChange={(v) => patch(d.id, { apr: v })}
               />
             </Field>
             <Field label="Min pay">
-              <GlassInput
-                type="number"
+              <NumberField
                 value={d.minPayment}
-                onChange={(e) => patch(d.id, { minPayment: Number(e.target.value) })}
+                onChange={(v) => patch(d.id, { minPayment: v })}
               />
             </Field>
           </div>
@@ -484,24 +460,21 @@ export function GoalsFields() {
           </div>
           <div className="grid grid-cols-3 gap-2">
             <Field label="Target">
-              <GlassInput
-                type="number"
+              <NumberField
                 value={g.target}
-                onChange={(e) => patch(g.id, { target: Number(e.target.value) })}
+                onChange={(v) => patch(g.id, { target: v })}
               />
             </Field>
             <Field label="Saved">
-              <GlassInput
-                type="number"
+              <NumberField
                 value={g.saved}
-                onChange={(e) => patch(g.id, { saved: Number(e.target.value) })}
+                onChange={(v) => patch(g.id, { saved: v })}
               />
             </Field>
             <Field label="Years">
-              <GlassInput
-                type="number"
+              <NumberField
                 value={g.horizonYears}
-                onChange={(e) => patch(g.id, { horizonYears: Number(e.target.value) })}
+                onChange={(v) => patch(g.id, { horizonYears: v })}
               />
             </Field>
           </div>

@@ -1,7 +1,8 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { useStore } from "../state/store";
 import { GlassCard } from "./glass/GlassCard";
-import { FieldLabel, GlassInput } from "./glass/GlassInput";
+import { FieldLabel } from "./glass/GlassInput";
+import { NumberField } from "./glass/NumberField";
 
 export function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const settings = useStore((s) => s.settings);
@@ -38,12 +39,11 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
               <div className="space-y-4">
                 <label className="block space-y-1.5">
                   <FieldLabel>Monthly expenses ($)</FieldLabel>
-                  <GlassInput
-                    type="number"
-                    value={settings.monthlyExpenses ?? ""}
-                    onChange={(e) =>
+                  <NumberField
+                    value={settings.monthlyExpenses ?? 0}
+                    onChange={(v) =>
                       useStore.getState().setSettings({
-                        monthlyExpenses: e.target.value ? Number(e.target.value) : undefined,
+                        monthlyExpenses: v || undefined,
                       })
                     }
                   />
@@ -53,12 +53,11 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                 </label>
                 <label className="block space-y-1.5">
                   <FieldLabel>Pre-tax annual income ($)</FieldLabel>
-                  <GlassInput
-                    type="number"
-                    value={settings.preTaxIncome ?? ""}
-                    onChange={(e) =>
+                  <NumberField
+                    value={settings.preTaxIncome ?? 0}
+                    onChange={(v) =>
                       useStore.getState().setSettings({
-                        preTaxIncome: e.target.value ? Number(e.target.value) : undefined,
+                        preTaxIncome: v || undefined,
                       })
                     }
                   />
@@ -70,32 +69,29 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                   </div>
                   <label className="block space-y-1.5">
                     <FieldLabel>IRA</FieldLabel>
-                    <GlassInput
-                      type="number"
+                    <NumberField
                       value={settings.iraAnnualLimit}
-                      onChange={(e) =>
-                        useStore.getState().setSettings({ iraAnnualLimit: Number(e.target.value) })
+                      onChange={(v) =>
+                        useStore.getState().setSettings({ iraAnnualLimit: v })
                       }
                     />
                   </label>
                   <div className="grid grid-cols-2 gap-3">
                     <label className="block space-y-1.5">
                       <FieldLabel>HSA self</FieldLabel>
-                      <GlassInput
-                        type="number"
+                      <NumberField
                         value={settings.hsaSelfLimit}
-                        onChange={(e) =>
-                          useStore.getState().setSettings({ hsaSelfLimit: Number(e.target.value) })
+                        onChange={(v) =>
+                          useStore.getState().setSettings({ hsaSelfLimit: v })
                         }
                       />
                     </label>
                     <label className="block space-y-1.5">
                       <FieldLabel>HSA family</FieldLabel>
-                      <GlassInput
-                        type="number"
+                      <NumberField
                         value={settings.hsaFamilyLimit}
-                        onChange={(e) =>
-                          useStore.getState().setSettings({ hsaFamilyLimit: Number(e.target.value) })
+                        onChange={(v) =>
+                          useStore.getState().setSettings({ hsaFamilyLimit: v })
                         }
                       />
                     </label>
