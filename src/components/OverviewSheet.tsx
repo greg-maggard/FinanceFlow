@@ -104,6 +104,7 @@ export function OverviewSheet() {
                     <div className="flex items-center gap-3">
                       <motion.div
                         layoutId={`phase-pill-${phase}`}
+                        transition={{ layout: M.morphLong }}
                         className="flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold"
                         style={{
                           background: `radial-gradient(circle, ${c.tint}, transparent 70%)`,

@@ -4,23 +4,9 @@ import { useUI } from "../state/uiStore";
 import { useStore } from "../state/store";
 import { GRAPH_BY_ID } from "../graph/flowchart";
 import { PHASE_COLORS } from "../theme/phaseColors";
-import { IDENTITY, MEDALS } from "../theme/identity";
+import { MEDALS } from "../theme/identity";
+import { deriveStatus } from "../graph/derive";
 import { EASE_FLOW, M } from "../theme/motion";
-
-const PARTICLE_COUNT = 26;
-
-function makeParticles(seed: number) {
-  return Array.from({ length: PARTICLE_COUNT }).map((_, i) => {
-    const angle = (i / PARTICLE_COUNT) * Math.PI * 2 + (seed % 1);
-    const dist = 90 + ((seed * (i + 1)) % 80);
-    return {
-      x: Math.cos(angle) * dist,
-      y: Math.sin(angle) * dist,
-      delay: ((i * 13 + seed) % 100) / 1000,
-      size: 4 + ((seed * 7 + i) % 6),
-    };
-  });
-}
 
 export function CelebrationLayer() {
   const pendingCelebration = useUI((s) => s.pendingCelebration);
@@ -40,146 +26,120 @@ export function CelebrationLayer() {
     return null;
   }, [pendingCelebration]);
 
-  const particles = useMemo(
-    () =>
-      pendingCelebration
-        ? makeParticles(state.nodes[pendingCelebration].completedAt?.length ?? Math.random())
-        : [],
-    [pendingCelebration, state.nodes],
-  );
-
-  const identity = pendingCelebration ? IDENTITY[pendingCelebration] : null;
+  // Determine if the celebration is on-path or muted (out-of-order)
+  const isOnPath = useMemo(() => {
+    if (!pendingCelebration) return false;
+    const status = deriveStatus(state);
+    return status[pendingCelebration] === "current" || state.nodes[pendingCelebration].completed;
+  }, [pendingCelebration, state]);
 
   return (
     <>
+      {/* Ambient atmospheric bloom that briefly intensifies the phase color */}
       <AnimatePresence>
-        {pendingCelebration && phaseColor && (
+        {pendingCelebration && phaseColor && isOnPath && (
           <motion.div
-            key={pendingCelebration}
-            className="pointer-events-none fixed inset-0 z-40 flex items-center justify-center"
-            initial={{ opacity: 1 }}
-            animate={{ opacity: 1 }}
+            key={`bloom-${pendingCelebration}-${state.nodes[pendingCelebration].completedAt ?? ""}`}
+            aria-hidden
+            className="pointer-events-none fixed inset-0 z-10"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: [0, 0.55, 0] }}
             exit={{ opacity: 0 }}
-          >
-            <motion.div
-              initial={{ scale: 0.5, opacity: 0 }}
-              animate={{ scale: [0.5, 1.5, 1.05], opacity: [0, 1, 0] }}
-              transition={{ duration: 1.6, ease: EASE_FLOW }}
-              className="absolute h-72 w-72 rounded-full"
-              style={{
-                background: `radial-gradient(circle, ${phaseColor.glow}, transparent 70%)`,
-                filter: "blur(10px)",
-              }}
-            />
-            {particles.map((p, i) => (
-              <motion.span
-                key={i}
-                initial={{ x: 0, y: 0, opacity: 0, scale: 0.5 }}
-                animate={{ x: p.x, y: p.y, opacity: [0, 1, 0], scale: [0.5, 1, 0.4] }}
-                transition={{ duration: 1.4, delay: p.delay, ease: EASE_FLOW }}
-                className="absolute rounded-full"
-                style={{
-                  width: p.size,
-                  height: p.size,
-                  background: phaseColor.base,
-                  boxShadow: `0 0 14px ${phaseColor.glow}`,
-                }}
-              />
-            ))}
-            {identity && (
-              <motion.div
-                initial={{ y: 22, opacity: 0, scale: 0.96 }}
-                animate={{ y: 0, opacity: 1, scale: 1 }}
-                exit={{ y: -16, opacity: 0, scale: 0.98 }}
-                transition={{ ...M.flow, delay: 0.18 }}
-                className="absolute top-[28%] rounded-2xl px-5 py-2.5 text-sm font-semibold"
-                style={{
-                  background: "rgba(12,14,22,0.65)",
-                  backdropFilter: "blur(24px) saturate(180%)",
-                  WebkitBackdropFilter: "blur(24px) saturate(180%)",
-                  border: `1px solid ${phaseColor.base}`,
-                  color: phaseColor.text,
-                  boxShadow: `0 0 24px ${phaseColor.glow}`,
-                }}
-              >
-                {identity}
-              </motion.div>
-            )}
-          </motion.div>
+            transition={{ duration: 1.7, ease: EASE_FLOW }}
+            style={{
+              background: `radial-gradient(60% 50% at 50% 45%, ${phaseColor.glow}, transparent 70%)`,
+              filter: "blur(6px)",
+            }}
+          />
         )}
       </AnimatePresence>
 
       <AnimatePresence>
         {pendingMedal !== null && (
-          <motion.div
+          <MedalTakeover
             key={`medal-${pendingMedal}`}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-md"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={clearMedal}
-          >
-            <MedalCard phase={pendingMedal as keyof typeof MEDALS} onClose={clearMedal} />
-          </motion.div>
+            phase={pendingMedal as keyof typeof MEDALS}
+            onClose={clearMedal}
+          />
         )}
       </AnimatePresence>
     </>
   );
 }
 
-function MedalCard({ phase, onClose }: { phase: keyof typeof MEDALS; onClose: () => void }) {
+function MedalTakeover({ phase, onClose }: { phase: keyof typeof MEDALS; onClose: () => void }) {
   const c = PHASE_COLORS[phase];
   const m = MEDALS[phase];
+
   return (
     <motion.div
-      initial={{ scale: 0.7, opacity: 0, y: 26 }}
-      animate={{ scale: 1, opacity: 1, y: 0 }}
-      exit={{ scale: 0.86, opacity: 0 }}
-      transition={M.flow}
-      onClick={(e) => e.stopPropagation()}
-      className="relative max-w-sm rounded-3xl px-8 py-9 text-center"
-      style={{
-        background: `linear-gradient(135deg, ${c.tint}, rgba(12,14,22,0.7))`,
-        border: `1px solid ${c.base}`,
-        backdropFilter: "blur(48px) saturate(180%)",
-        WebkitBackdropFilter: "blur(48px) saturate(180%)",
-        boxShadow: `0 0 48px ${c.glow}, inset 0 1px 0 rgba(255,255,255,0.2)`,
-      }}
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={M.morph}
+      onClick={onClose}
     >
+      {/* Atmospheric takeover */}
       <motion.div
-        animate={{ rotate: [0, -6, 6, 0] }}
-        transition={{ duration: 2.2, ease: "easeInOut" }}
-        className="mx-auto mb-5 flex h-28 w-28 items-center justify-center rounded-full text-5xl"
+        aria-hidden
+        className="absolute inset-0"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.8, ease: EASE_FLOW }}
         style={{
-          background: `radial-gradient(circle, ${c.glow}, ${c.tint})`,
-          boxShadow: `0 0 36px ${c.glow}`,
-          border: `1.5px solid ${c.base}`,
+          background: `radial-gradient(80% 60% at 50% 50%, ${c.glow} 0%, ${c.tint} 35%, rgba(7,8,15,0.92) 75%)`,
         }}
+      />
+
+      {/* Slow specular sweep */}
+      <motion.div
+        aria-hidden
+        className="absolute inset-0 overflow-hidden"
       >
-        ✨
+        <motion.div
+          initial={{ x: "-50%", opacity: 0 }}
+          animate={{ x: "50%", opacity: [0, 0.8, 0] }}
+          transition={{ duration: 2.4, ease: EASE_FLOW, delay: 0.4 }}
+          className="absolute inset-y-[-20%] left-0 w-[60%] -skew-x-12"
+          style={{
+            background: `linear-gradient(90deg, transparent, ${c.glow}, transparent)`,
+            filter: "blur(40px)",
+          }}
+        />
       </motion.div>
-      <div className="text-[11px] uppercase tracking-[0.3em] text-white/55">
-        Step {phase} unlocked
-      </div>
-      <h2
-        className="mt-1 text-2xl font-semibold tracking-tight"
-        style={{ color: c.text }}
+
+      <motion.div
+        initial={{ opacity: 0, y: 28 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -10 }}
+        transition={{ duration: 0.9, ease: EASE_FLOW, delay: 0.25 }}
+        onClick={(e) => e.stopPropagation()}
+        className="relative z-10 max-w-md px-8 text-center"
       >
-        {m.title}
-      </h2>
-      <p className="mt-2 text-sm text-white/70">{m.subtitle}</p>
-      <button
-        type="button"
-        onClick={onClose}
-        className="mt-6 rounded-full px-5 py-2 text-sm font-medium text-white/90"
-        style={{
-          background: c.tint,
-          border: `1px solid ${c.base}`,
-          boxShadow: `0 0 24px ${c.glow}`,
-        }}
-      >
-        Continue
-      </button>
+        <div
+          className="text-[10px] font-medium uppercase tracking-[0.42em]"
+          style={{ color: c.text, opacity: 0.65 }}
+        >
+          Step {phase} unlocked
+        </div>
+        <h2
+          className="mt-5 text-[34px] font-semibold leading-tight tracking-tight"
+          style={{ color: c.text }}
+        >
+          {m.title}
+        </h2>
+        <p className="mt-4 text-sm leading-relaxed text-white/65">{m.subtitle}</p>
+        <motion.p
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 0.45 }}
+          transition={{ delay: 1.6, duration: 0.6 }}
+          className="mt-14 text-[10px] uppercase tracking-[0.4em] text-white/35"
+        >
+          Tap to continue
+        </motion.p>
+      </motion.div>
     </motion.div>
   );
 }

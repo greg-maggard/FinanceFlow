@@ -15,7 +15,7 @@ export function findCurrentNode(): NodeId {
 
 export function advanceFromCurrent(): void {
   const next = findCurrentNode();
-  useUI.getState().setFocus(next);
+  useUI.getState().setFocus(next, "forward");
   checkPhaseCompletion();
 }
 
