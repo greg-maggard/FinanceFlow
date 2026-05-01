@@ -52,12 +52,13 @@ export function GoalBar({
             <motion.div
               className="absolute inset-y-0 left-0"
               style={{
-                width: "55%",
-                background: `linear-gradient(90deg, transparent, ${tint}, transparent)`,
-                opacity: goalNear ? 0.5 : 0.32,
+                width: "60%",
+                background: `linear-gradient(90deg, transparent 0%, ${glow} 50%, transparent 100%)`,
+                opacity: goalNear ? 0.85 : 0.65,
+                mixBlendMode: "screen",
               }}
               animate={{ x: ["-110%", "240%"] }}
-              transition={{ duration: 4.2, repeat: Infinity, ease: "linear" }}
+              transition={{ duration: 3.6, repeat: Infinity, ease: "linear" }}
             />
           </div>
         )}

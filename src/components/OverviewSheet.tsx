@@ -102,9 +102,7 @@ export function OverviewSheet() {
                     className="space-y-3"
                   >
                     <div className="flex items-center gap-3">
-                      <motion.div
-                        layoutId={`phase-pill-${phase}`}
-                        transition={{ layout: M.morphLong }}
+                      <div
                         className="flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold"
                         style={{
                           background: `radial-gradient(circle, ${c.tint}, transparent 70%)`,
@@ -114,7 +112,7 @@ export function OverviewSheet() {
                         }}
                       >
                         {phase}
-                      </motion.div>
+                      </div>
                       <div className="text-xs uppercase tracking-[0.22em] text-white/55">
                         {PHASE_LABELS[phase].replace(/^Step \d+: /, "")}
                       </div>
