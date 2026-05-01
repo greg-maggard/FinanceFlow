@@ -39,14 +39,14 @@ function Arrow({ dir, onClick }: { dir: "prev" | "next"; onClick: () => void }) 
 
 const variants = {
   enter: (dir: Direction) => ({
-    x: dir === "forward" ? 70 : dir === "backward" ? -70 : 0,
+    x: dir === "forward" ? "60%" : dir === "backward" ? "-60%" : 0,
     opacity: 0,
     scale: dir === "none" ? 0.94 : 1,
     filter: dir === "none" ? "blur(6px)" : "blur(0px)",
   }),
-  center: { x: 0, opacity: 1, scale: 1, filter: "blur(0px)" },
+  center: { x: "0%", opacity: 1, scale: 1, filter: "blur(0px)" },
   exit: (dir: Direction) => ({
-    x: dir === "forward" ? -70 : dir === "backward" ? 70 : 0,
+    x: dir === "forward" ? "-60%" : dir === "backward" ? "60%" : 0,
     opacity: 0,
     scale: dir === "none" ? 0.94 : 1,
     filter: dir === "none" ? "blur(10px)" : "blur(0px)",
@@ -88,18 +88,7 @@ export function FocusStage({ activeId }: { activeId: NodeId }) {
         {prev ? <Arrow key="prev" dir="prev" onClick={goPrev} /> : null}
       </AnimatePresence>
 
-      <motion.div
-        className="relative w-full max-w-xl"
-        drag="x"
-        dragConstraints={{ left: 0, right: 0 }}
-        dragElastic={0.18}
-        dragMomentum={false}
-        onClick={(e) => e.stopPropagation()}
-        onDragEnd={(_, info) => {
-          if (info.offset.x < -SWIPE_THRESHOLD && next) goNext();
-          else if (info.offset.x > SWIPE_THRESHOLD && prev) goPrev();
-        }}
-      >
+      <div className="relative w-full max-w-xl">
         <AnimatePresence mode="popLayout" initial={false} custom={direction}>
           <motion.div
             key={activeId}
@@ -109,11 +98,20 @@ export function FocusStage({ activeId }: { activeId: NodeId }) {
             animate="center"
             exit="exit"
             transition={M.cardSlide}
+            drag="x"
+            dragConstraints={{ left: 0, right: 0 }}
+            dragElastic={0.18}
+            dragMomentum={false}
+            onClick={(e) => e.stopPropagation()}
+            onDragEnd={(_, info) => {
+              if (info.offset.x < -SWIPE_THRESHOLD && next) goNext();
+              else if (info.offset.x > SWIPE_THRESHOLD && prev) goPrev();
+            }}
           >
             <FocusCard nodeId={activeId} />
           </motion.div>
         </AnimatePresence>
-      </motion.div>
+      </div>
 
       <AnimatePresence>
         {next ? <Arrow key="next" dir="next" onClick={goNext} /> : null}
