@@ -1,4 +1,5 @@
 import { motion } from "framer-motion";
+import { M } from "../../theme/motion";
 
 export function GoalBar({
   value,
@@ -23,7 +24,7 @@ export function GoalBar({
         <span className="text-xs uppercase tracking-[0.2em] text-white/60">{caption ?? "Progress"}</span>
         <motion.span
           animate={{ scale: goalNear ? 1.06 : 1, opacity: goalNear ? 1 : 0.85 }}
-          transition={{ type: "spring", stiffness: 280, damping: 22 }}
+          transition={M.flow}
           className="text-sm font-semibold tabular-nums text-white/90"
         >
           {Math.round(pct)}%
@@ -40,7 +41,7 @@ export function GoalBar({
         <motion.div
           initial={{ width: 0 }}
           animate={{ width: `${pct}%` }}
-          transition={{ type: "spring", stiffness: 90, damping: 20 }}
+          transition={M.bar}
           className="absolute inset-y-0 left-0 rounded-full"
           style={{
             background: `linear-gradient(90deg, ${tint}, ${glow})`,
@@ -49,8 +50,8 @@ export function GoalBar({
         />
         <motion.div
           aria-hidden
-          animate={{ opacity: goalNear ? [0.0, 0.25, 0.0] : 0 }}
-          transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
+          animate={{ opacity: goalNear ? [0.0, 0.32, 0.0] : 0 }}
+          transition={{ duration: 3.4, repeat: Infinity, ease: "easeInOut" }}
           className="absolute inset-0 rounded-full"
           style={{ background: `radial-gradient(60% 100% at 80% 50%, ${glow}, transparent)` }}
         />

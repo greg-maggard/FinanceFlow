@@ -3,6 +3,7 @@ import { useState } from "react";
 import { GRAPH_BY_ID, PHASE_LABELS } from "../../graph/flowchart";
 import { PHASE_COLORS } from "../../theme/phaseColors";
 import { IDENTITY, RECURRING } from "../../theme/identity";
+import { M } from "../../theme/motion";
 import type { NodeId } from "../../state/schema";
 import { useStore } from "../../state/store";
 import { useUI } from "../../state/uiStore";
@@ -55,10 +56,11 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
     <motion.div
       layoutId="focus-card"
       key={nodeId}
-      initial={{ opacity: 0, scale: 0.94, y: 24 }}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.94, y: -24, filter: "blur(12px)" }}
-      transition={{ type: "spring", stiffness: 220, damping: 26 }}
+      initial={{ opacity: 0, scale: 0.92, y: 28, filter: "blur(8px)" }}
+      animate={{ opacity: 1, scale: 1, y: 0, filter: "blur(0px)" }}
+      exit={{ opacity: 0, scale: 0.94, y: -22, filter: "blur(14px)" }}
+      transition={M.flow}
+      onClick={(e) => e.stopPropagation()}
       className="mx-auto w-full max-w-xl"
     >
       <GlassCard

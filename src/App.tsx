@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import { AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { AmbientBackground } from "./components/AmbientBackground";
 import { TopBar } from "./components/TopBar";
 import { PhaseTrail } from "./components/PhaseTrail";
 import { SettingsModal } from "./components/SettingsModal";
 import { OverviewSheet } from "./components/OverviewSheet";
 import { CelebrationLayer } from "./components/CelebrationLayer";
-import { FocusCard } from "./components/focus/FocusCard";
+import { FocusStage } from "./components/focus/FocusStage";
 import { findCurrentNode } from "./components/focus/advance";
 import { useUI } from "./state/uiStore";
 import { GRAPH_BY_ID } from "./graph/flowchart";
+import { M } from "./theme/motion";
 
 export default function App() {
   const focusedId = useUI((s) => s.focusedId);
@@ -25,14 +26,26 @@ export default function App() {
   const activePhase = useMemo(() => GRAPH_BY_ID[activeId].phase, [activeId]);
 
   return (
-    <div className="relative min-h-screen text-white/95">
+    <div className="relative flex min-h-screen flex-col text-white/95">
       <AmbientBackground phase={activePhase} />
       <TopBar onOpenSettings={() => setSettingsOpen(true)} />
 
-      <main className="flex min-h-screen items-center justify-center px-5 pb-32 pt-24">
-        <AnimatePresence mode="wait">
+      <main
+        className="flex flex-1 items-center justify-center pb-32 pt-24"
+        onClick={() => view === "focus" && useUI.getState().setView("overview")}
+      >
+        <AnimatePresence mode="wait" initial={false}>
           {view === "focus" && (
-            <FocusCard key={activeId} nodeId={activeId} />
+            <motion.div
+              key="focus-stage"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={M.fade}
+              className="flex w-full"
+            >
+              <FocusStage activeId={activeId} />
+            </motion.div>
           )}
         </AnimatePresence>
       </main>

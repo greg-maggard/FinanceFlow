@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import { GRAPH, PHASE_LABELS, type Phase } from "../graph/flowchart";
 import { PHASE_COLORS } from "../theme/phaseColors";
+import { M } from "../theme/motion";
 import { useStore } from "../state/store";
 import { useUI } from "../state/uiStore";
 import { deriveStatus } from "../graph/derive";
@@ -46,10 +47,13 @@ export function PhaseTrail({ activePhase }: { activePhase: Phase }) {
             <motion.button
               key={p}
               layoutId={`phase-pill-${p}`}
-              onClick={() => setView(view === "overview" ? "focus" : "overview")}
+              onClick={(e) => {
+                e.stopPropagation();
+                setView(view === "overview" ? "focus" : "overview");
+              }}
               whileHover={{ scale: 1.06, y: -2 }}
               whileTap={{ scale: 0.96 }}
-              transition={{ type: "spring", stiffness: 380, damping: 24 }}
+              transition={M.flow}
               className="group relative flex items-center justify-center"
               style={{
                 width: isActive ? 44 : 28,
@@ -106,7 +110,7 @@ export function PhaseTrail({ activePhase }: { activePhase: Phase }) {
                     strokeDasharray={138.2}
                     initial={false}
                     animate={{ strokeDashoffset: 138.2 * (1 - prog.pct) }}
-                    transition={{ type: "spring", stiffness: 70, damping: 18 }}
+                    transition={M.bar}
                     style={{ filter: `drop-shadow(0 0 4px ${c.glow})` }}
                   />
                 </svg>
