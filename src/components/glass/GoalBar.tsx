@@ -41,26 +41,22 @@ export function GoalBar({
           boxShadow: "inset 0 1px 2px rgba(0,0,0,0.4)",
         }}
       >
-        {/* Flowing-wave hint over the unfilled portion: a slow, soft gradient
-            sweeping rightward, suggesting motion toward the goal. */}
+        {/* Continuous flowing wave across the full bar. The filled portion
+            naturally occludes it, so the wave is only visible in the empty
+            portion — and stays in steady rhythm regardless of fill state. */}
         {incomplete && (
-          <div
+          <motion.div
             aria-hidden
-            className="pointer-events-none absolute inset-y-0 overflow-hidden"
-            style={{ left: `${pct}%`, right: 0 }}
-          >
-            <motion.div
-              className="absolute inset-y-0 left-0"
-              style={{
-                width: "60%",
-                background: `linear-gradient(90deg, transparent 0%, ${glow} 50%, transparent 100%)`,
-                opacity: goalNear ? 0.85 : 0.65,
-                mixBlendMode: "screen",
-              }}
-              animate={{ x: ["-110%", "240%"] }}
-              transition={{ duration: 3.6, repeat: Infinity, ease: "linear" }}
-            />
-          </div>
+            className="pointer-events-none absolute inset-y-0 left-0"
+            style={{
+              width: "60%",
+              background: `linear-gradient(90deg, transparent 0%, ${glow} 50%, transparent 100%)`,
+              opacity: goalNear ? 0.85 : 0.65,
+              mixBlendMode: "screen",
+            }}
+            animate={{ x: ["-110%", "240%"] }}
+            transition={{ duration: 3.6, repeat: Infinity, ease: "linear" }}
+          />
         )}
         <motion.div
           initial={{ width: 0 }}

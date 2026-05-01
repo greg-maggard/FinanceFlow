@@ -52,13 +52,14 @@ export function PhaseTrail({ activePhase }: { activePhase: Phase }) {
           return (
             <motion.button
               key={p}
+              layoutId={`phase-pill-${p}`}
               onClick={(e) => {
                 e.stopPropagation();
                 setView(view === "overview" ? "focus" : "overview");
               }}
               whileHover={{ scale: 1.06, y: -2 }}
               whileTap={{ scale: 0.96 }}
-              transition={M.flow}
+              transition={{ layout: M.morphLong, default: M.flow }}
               className="group relative flex items-center justify-center"
               style={{
                 width: isActive ? 44 : 28,
