@@ -109,6 +109,7 @@ export type NodeState = {
   completedAt?: string;
   notes: string;
   data?: NodeDataMap[keyof NodeDataMap];
+  monthlyChecks?: Record<string, boolean>;
 };
 
 export type Settings = {
@@ -124,6 +125,8 @@ export type AppState = {
   settings: Settings;
   decisions: Decisions;
   nodes: Record<NodeId, NodeState>;
+  shownCelebrations?: NodeId[];
+  earnedMedals?: number[];
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -154,6 +157,8 @@ export function makeInitialState(): AppState {
   return {
     version: 1,
     settings: { ...DEFAULT_SETTINGS },
+    shownCelebrations: [],
+    earnedMedals: [],
     decisions: {
       Q_Match: null,
       Q_HighDebt: null,
