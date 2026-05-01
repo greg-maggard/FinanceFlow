@@ -26,7 +26,13 @@ export function PhaseTrail({ activePhase }: { activePhase: Phase }) {
   }, [state, status]);
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-30 flex justify-center px-4 pb-5">
+    <motion.div
+      initial={{ y: 90, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      exit={{ y: 90, opacity: 0 }}
+      transition={M.morph}
+      className="fixed inset-x-0 bottom-0 z-30 flex justify-center px-4 pb-5"
+    >
       <motion.div
         layout
         className="relative flex items-center gap-2 rounded-full px-3 py-2"
@@ -119,6 +125,6 @@ export function PhaseTrail({ activePhase }: { activePhase: Phase }) {
           );
         })}
       </motion.div>
-    </div>
+    </motion.div>
   );
 }

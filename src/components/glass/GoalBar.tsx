@@ -17,11 +17,14 @@ export function GoalBar({
   const safeMax = max > 0 ? max : 1;
   const pct = Math.max(0, Math.min(100, (value / safeMax) * 100));
   const goalNear = pct >= 80;
+  const incomplete = pct < 100;
 
   return (
     <div className="space-y-2">
       <div className="flex items-baseline justify-between">
-        <span className="text-xs uppercase tracking-[0.2em] text-white/60">{caption ?? "Progress"}</span>
+        <span className="text-xs uppercase tracking-[0.2em] text-white/60">
+          {caption ?? "Progress"}
+        </span>
         <motion.span
           animate={{ scale: goalNear ? 1.06 : 1, opacity: goalNear ? 1 : 0.85 }}
           transition={M.flow}
@@ -38,6 +41,26 @@ export function GoalBar({
           boxShadow: "inset 0 1px 2px rgba(0,0,0,0.4)",
         }}
       >
+        {/* Flowing-wave hint over the unfilled portion: a slow, soft gradient
+            sweeping rightward, suggesting motion toward the goal. */}
+        {incomplete && (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 overflow-hidden"
+            style={{ left: `${pct}%`, right: 0 }}
+          >
+            <motion.div
+              className="absolute inset-y-0 left-0"
+              style={{
+                width: "55%",
+                background: `linear-gradient(90deg, transparent, ${tint}, transparent)`,
+                opacity: goalNear ? 0.5 : 0.32,
+              }}
+              animate={{ x: ["-110%", "240%"] }}
+              transition={{ duration: 4.2, repeat: Infinity, ease: "linear" }}
+            />
+          </div>
+        )}
         <motion.div
           initial={{ width: 0 }}
           animate={{ width: `${pct}%` }}
@@ -47,13 +70,6 @@ export function GoalBar({
             background: `linear-gradient(90deg, ${tint}, ${glow})`,
             boxShadow: goalNear ? `0 0 24px ${glow}, 0 0 12px ${glow}` : `0 0 8px ${tint}`,
           }}
-        />
-        <motion.div
-          aria-hidden
-          animate={{ opacity: goalNear ? [0.0, 0.32, 0.0] : 0 }}
-          transition={{ duration: 3.4, repeat: Infinity, ease: "easeInOut" }}
-          className="absolute inset-0 rounded-full"
-          style={{ background: `radial-gradient(60% 100% at 80% 50%, ${glow}, transparent)` }}
         />
       </div>
       <div className="flex justify-between text-[11px] tabular-nums text-white/55">

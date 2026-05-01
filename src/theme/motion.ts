@@ -12,7 +12,7 @@ export const M = {
   bloom: { duration: 1.4, ease: EASE_FLOW } as Transition,
   morph: { duration: 0.6, ease: EASE_FLOW } as Transition,
   morphLong: { duration: 0.85, ease: EASE_FLOW } as Transition,
-  cardSlide: { duration: 0.55, ease: EASE_FLOW } as Transition,
+  cardSlide: { duration: 0.72, ease: EASE_FLOW } as Transition,
 };
 
 export const SWIPE_THRESHOLD = 90;
