@@ -198,7 +198,7 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
                   onClick={() => setShowForm((v) => !v)}
                   className="flex w-full items-center justify-between text-left text-xs uppercase tracking-[0.2em] text-white/55 hover:text-white/80"
                 >
-                  <span>Details</span>
+                  <span>{recurring ? "Edit goal" : "Details"}</span>
                   <span className="text-base">{showForm ? "−" : "+"}</span>
                 </button>
                 <AnimatePresence initial={false}>
