@@ -17,7 +17,7 @@ export type GraphNode = {
 
 export const GRAPH: GraphNode[] = [
   // Step 0
-  { id: "Start", label: "Create Budget", phase: 0, kind: "task", edges: [{ to: "Rent" }] },
+  { id: "Start", label: "Create Budget", sublabel: "Just being here is the first step.", phase: 0, kind: "task", edges: [{ to: "Rent" }] },
   { id: "Rent", label: "Pay Rent/Mortgage", sublabel: "incl. renters or homeowners insurance", phase: 0, kind: "task", edges: [{ to: "Food" }] },
   { id: "Food", label: "Buy Food/Groceries", phase: 0, kind: "task", edges: [{ to: "Essential" }] },
   { id: "Essential", label: "Pay Essential Items", sublabel: "power, water, heat, toiletries", phase: 0, kind: "task", edges: [{ to: "Income" }] },
