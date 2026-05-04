@@ -22,7 +22,7 @@ export function progressOf(state: AppState, id: NodeId): ProgressInfo {
 
   switch (id) {
     case "Start":
-      return { kind: "goal", value: state.nodes[id].completed ? 1 : 0.25, max: 1, ready: true };
+      return { kind: "none", ready: true };
     case "SmallEF": {
       const balance =
         ((data?.balance as { value: number } | undefined)?.value ?? 0);

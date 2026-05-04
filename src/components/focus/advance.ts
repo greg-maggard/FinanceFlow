@@ -2,6 +2,7 @@ import { useStore } from "../../state/store";
 import { useUI } from "../../state/uiStore";
 import { deriveStatus } from "../../graph/derive";
 import { GRAPH } from "../../graph/flowchart";
+import { neighbors } from "../../graph/path";
 import type { NodeId } from "../../state/schema";
 import { MEDALS } from "../../theme/identity";
 
@@ -13,9 +14,12 @@ export function findCurrentNode(): NodeId {
   return "Start";
 }
 
-export function advanceFromCurrent(): void {
-  const next = findCurrentNode();
-  useUI.getState().setFocus(next, "forward");
+export function advance(fromId: NodeId): void {
+  const state = useStore.getState();
+  const { next } = neighbors(state, fromId);
+  if (next) {
+    useUI.getState().setFocus(next, "forward");
+  }
   checkPhaseCompletion();
 }
 

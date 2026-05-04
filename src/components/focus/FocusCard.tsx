@@ -15,7 +15,7 @@ import { GlassTextarea } from "../glass/GlassInput";
 import { progressOf } from "./progressOf";
 import { FORM_BY_NODE } from "./forms";
 import { StreakBadge } from "./StreakBadge";
-import { advanceFromCurrent, findCurrentNode } from "./advance";
+import { advance, findCurrentNode } from "./advance";
 
 export function FocusCard({ nodeId }: { nodeId: NodeId }) {
   const node = GRAPH_BY_ID[nodeId];
@@ -48,14 +48,14 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
       useStore.getState().toggleComplete(nodeId);
       triggerCelebration(nodeId);
     }
-    advanceFromCurrent();
+    advance(nodeId);
   };
 
   const onDecide = (answer: "yes" | "no") => {
     if (node.decisionId) {
       useStore.getState().setDecision(node.decisionId, answer);
       triggerCelebration(nodeId);
-      advanceFromCurrent();
+      advance(nodeId);
     }
   };
 
@@ -276,7 +276,7 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
                 onClick={onComplete}
                 style={{ minWidth: 140 }}
               >
-                {nodeState.completed ? "Continue →" : "Mark complete"}
+                {nodeState.completed ? "Next step →" : "Mark complete"}
               </GlassButton>
             </div>
 

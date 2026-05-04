@@ -7,36 +7,6 @@ import { neighbors } from "../../graph/path";
 import type { NodeId } from "../../state/schema";
 import { M, SWIPE_THRESHOLD, type Direction } from "../../theme/motion";
 
-function Arrow({ dir, onClick }: { dir: "prev" | "next"; onClick: () => void }) {
-  return (
-    <motion.button
-      type="button"
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick();
-      }}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 0.32 }}
-      whileHover={{ opacity: 0.95, scale: 1.12 }}
-      whileTap={{ scale: 0.92 }}
-      exit={{ opacity: 0 }}
-      transition={M.fadeQuick}
-      aria-label={dir === "prev" ? "Previous step" : "Next step"}
-      className="hidden h-11 w-11 shrink-0 items-center justify-center text-white sm:flex"
-    >
-      <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none">
-        <path
-          d={dir === "prev" ? "M15 18 L9 12 L15 6" : "M9 6 L15 12 L9 18"}
-          stroke="currentColor"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    </motion.button>
-  );
-}
-
 const variants = {
   enter: (dir: Direction) => ({
     x: dir === "forward" ? "60%" : dir === "backward" ? "-60%" : 0,
@@ -83,11 +53,7 @@ export function FocusStage({ activeId }: { activeId: NodeId }) {
   }, [view, goPrev, goNext, setView]);
 
   return (
-    <div className="relative flex w-full flex-1 items-center justify-center px-2 sm:gap-2 sm:px-4">
-      <AnimatePresence>
-        {prev ? <Arrow key="prev" dir="prev" onClick={goPrev} /> : null}
-      </AnimatePresence>
-
+    <div className="relative flex w-full flex-1 items-center justify-center px-3 sm:px-5">
       <div className="relative w-full max-w-xl">
         <AnimatePresence mode="popLayout" initial={false} custom={direction}>
           <motion.div
@@ -112,10 +78,6 @@ export function FocusStage({ activeId }: { activeId: NodeId }) {
           </motion.div>
         </AnimatePresence>
       </div>
-
-      <AnimatePresence>
-        {next ? <Arrow key="next" dir="next" onClick={goNext} /> : null}
-      </AnimatePresence>
     </div>
   );
 }
