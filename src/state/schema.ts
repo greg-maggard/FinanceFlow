@@ -40,6 +40,13 @@ export type Goal = {
 };
 
 export type NodeDataMap = {
+  Rent: { target: SourcedNumber };
+  Food: { target: SourcedNumber };
+  Essential: { target: SourcedNumber };
+  Income: { target: SourcedNumber };
+  Health: { target: SourcedNumber };
+  MinDebt: { target: SourcedNumber };
+  NonEssential: { target: SourcedNumber };
   SmallEF: { balance: SourcedNumber };
   BigEF: { targetMonths: 3 | 4 | 5 | 6; balance: SourcedNumber };
   Match: { matchPct: number; currentContribPct: number };

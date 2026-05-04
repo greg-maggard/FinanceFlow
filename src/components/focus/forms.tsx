@@ -492,6 +492,13 @@ export function GoalsFields() {
 }
 
 export const FORM_BY_NODE: Partial<Record<NodeId, () => JSX.Element>> = {
+  Rent: () => <RecurringTargetFields nodeId="Rent" label="Rent / mortgage" />,
+  Food: () => <RecurringTargetFields nodeId="Food" label="Groceries" />,
+  Essential: () => <RecurringTargetFields nodeId="Essential" label="Utilities & essentials" />,
+  Income: () => <RecurringTargetFields nodeId="Income" label="Transportation, internet, phone" />,
+  Health: () => <RecurringTargetFields nodeId="Health" label="Insurance & health care" />,
+  MinDebt: () => <RecurringTargetFields nodeId="MinDebt" label="Total minimum payments" />,
+  NonEssential: () => <RecurringTargetFields nodeId="NonEssential" label="Non-essential subscriptions" />,
   SmallEF: SmallEFFields,
   BigEF: BigEFFields,
   Match: MatchFields,
@@ -504,3 +511,29 @@ export const FORM_BY_NODE: Partial<Record<NodeId, () => JSX.Element>> = {
   ModDebt: () => <DebtFields nodeId="ModDebt" aprThreshold={4} />,
   Goals: GoalsFields,
 };
+
+type RecurringNodeId =
+  | "Rent"
+  | "Food"
+  | "Essential"
+  | "Income"
+  | "Health"
+  | "MinDebt"
+  | "NonEssential";
+
+function RecurringTargetFields({ nodeId, label }: { nodeId: RecurringNodeId; label: string }) {
+  const state = useStore();
+  const data = (state.nodes[nodeId].data as
+    | { target: { value: number; source: "manual" } }
+    | undefined) ?? { target: { value: 0, source: "manual" as const } };
+  return (
+    <Field label={`Monthly ${label.toLowerCase()} ($)`}>
+      <NumberField
+        value={data.target.value}
+        onChange={(v) =>
+          useStore.getState().setNodeData(nodeId, { target: { value: v, source: "manual" } })
+        }
+      />
+    </Field>
+  );
+}
