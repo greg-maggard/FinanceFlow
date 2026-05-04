@@ -3,6 +3,7 @@ import { useStore } from "../state/store";
 import { GlassCard } from "./glass/GlassCard";
 import { FieldLabel } from "./glass/GlassInput";
 import { NumberField } from "./glass/NumberField";
+import { YnabPanel } from "./settings/YnabPanel";
 
 export function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const settings = useStore((s) => s.settings);
@@ -18,14 +19,14 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
           onClick={onClose}
         >
           <motion.div
-            className="w-full max-w-md"
+            className="w-full max-w-md max-h-[85vh]"
             initial={{ scale: 0.94, y: 20, opacity: 0 }}
             animate={{ scale: 1, y: 0, opacity: 1 }}
             exit={{ scale: 0.94, y: 20, opacity: 0 }}
             transition={{ type: "spring", stiffness: 240, damping: 24 }}
             onClick={(e) => e.stopPropagation()}
           >
-            <GlassCard intensity="strong" className="p-6">
+            <GlassCard intensity="strong" className="max-h-[85vh] overflow-y-auto p-6">
               <div className="mb-5 flex items-center justify-between">
                 <h2 className="text-lg font-semibold tracking-tight text-white/95">Settings</h2>
                 <button
@@ -97,6 +98,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                     </label>
                   </div>
                 </div>
+                <YnabPanel />
               </div>
             </GlassCard>
           </motion.div>

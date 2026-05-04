@@ -13,12 +13,12 @@ export function progressOf(state: AppState, id: NodeId): ProgressInfo {
   if (node.kind === "decision") return { kind: "none", ready: false };
   if (RECURRING.has(id)) {
     const recurring = state.nodes[id].data as
-      | { target?: { value: number }; spent?: { value: number } }
+      | { target?: { value: number }; funded?: { value: number } }
       | undefined;
     const target = recurring?.target?.value ?? 0;
-    const spent = recurring?.spent?.value ?? 0;
+    const funded = recurring?.funded?.value ?? 0;
     if (target > 0) {
-      return { kind: "goal", value: spent, max: target, ready: spent >= target };
+      return { kind: "goal", value: funded, max: target, ready: funded >= target };
     }
     return { kind: "none", ready: true };
   }

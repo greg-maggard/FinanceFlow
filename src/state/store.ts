@@ -11,6 +11,7 @@ type Store = AppState & {
   setNodeData: <K extends keyof NodeDataMap>(id: K, data: NodeDataMap[K]) => void;
   patchNodeData: <K extends keyof NodeDataMap>(id: K, patch: Partial<NodeDataMap[K]>) => void;
   setSettings: (patch: Partial<Settings>) => void;
+  setCategoryMap: (nodeId: NodeId, categoryId: string | null) => void;
   reset: () => void;
   replaceAll: (state: AppState) => void;
 };
@@ -65,6 +66,13 @@ export const useStore = create<Store>((set) => ({
       },
     })),
   setSettings: (patch) => set((s) => ({ settings: { ...s.settings, ...patch } })),
+  setCategoryMap: (nodeId, categoryId) =>
+    set((s) => {
+      const next = { ...(s.categoryMap ?? {}) };
+      if (categoryId) next[nodeId] = categoryId;
+      else delete next[nodeId];
+      return { categoryMap: next };
+    }),
   reset: () => set(() => ({ ...makeInitialState() })),
   replaceAll: (state) => set(() => ({ ...state })),
 }));
