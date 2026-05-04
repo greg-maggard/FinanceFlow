@@ -4,6 +4,9 @@ import { useStore } from "../../state/store";
 import type { Debt, NodeId } from "../../state/schema";
 import { emergencyFundTarget, bigEmergencyFundTarget } from "../../state/schema";
 import { motion } from "framer-motion";
+import { useEffect, useState } from "react";
+import { useYnab } from "../../state/ynabStore";
+import { YnabClient, milliToDollar, type YnabCategoryGroup } from "../../integrations/ynab";
 
 const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
   <label className="block space-y-1.5">
@@ -521,12 +524,74 @@ type RecurringNodeId =
   | "MinDebt"
   | "NonEssential";
 
+let categoryCache: { budgetId: string; groups: YnabCategoryGroup[] } | null = null;
+
 function RecurringTargetFields({ nodeId, label }: { nodeId: RecurringNodeId; label: string }) {
   const state = useStore();
+  const ynab = useYnab();
+  const ynabConnected = Boolean(ynab.pat && ynab.budgetId);
   const data = (state.nodes[nodeId].data as
-    | { target: { value: number; source: "manual" }; spent?: { value: number; source: "manual" } }
+    | { target: { value: number; source: "manual" | "ynab" }; funded?: { value: number; source: "manual" | "ynab"; lastSyncedAt?: string } }
     | undefined) ?? { target: { value: 0, source: "manual" as const } };
   const targetSet = data.target.value > 0;
+  const mappedCategoryId = state.categoryMap?.[nodeId];
+
+  const [groups, setGroups] = useState<YnabCategoryGroup[]>(
+    categoryCache?.budgetId === ynab.budgetId ? categoryCache.groups : [],
+  );
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  useEffect(() => {
+    if (!ynabConnected || !ynab.pat || !ynab.budgetId) return;
+    if (categoryCache?.budgetId === ynab.budgetId) {
+      setGroups(categoryCache.groups);
+      return;
+    }
+    let cancelled = false;
+    new YnabClient(ynab.pat)
+      .getCategoryGroups(ynab.budgetId)
+      .then((g) => {
+        if (cancelled) return;
+        categoryCache = { budgetId: ynab.budgetId!, groups: g };
+        setGroups(g);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setRefreshError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ynabConnected, ynab.pat, ynab.budgetId]);
+
+  const refresh = async () => {
+    if (!ynab.pat || !ynab.budgetId || !mappedCategoryId) return;
+    setRefreshing(true);
+    setRefreshError(null);
+    try {
+      const cat = await new YnabClient(ynab.pat).getCategoryCurrent(ynab.budgetId, mappedCategoryId);
+      const targetDollars =
+        cat.goal_target && cat.goal_target > 0 ? milliToDollar(cat.goal_target) : data.target.value;
+      const fundedDollars = milliToDollar(Math.max(0, cat.budgeted));
+      const now = new Date().toISOString();
+      useStore.getState().setNodeData(nodeId, {
+        target: { value: targetDollars, source: "ynab" },
+        funded: { value: fundedDollars, source: "ynab", lastSyncedAt: now },
+      });
+    } catch (e: unknown) {
+      setRefreshError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const onCategorySelect = (categoryId: string) => {
+    useStore.getState().setCategoryMap(nodeId, categoryId || null);
+  };
+
+  const fundedSyncedAt = data.funded?.lastSyncedAt;
+
   return (
     <div className="space-y-3">
       <Field label={`Monthly ${label.toLowerCase()} target ($)`}>
@@ -535,23 +600,82 @@ function RecurringTargetFields({ nodeId, label }: { nodeId: RecurringNodeId; lab
           onChange={(v) =>
             useStore.getState().setNodeData(nodeId, {
               target: { value: v, source: "manual" },
-              spent: data.spent,
+              funded: data.funded,
             })
           }
         />
       </Field>
       {targetSet && (
-        <Field label="Spent this month ($)">
+        <Field label="Saved this month ($)">
           <NumberField
-            value={data.spent?.value ?? 0}
+            value={data.funded?.value ?? 0}
             onChange={(v) =>
               useStore.getState().setNodeData(nodeId, {
                 target: data.target,
-                spent: { value: v, source: "manual" },
+                funded: { value: v, source: "manual" },
               })
             }
           />
         </Field>
+      )}
+
+      {ynabConnected && (
+        <div
+          className="space-y-2 rounded-xl px-3 py-2.5"
+          style={{
+            background: "rgba(255,255,255,0.03)",
+            border: "1px solid rgba(255,255,255,0.08)",
+          }}
+        >
+          <Field label="YNAB category">
+            <GlassSelect
+              value={mappedCategoryId ?? ""}
+              onChange={(e) => onCategorySelect(e.target.value)}
+            >
+              <option value="">— Not linked —</option>
+              {groups.map((g) => (
+                <optgroup key={g.id} label={g.name}>
+                  {g.categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </GlassSelect>
+          </Field>
+          <div className="flex items-center justify-between gap-2 text-[11px]">
+            <span className="text-white/45">
+              {fundedSyncedAt
+                ? `Last synced ${new Date(fundedSyncedAt).toLocaleString()}`
+                : mappedCategoryId
+                  ? "Not yet synced."
+                  : "Pick a category to sync."}
+            </span>
+            <button
+              type="button"
+              onClick={refresh}
+              disabled={!mappedCategoryId || refreshing}
+              className="rounded-full px-3 py-1 text-[11px] font-medium transition-opacity disabled:opacity-40"
+              style={{
+                background: "rgba(96, 165, 250, 0.16)",
+                border: "1px solid rgba(96, 165, 250, 0.45)",
+                color: "#dbeafe",
+              }}
+            >
+              {refreshing ? "Syncing…" : "Refresh from YNAB"}
+            </button>
+          </div>
+          {refreshError && (
+            <div className="text-[11px]" style={{ color: "#fecaca" }}>
+              {refreshError}
+            </div>
+          )}
+          <p className="text-[10px] text-white/35">
+            Pulls the assigned (budgeted) amount for this category in the current
+            month, plus the goal target if one is set.
+          </p>
+        </div>
       )}
     </div>
   );

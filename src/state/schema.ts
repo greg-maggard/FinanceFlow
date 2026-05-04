@@ -40,13 +40,13 @@ export type Goal = {
 };
 
 export type NodeDataMap = {
-  Rent: { target: SourcedNumber; spent?: SourcedNumber };
-  Food: { target: SourcedNumber; spent?: SourcedNumber };
-  Essential: { target: SourcedNumber; spent?: SourcedNumber };
-  Income: { target: SourcedNumber; spent?: SourcedNumber };
-  Health: { target: SourcedNumber; spent?: SourcedNumber };
-  MinDebt: { target: SourcedNumber; spent?: SourcedNumber };
-  NonEssential: { target: SourcedNumber; spent?: SourcedNumber };
+  Rent: { target: SourcedNumber; funded?: SourcedNumber };
+  Food: { target: SourcedNumber; funded?: SourcedNumber };
+  Essential: { target: SourcedNumber; funded?: SourcedNumber };
+  Income: { target: SourcedNumber; funded?: SourcedNumber };
+  Health: { target: SourcedNumber; funded?: SourcedNumber };
+  MinDebt: { target: SourcedNumber; funded?: SourcedNumber };
+  NonEssential: { target: SourcedNumber; funded?: SourcedNumber };
   SmallEF: { balance: SourcedNumber };
   BigEF: { targetMonths: 3 | 4 | 5 | 6; balance: SourcedNumber };
   Match: { matchPct: number; currentContribPct: number };
@@ -134,6 +134,7 @@ export type AppState = {
   nodes: Record<NodeId, NodeState>;
   shownCelebrations?: NodeId[];
   earnedMedals?: number[];
+  categoryMap?: Partial<Record<NodeId, string>>;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
