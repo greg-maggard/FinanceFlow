@@ -12,10 +12,15 @@ export function progressOf(state: AppState, id: NodeId): ProgressInfo {
   const node = GRAPH_BY_ID[id];
   if (node.kind === "decision") return { kind: "none", ready: false };
   if (RECURRING.has(id)) {
-    return {
-      kind: "none",
-      ready: true,
-    };
+    const recurring = state.nodes[id].data as
+      | { target?: { value: number }; spent?: { value: number } }
+      | undefined;
+    const target = recurring?.target?.value ?? 0;
+    const spent = recurring?.spent?.value ?? 0;
+    if (target > 0) {
+      return { kind: "goal", value: spent, max: target, ready: spent >= target };
+    }
+    return { kind: "none", ready: true };
   }
 
   const data = state.nodes[id].data as Record<string, unknown> | undefined;

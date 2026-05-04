@@ -524,16 +524,35 @@ type RecurringNodeId =
 function RecurringTargetFields({ nodeId, label }: { nodeId: RecurringNodeId; label: string }) {
   const state = useStore();
   const data = (state.nodes[nodeId].data as
-    | { target: { value: number; source: "manual" } }
+    | { target: { value: number; source: "manual" }; spent?: { value: number; source: "manual" } }
     | undefined) ?? { target: { value: 0, source: "manual" as const } };
+  const targetSet = data.target.value > 0;
   return (
-    <Field label={`Monthly ${label.toLowerCase()} ($)`}>
-      <NumberField
-        value={data.target.value}
-        onChange={(v) =>
-          useStore.getState().setNodeData(nodeId, { target: { value: v, source: "manual" } })
-        }
-      />
-    </Field>
+    <div className="space-y-3">
+      <Field label={`Monthly ${label.toLowerCase()} target ($)`}>
+        <NumberField
+          value={data.target.value}
+          onChange={(v) =>
+            useStore.getState().setNodeData(nodeId, {
+              target: { value: v, source: "manual" },
+              spent: data.spent,
+            })
+          }
+        />
+      </Field>
+      {targetSet && (
+        <Field label="Spent this month ($)">
+          <NumberField
+            value={data.spent?.value ?? 0}
+            onChange={(v) =>
+              useStore.getState().setNodeData(nodeId, {
+                target: data.target,
+                spent: { value: v, source: "manual" },
+              })
+            }
+          />
+        </Field>
+      )}
+    </div>
   );
 }
