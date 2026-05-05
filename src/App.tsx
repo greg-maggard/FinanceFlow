@@ -30,10 +30,7 @@ export default function App() {
       <AmbientBackground phase={activePhase} />
       <TopBar onOpenSettings={() => setSettingsOpen(true)} />
 
-      <main
-        className="flex flex-1 items-center justify-center pb-32 pt-24"
-        onClick={() => view === "focus" && useUI.getState().setView("overview")}
-      >
+      <main className="flex flex-1 items-center justify-center pb-32 pt-24">
         <AnimatePresence mode="wait" initial={false}>
           {view === "focus" && (
             <motion.div
