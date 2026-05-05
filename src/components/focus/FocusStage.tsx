@@ -41,20 +41,27 @@ function SideZone({
         e.stopPropagation();
         onClick();
       }}
-      className={`absolute inset-y-0 ${side === "left" ? "left-0" : "right-0"} z-0 w-1/2 cursor-pointer focus:outline-none`}
-      style={{
-        background: "transparent",
-        transition: "background 0.4s ease-out",
+      className={`absolute inset-y-0 ${side === "left" ? "left-0" : "right-0"} z-0 w-1/2 cursor-pointer bg-transparent focus:outline-none`}
+    />
+  );
+}
+
+function OverviewZone({
+  position,
+  onClick,
+}: {
+  position: "top" | "bottom";
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label="Open overview"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
       }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background =
-          side === "left"
-            ? "linear-gradient(90deg, rgba(255,255,255,0.04), transparent)"
-            : "linear-gradient(270deg, rgba(255,255,255,0.04), transparent)";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = "transparent";
-      }}
+      className={`flex-1 cursor-pointer bg-transparent focus:outline-none ${position === "top" ? "min-h-[24px]" : "min-h-[24px]"}`}
     />
   );
 }
@@ -76,6 +83,8 @@ export function FocusStage({ activeId }: { activeId: NodeId }) {
     if (next) setFocus(next, "forward");
   }, [next, setFocus]);
 
+  const goOverview = useCallback(() => setView("overview"), [setView]);
+
   useEffect(() => {
     if (view !== "focus") return;
     const onKey = (e: KeyboardEvent) => {
@@ -89,33 +98,37 @@ export function FocusStage({ activeId }: { activeId: NodeId }) {
   }, [view, goPrev, goNext, setView]);
 
   return (
-    <div className="relative flex w-full flex-1 items-center justify-center">
-      <SideZone side="left" onClick={goPrev} enabled={Boolean(prev)} />
-      <SideZone side="right" onClick={goNext} enabled={Boolean(next)} />
-      <div className="relative z-10 w-full max-w-xl px-3 sm:px-5">
-        <AnimatePresence mode="popLayout" initial={false} custom={direction}>
-          <motion.div
-            key={activeId}
-            custom={direction}
-            variants={variants}
-            initial="enter"
-            animate="center"
-            exit="exit"
-            transition={M.cardSlide}
-            drag="x"
-            dragConstraints={{ left: 0, right: 0 }}
-            dragElastic={0.18}
-            dragMomentum={false}
-            onClick={(e) => e.stopPropagation()}
-            onDragEnd={(_, info) => {
-              if (info.offset.x < -SWIPE_THRESHOLD && next) goNext();
-              else if (info.offset.x > SWIPE_THRESHOLD && prev) goPrev();
-            }}
-          >
-            <FocusCard nodeId={activeId} />
-          </motion.div>
-        </AnimatePresence>
+    <div className="relative flex w-full flex-1 flex-col">
+      <OverviewZone position="top" onClick={goOverview} />
+      <div className="relative flex w-full items-center justify-center">
+        <SideZone side="left" onClick={goPrev} enabled={Boolean(prev)} />
+        <SideZone side="right" onClick={goNext} enabled={Boolean(next)} />
+        <div className="relative z-10 w-full max-w-xl px-3 sm:px-5">
+          <AnimatePresence mode="popLayout" initial={false} custom={direction}>
+            <motion.div
+              key={activeId}
+              custom={direction}
+              variants={variants}
+              initial="enter"
+              animate="center"
+              exit="exit"
+              transition={M.cardSlide}
+              drag="x"
+              dragConstraints={{ left: 0, right: 0 }}
+              dragElastic={0.18}
+              dragMomentum={false}
+              onClick={(e) => e.stopPropagation()}
+              onDragEnd={(_, info) => {
+                if (info.offset.x < -SWIPE_THRESHOLD && next) goNext();
+                else if (info.offset.x > SWIPE_THRESHOLD && prev) goPrev();
+              }}
+            >
+              <FocusCard nodeId={activeId} />
+            </motion.div>
+          </AnimatePresence>
+        </div>
       </div>
+      <OverviewZone position="bottom" onClick={goOverview} />
     </div>
   );
 }
