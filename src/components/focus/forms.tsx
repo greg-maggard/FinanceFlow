@@ -3,7 +3,7 @@ import { NumberField } from "../glass/NumberField";
 import { useStore } from "../../state/store";
 import type { Debt, NodeId } from "../../state/schema";
 import { emergencyFundTarget, bigEmergencyFundTarget } from "../../state/schema";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useState } from "react";
 import { useYnab } from "../../state/ynabStore";
 import { YnabClient, milliToDollar, type YnabCategoryGroup } from "../../integrations/ynab";
@@ -536,6 +536,7 @@ function RecurringTargetFields({ nodeId, label }: { nodeId: RecurringNodeId; lab
   const targetSet = data.target.value > 0;
   const mappedCategoryId = state.categoryMap?.[nodeId];
 
+  const [showEdit, setShowEdit] = useState(!targetSet);
   const [groups, setGroups] = useState<YnabCategoryGroup[]>(
     categoryCache?.budgetId === ynab.budgetId ? categoryCache.groups : [],
   );
@@ -593,90 +594,113 @@ function RecurringTargetFields({ nodeId, label }: { nodeId: RecurringNodeId; lab
   const fundedSyncedAt = data.funded?.lastSyncedAt;
 
   return (
-    <div className="space-y-3">
-      <Field label={`Monthly ${label.toLowerCase()} target ($)`}>
+    <div className="space-y-4">
+      <Field label="Saved this month ($)">
         <NumberField
-          value={data.target.value}
+          value={data.funded?.value ?? 0}
           onChange={(v) =>
             useStore.getState().setNodeData(nodeId, {
-              target: { value: v, source: "manual" },
-              funded: data.funded,
+              target: data.target,
+              funded: { value: v, source: "manual" },
             })
           }
         />
       </Field>
-      {targetSet && (
-        <Field label="Saved this month ($)">
-          <NumberField
-            value={data.funded?.value ?? 0}
-            onChange={(v) =>
-              useStore.getState().setNodeData(nodeId, {
-                target: data.target,
-                funded: { value: v, source: "manual" },
-              })
-            }
-          />
-        </Field>
-      )}
 
-      {ynabConnected && (
-        <div
-          className="space-y-2 rounded-xl px-3 py-2.5"
-          style={{
-            background: "rgba(255,255,255,0.03)",
-            border: "1px solid rgba(255,255,255,0.08)",
-          }}
+      <div>
+        <button
+          type="button"
+          onClick={() => setShowEdit((v) => !v)}
+          className="flex w-full items-center justify-between text-left text-xs uppercase tracking-[0.2em] text-white/55 hover:text-white/80"
         >
-          <Field label="YNAB category">
-            <GlassSelect
-              value={mappedCategoryId ?? ""}
-              onChange={(e) => onCategorySelect(e.target.value)}
+          <span>{targetSet ? `Edit goal — $${data.target.value.toLocaleString()}/mo` : "Set monthly goal"}</span>
+          <span className="text-base">{showEdit ? "−" : "+"}</span>
+        </button>
+        <AnimatePresence initial={false}>
+          {showEdit && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.25, ease: "easeOut" }}
+              className="overflow-hidden"
             >
-              <option value="">— Not linked —</option>
-              {groups.map((g) => (
-                <optgroup key={g.id} label={g.name}>
-                  {g.categories.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </GlassSelect>
-          </Field>
-          <div className="flex items-center justify-between gap-2 text-[11px]">
-            <span className="text-white/45">
-              {fundedSyncedAt
-                ? `Last synced ${new Date(fundedSyncedAt).toLocaleString()}`
-                : mappedCategoryId
-                  ? "Not yet synced."
-                  : "Pick a category to sync."}
-            </span>
-            <button
-              type="button"
-              onClick={refresh}
-              disabled={!mappedCategoryId || refreshing}
-              className="rounded-full px-3 py-1 text-[11px] font-medium transition-opacity disabled:opacity-40"
-              style={{
-                background: "rgba(96, 165, 250, 0.16)",
-                border: "1px solid rgba(96, 165, 250, 0.45)",
-                color: "#dbeafe",
-              }}
-            >
-              {refreshing ? "Syncing…" : "Refresh from YNAB"}
-            </button>
-          </div>
-          {refreshError && (
-            <div className="text-[11px]" style={{ color: "#fecaca" }}>
-              {refreshError}
-            </div>
+              <div className="space-y-3 pt-3">
+                <Field label={`Monthly ${label.toLowerCase()} target ($)`}>
+                  <NumberField
+                    value={data.target.value}
+                    onChange={(v) =>
+                      useStore.getState().setNodeData(nodeId, {
+                        target: { value: v, source: "manual" },
+                        funded: data.funded,
+                      })
+                    }
+                  />
+                </Field>
+
+                {ynabConnected && (
+                  <div
+                    className="space-y-2 rounded-xl px-3 py-2.5"
+                    style={{
+                      background: "rgba(255,255,255,0.03)",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                    }}
+                  >
+                    <Field label="YNAB category">
+                      <GlassSelect
+                        value={mappedCategoryId ?? ""}
+                        onChange={(e) => onCategorySelect(e.target.value)}
+                      >
+                        <option value="">— Not linked —</option>
+                        {groups.map((g) => (
+                          <optgroup key={g.id} label={g.name}>
+                            {g.categories.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ))}
+                      </GlassSelect>
+                    </Field>
+                    <div className="flex items-center justify-between gap-2 text-[11px]">
+                      <span className="text-white/45">
+                        {fundedSyncedAt
+                          ? `Last synced ${new Date(fundedSyncedAt).toLocaleString()}`
+                          : mappedCategoryId
+                            ? "Not yet synced."
+                            : "Pick a category to sync."}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={refresh}
+                        disabled={!mappedCategoryId || refreshing}
+                        className="rounded-full px-3 py-1 text-[11px] font-medium transition-opacity disabled:opacity-40"
+                        style={{
+                          background: "rgba(96, 165, 250, 0.16)",
+                          border: "1px solid rgba(96, 165, 250, 0.45)",
+                          color: "#dbeafe",
+                        }}
+                      >
+                        {refreshing ? "Syncing…" : "Refresh from YNAB"}
+                      </button>
+                    </div>
+                    {refreshError && (
+                      <div className="text-[11px]" style={{ color: "#fecaca" }}>
+                        {refreshError}
+                      </div>
+                    )}
+                    <p className="text-[10px] text-white/35">
+                      Pulls the assigned (budgeted) amount for this category in the
+                      current month, plus the goal target if one is set.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </motion.div>
           )}
-          <p className="text-[10px] text-white/35">
-            Pulls the assigned (budgeted) amount for this category in the current
-            month, plus the goal target if one is set.
-          </p>
-        </div>
-      )}
+        </AnimatePresence>
+      </div>
     </div>
   );
 }
