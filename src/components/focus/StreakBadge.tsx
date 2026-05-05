@@ -73,15 +73,17 @@ export function StreakBadge({ nodeId, tint, glow }: { nodeId: NodeId; tint: stri
           <motion.div
             initial={{ scale: 0.8, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className="flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold"
+            className="flex items-baseline gap-1 rounded-full px-2.5 py-1 text-xs font-semibold tabular-nums"
             style={{
               background: glow,
               boxShadow: `0 0 18px ${glow}`,
               color: "white",
             }}
           >
-            <span aria-hidden>🔥</span>
-            <span className="tabular-nums">{months}</span>
+            <span>{months}</span>
+            <span className="text-[10px] uppercase tracking-wider opacity-80">
+              {months === 1 ? "mo" : "mos"}
+            </span>
           </motion.div>
         )}
       </button>

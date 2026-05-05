@@ -43,11 +43,18 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
     return cur === nodeId ? null : cur;
   }, [nodeId, isOnPath, nodeState.completed]);
 
-  const onComplete = () => {
-    if (!nodeState.completed) {
+  const canMarkComplete =
+    !nodeState.completed && (progress.kind !== "goal" || progress.ready);
+
+  const onMarkComplete = () => {
+    if (canMarkComplete) {
       useStore.getState().toggleComplete(nodeId);
       triggerCelebration(nodeId);
     }
+    advance(nodeId);
+  };
+
+  const onAdvanceOnly = () => {
     advance(nodeId);
   };
 
@@ -59,13 +66,7 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
     }
   };
 
-  const ready =
-    node.kind === "decision" ||
-    nodeState.completed ||
-    (progress.kind === "goal" && progress.ready) ||
-    progress.kind === "none";
-
-  const buttonGlow = ready && !nodeState.completed && isOnPath;
+  const buttonGlow = canMarkComplete && isOnPath;
 
   return (
     <div className="mx-auto w-full max-w-xl">
@@ -191,14 +192,20 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
               <StreakBadge nodeId={nodeId} tint={phaseColor.tint} glow={phaseColor.glow} />
             )}
 
-            {Form && (
+            {Form && recurring && (
+              <div>
+                <Form />
+              </div>
+            )}
+
+            {Form && !recurring && (
               <div>
                 <button
                   type="button"
                   onClick={() => setShowForm((v) => !v)}
                   className="flex w-full items-center justify-between text-left text-xs uppercase tracking-[0.2em] text-white/55 hover:text-white/80"
                 >
-                  <span>{recurring ? "Edit goal" : "Details"}</span>
+                  <span>Details</span>
                   <span className="text-base">{showForm ? "−" : "+"}</span>
                 </button>
                 <AnimatePresence initial={false}>
@@ -271,12 +278,12 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
               <GlassButton
                 variant="primary"
                 size="lg"
-                tint={isOnPath ? phaseColor.tint : "rgba(255,255,255,0.06)"}
+                tint={canMarkComplete ? phaseColor.tint : "rgba(255,255,255,0.06)"}
                 glow={buttonGlow}
-                onClick={onComplete}
+                onClick={canMarkComplete ? onMarkComplete : onAdvanceOnly}
                 style={{ minWidth: 140 }}
               >
-                {nodeState.completed ? "Next step →" : "Mark complete"}
+                {canMarkComplete ? "Mark complete" : "Next step →"}
               </GlassButton>
             </div>
 
