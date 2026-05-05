@@ -13,9 +13,10 @@ import { GlassButton } from "../glass/GlassButton";
 import { GoalBar } from "../glass/GoalBar";
 import { GlassTextarea } from "../glass/GlassInput";
 import { progressOf } from "./progressOf";
-import { FORM_BY_NODE } from "./forms";
+import { FORM_BY_NODE, MENU_BY_NODE } from "./forms";
 import { StreakBadge } from "./StreakBadge";
 import { advance, findCurrentNode } from "./advance";
+import { KebabMenu } from "../glass/KebabMenu";
 
 export function FocusCard({ nodeId }: { nodeId: NodeId }) {
   const node = GRAPH_BY_ID[nodeId];
@@ -29,6 +30,7 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
 
   const nodeState = state.nodes[nodeId];
   const Form = FORM_BY_NODE[nodeId];
+  const Menu = MENU_BY_NODE[nodeId];
   const progress = progressOf(state, nodeId);
   const recurring = RECURRING.has(nodeId);
   const identity = IDENTITY[nodeId];
@@ -99,31 +101,38 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
         </AnimatePresence>
 
         <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <span
-              className="rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em]"
-              style={{
-                background: phaseColor.tint,
-                color: phaseColor.text,
-                border: `1px solid ${phaseColor.base}`,
-              }}
-            >
-              {PHASE_LABELS[node.phase].replace(/^Step \d+: /, "")}
-            </span>
-            {nodeState.completed && (
-              <motion.span
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={M.fade}
-                className="rounded-full px-2 py-0.5 text-[10px] font-semibold"
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className="rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em]"
                 style={{
-                  background: "rgba(52, 211, 153, 0.14)",
-                  color: "#a7f3d0",
-                  border: "1px solid rgba(52, 211, 153, 0.32)",
+                  background: phaseColor.tint,
+                  color: phaseColor.text,
+                  border: `1px solid ${phaseColor.base}`,
                 }}
               >
-                Complete
-              </motion.span>
+                {PHASE_LABELS[node.phase].replace(/^Step \d+: /, "")}
+              </span>
+              {nodeState.completed && (
+                <motion.span
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={M.fade}
+                  className="rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                  style={{
+                    background: "rgba(52, 211, 153, 0.14)",
+                    color: "#a7f3d0",
+                    border: "1px solid rgba(52, 211, 153, 0.32)",
+                  }}
+                >
+                  Complete
+                </motion.span>
+              )}
+            </div>
+            {Menu && (
+              <KebabMenu ariaLabel="Goal settings">
+                <Menu />
+              </KebabMenu>
             )}
           </div>
           <h1 className="text-2xl font-semibold leading-tight tracking-tight text-white">
@@ -275,16 +284,26 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
                       : "Mark complete when ready."}
                 </span>
               )}
-              <GlassButton
-                variant="primary"
-                size="lg"
-                tint={canMarkComplete ? phaseColor.tint : "rgba(255,255,255,0.06)"}
-                glow={buttonGlow}
-                onClick={canMarkComplete ? onMarkComplete : onAdvanceOnly}
-                style={{ minWidth: 140 }}
-              >
-                {canMarkComplete ? "Mark complete" : "Next step →"}
-              </GlassButton>
+              <AnimatePresence mode="wait" initial={false}>
+                <motion.div
+                  key={canMarkComplete ? "mark" : "next"}
+                  initial={{ opacity: 0, y: 6, scale: 0.96 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -6, scale: 0.96 }}
+                  transition={{ duration: 0.45, ease: EASE_FLOW }}
+                >
+                  <GlassButton
+                    variant="primary"
+                    size="lg"
+                    tint={canMarkComplete ? phaseColor.tint : "rgba(255,255,255,0.06)"}
+                    glow={buttonGlow}
+                    onClick={canMarkComplete ? onMarkComplete : onAdvanceOnly}
+                    style={{ minWidth: 140 }}
+                  >
+                    {canMarkComplete ? "Mark complete" : "Next step →"}
+                  </GlassButton>
+                </motion.div>
+              </AnimatePresence>
             </div>
 
             {upNextId && (

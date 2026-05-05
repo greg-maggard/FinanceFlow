@@ -23,6 +23,42 @@ const variants = {
   }),
 };
 
+function SideZone({
+  side,
+  onClick,
+  enabled,
+}: {
+  side: "left" | "right";
+  onClick: () => void;
+  enabled: boolean;
+}) {
+  if (!enabled) return null;
+  return (
+    <button
+      type="button"
+      aria-label={side === "left" ? "Previous step" : "Next step"}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className={`absolute inset-y-0 ${side === "left" ? "left-0" : "right-0"} z-0 w-1/2 cursor-pointer focus:outline-none`}
+      style={{
+        background: "transparent",
+        transition: "background 0.4s ease-out",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background =
+          side === "left"
+            ? "linear-gradient(90deg, rgba(255,255,255,0.04), transparent)"
+            : "linear-gradient(270deg, rgba(255,255,255,0.04), transparent)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "transparent";
+      }}
+    />
+  );
+}
+
 export function FocusStage({ activeId }: { activeId: NodeId }) {
   const setFocus = useUI((s) => s.setFocus);
   const setView = useUI((s) => s.setView);
@@ -53,8 +89,10 @@ export function FocusStage({ activeId }: { activeId: NodeId }) {
   }, [view, goPrev, goNext, setView]);
 
   return (
-    <div className="relative flex w-full flex-1 items-center justify-center px-3 sm:px-5">
-      <div className="relative w-full max-w-xl">
+    <div className="relative flex w-full flex-1 items-center justify-center">
+      <SideZone side="left" onClick={goPrev} enabled={Boolean(prev)} />
+      <SideZone side="right" onClick={goNext} enabled={Boolean(next)} />
+      <div className="relative z-10 w-full max-w-xl px-3 sm:px-5">
         <AnimatePresence mode="popLayout" initial={false} custom={direction}>
           <motion.div
             key={activeId}

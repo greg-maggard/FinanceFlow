@@ -39,14 +39,27 @@ export type Goal = {
   horizonYears: number;
 };
 
+export type RecurringItem = {
+  id: string;
+  name: string;
+  target: SourcedNumber;
+  funded?: SourcedNumber;
+};
+
+export type RecurringData = {
+  target: SourcedNumber;
+  funded?: SourcedNumber;
+  items?: RecurringItem[];
+};
+
 export type NodeDataMap = {
-  Rent: { target: SourcedNumber; funded?: SourcedNumber };
-  Food: { target: SourcedNumber; funded?: SourcedNumber };
-  Essential: { target: SourcedNumber; funded?: SourcedNumber };
-  Income: { target: SourcedNumber; funded?: SourcedNumber };
-  Health: { target: SourcedNumber; funded?: SourcedNumber };
-  MinDebt: { target: SourcedNumber; funded?: SourcedNumber };
-  NonEssential: { target: SourcedNumber; funded?: SourcedNumber };
+  Rent: RecurringData;
+  Food: RecurringData;
+  Essential: RecurringData;
+  Income: RecurringData;
+  Health: RecurringData;
+  MinDebt: RecurringData;
+  NonEssential: RecurringData;
   SmallEF: { balance: SourcedNumber };
   BigEF: { targetMonths: 3 | 4 | 5 | 6; balance: SourcedNumber };
   Match: { matchPct: number; currentContribPct: number };

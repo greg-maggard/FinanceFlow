@@ -3,10 +3,11 @@ import { NumberField } from "../glass/NumberField";
 import { useStore } from "../../state/store";
 import type { Debt, NodeId } from "../../state/schema";
 import { emergencyFundTarget, bigEmergencyFundTarget } from "../../state/schema";
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
 import { useYnab } from "../../state/ynabStore";
 import { YnabClient, milliToDollar, type YnabCategoryGroup } from "../../integrations/ynab";
+import type { RecurringItem } from "../../state/schema";
 
 const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
   <label className="block space-y-1.5">
@@ -495,13 +496,13 @@ export function GoalsFields() {
 }
 
 export const FORM_BY_NODE: Partial<Record<NodeId, () => JSX.Element>> = {
-  Rent: () => <RecurringTargetFields nodeId="Rent" label="Rent / mortgage" />,
-  Food: () => <RecurringTargetFields nodeId="Food" label="Groceries" />,
-  Essential: () => <RecurringTargetFields nodeId="Essential" label="Utilities & essentials" />,
-  Income: () => <RecurringTargetFields nodeId="Income" label="Transportation, internet, phone" />,
-  Health: () => <RecurringTargetFields nodeId="Health" label="Insurance & health care" />,
-  MinDebt: () => <RecurringTargetFields nodeId="MinDebt" label="Total minimum payments" />,
-  NonEssential: () => <RecurringTargetFields nodeId="NonEssential" label="Non-essential subscriptions" />,
+  Rent: () => <RecurringSavedField nodeId="Rent" />,
+  Food: () => <RecurringSavedField nodeId="Food" />,
+  Essential: () => <RecurringSavedField nodeId="Essential" />,
+  Income: () => <RecurringSavedField nodeId="Income" />,
+  Health: () => <RecurringSavedField nodeId="Health" />,
+  MinDebt: () => <RecurringSavedField nodeId="MinDebt" />,
+  NonEssential: () => <RecurringSavedField nodeId="NonEssential" />,
   SmallEF: SmallEFFields,
   BigEF: BigEFFields,
   Match: MatchFields,
@@ -526,17 +527,57 @@ type RecurringNodeId =
 
 let categoryCache: { budgetId: string; groups: YnabCategoryGroup[] } | null = null;
 
-function RecurringTargetFields({ nodeId, label }: { nodeId: RecurringNodeId; label: string }) {
+function recurringData(
+  raw: unknown,
+): {
+  target: { value: number; source: "manual" | "ynab" };
+  funded?: { value: number; source: "manual" | "ynab"; lastSyncedAt?: string };
+  items?: RecurringItem[];
+} {
+  return (
+    (raw as
+      | {
+          target: { value: number; source: "manual" | "ynab" };
+          funded?: { value: number; source: "manual" | "ynab"; lastSyncedAt?: string };
+          items?: RecurringItem[];
+        }
+      | undefined) ?? { target: { value: 0, source: "manual" as const } }
+  );
+}
+
+function uidShort() {
+  return Math.random().toString(36).slice(2, 9);
+}
+
+export function RecurringSavedField({ nodeId }: { nodeId: RecurringNodeId }) {
+  const state = useStore();
+  const data = recurringData(state.nodes[nodeId].data);
+  const hasItems = (data.items?.length ?? 0) > 0;
+  if (hasItems) return null;
+  return (
+    <Field label="Saved this month ($)">
+      <NumberField
+        value={data.funded?.value ?? 0}
+        onChange={(v) =>
+          useStore.getState().setNodeData(nodeId, {
+            ...data,
+            funded: { value: v, source: "manual" },
+          })
+        }
+      />
+    </Field>
+  );
+}
+
+export function RecurringGoalMenu({ nodeId, label }: { nodeId: RecurringNodeId; label: string }) {
   const state = useStore();
   const ynab = useYnab();
   const ynabConnected = Boolean(ynab.pat && ynab.budgetId);
-  const data = (state.nodes[nodeId].data as
-    | { target: { value: number; source: "manual" | "ynab" }; funded?: { value: number; source: "manual" | "ynab"; lastSyncedAt?: string } }
-    | undefined) ?? { target: { value: 0, source: "manual" as const } };
-  const targetSet = data.target.value > 0;
+  const data = recurringData(state.nodes[nodeId].data);
+  const items = data.items ?? [];
+  const hasItems = items.length > 0;
   const mappedCategoryId = state.categoryMap?.[nodeId];
 
-  const [showEdit, setShowEdit] = useState(!targetSet);
   const [groups, setGroups] = useState<YnabCategoryGroup[]>(
     categoryCache?.budgetId === ynab.budgetId ? categoryCache.groups : [],
   );
@@ -577,6 +618,7 @@ function RecurringTargetFields({ nodeId, label }: { nodeId: RecurringNodeId; lab
       const fundedDollars = milliToDollar(Math.max(0, cat.budgeted));
       const now = new Date().toISOString();
       useStore.getState().setNodeData(nodeId, {
+        ...data,
         target: { value: targetDollars, source: "ynab" },
         funded: { value: fundedDollars, source: "ynab", lastSyncedAt: now },
       });
@@ -587,120 +629,187 @@ function RecurringTargetFields({ nodeId, label }: { nodeId: RecurringNodeId; lab
     }
   };
 
-  const onCategorySelect = (categoryId: string) => {
-    useStore.getState().setCategoryMap(nodeId, categoryId || null);
+  const updateData = (
+    patch: Partial<{
+      target: { value: number; source: "manual" | "ynab" };
+      funded: { value: number; source: "manual" | "ynab"; lastSyncedAt?: string };
+      items: RecurringItem[];
+    }>,
+  ) => useStore.getState().setNodeData(nodeId, { ...data, ...patch });
+
+  const addItem = () => {
+    const next: RecurringItem = {
+      id: uidShort(),
+      name: "",
+      target: { value: 0, source: "manual" },
+    };
+    updateData({ items: [...items, next] });
+  };
+
+  const patchItem = (id: string, patch: Partial<RecurringItem>) => {
+    updateData({ items: items.map((it) => (it.id === id ? { ...it, ...patch } : it)) });
+  };
+
+  const removeItem = (id: string) => {
+    updateData({ items: items.filter((it) => it.id !== id) });
   };
 
   const fundedSyncedAt = data.funded?.lastSyncedAt;
 
   return (
     <div className="space-y-4">
-      <Field label="Saved this month ($)">
-        <NumberField
-          value={data.funded?.value ?? 0}
-          onChange={(v) =>
-            useStore.getState().setNodeData(nodeId, {
-              target: data.target,
-              funded: { value: v, source: "manual" },
-            })
-          }
-        />
-      </Field>
+      <div className="text-xs font-semibold uppercase tracking-[0.22em] text-white/70">
+        Goal settings
+      </div>
 
-      <div>
+      {!hasItems && (
+        <Field label={`Monthly ${label.toLowerCase()} target ($)`}>
+          <NumberField
+            value={data.target.value}
+            onChange={(v) =>
+              updateData({ target: { value: v, source: "manual" } })
+            }
+          />
+        </Field>
+      )}
+
+      <div className="space-y-2">
+        <div className="text-[11px] uppercase tracking-[0.2em] text-white/55">
+          {hasItems ? "Items — bar totals their goals" : "Or split into items"}
+        </div>
+        {items.map((it) => (
+          <motion.div
+            key={it.id}
+            layout
+            className="space-y-2 rounded-xl p-2.5"
+            style={{
+              background: "rgba(255,255,255,0.03)",
+              border: "1px solid rgba(255,255,255,0.08)",
+            }}
+          >
+            <div className="flex gap-2">
+              <GlassInput
+                placeholder="Item name (e.g., Power)"
+                value={it.name}
+                onChange={(e) => patchItem(it.id, { name: e.target.value })}
+              />
+              <button
+                type="button"
+                onClick={() => removeItem(it.id)}
+                className="rounded-full px-2 text-xs text-red-300 hover:bg-red-500/10"
+              >
+                ×
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Target $">
+                <NumberField
+                  value={it.target.value}
+                  onChange={(v) =>
+                    patchItem(it.id, { target: { value: v, source: "manual" } })
+                  }
+                />
+              </Field>
+              <Field label="Saved $">
+                <NumberField
+                  value={it.funded?.value ?? 0}
+                  onChange={(v) =>
+                    patchItem(it.id, { funded: { value: v, source: "manual" } })
+                  }
+                />
+              </Field>
+            </div>
+          </motion.div>
+        ))}
         <button
           type="button"
-          onClick={() => setShowEdit((v) => !v)}
-          className="flex w-full items-center justify-between text-left text-xs uppercase tracking-[0.2em] text-white/55 hover:text-white/80"
+          onClick={addItem}
+          className="w-full rounded-xl border border-dashed border-white/15 py-2 text-xs text-white/65 hover:bg-white/5"
         >
-          <span>{targetSet ? `Edit goal — $${data.target.value.toLocaleString()}/mo` : "Set monthly goal"}</span>
-          <span className="text-base">{showEdit ? "−" : "+"}</span>
+          + Add item
         </button>
-        <AnimatePresence initial={false}>
-          {showEdit && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.25, ease: "easeOut" }}
-              className="overflow-hidden"
-            >
-              <div className="space-y-3 pt-3">
-                <Field label={`Monthly ${label.toLowerCase()} target ($)`}>
-                  <NumberField
-                    value={data.target.value}
-                    onChange={(v) =>
-                      useStore.getState().setNodeData(nodeId, {
-                        target: { value: v, source: "manual" },
-                        funded: data.funded,
-                      })
-                    }
-                  />
-                </Field>
-
-                {ynabConnected && (
-                  <div
-                    className="space-y-2 rounded-xl px-3 py-2.5"
-                    style={{
-                      background: "rgba(255,255,255,0.03)",
-                      border: "1px solid rgba(255,255,255,0.08)",
-                    }}
-                  >
-                    <Field label="YNAB category">
-                      <GlassSelect
-                        value={mappedCategoryId ?? ""}
-                        onChange={(e) => onCategorySelect(e.target.value)}
-                      >
-                        <option value="">— Not linked —</option>
-                        {groups.map((g) => (
-                          <optgroup key={g.id} label={g.name}>
-                            {g.categories.map((c) => (
-                              <option key={c.id} value={c.id}>
-                                {c.name}
-                              </option>
-                            ))}
-                          </optgroup>
-                        ))}
-                      </GlassSelect>
-                    </Field>
-                    <div className="flex items-center justify-between gap-2 text-[11px]">
-                      <span className="text-white/45">
-                        {fundedSyncedAt
-                          ? `Last synced ${new Date(fundedSyncedAt).toLocaleString()}`
-                          : mappedCategoryId
-                            ? "Not yet synced."
-                            : "Pick a category to sync."}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={refresh}
-                        disabled={!mappedCategoryId || refreshing}
-                        className="rounded-full px-3 py-1 text-[11px] font-medium transition-opacity disabled:opacity-40"
-                        style={{
-                          background: "rgba(96, 165, 250, 0.16)",
-                          border: "1px solid rgba(96, 165, 250, 0.45)",
-                          color: "#dbeafe",
-                        }}
-                      >
-                        {refreshing ? "Syncing…" : "Refresh from YNAB"}
-                      </button>
-                    </div>
-                    {refreshError && (
-                      <div className="text-[11px]" style={{ color: "#fecaca" }}>
-                        {refreshError}
-                      </div>
-                    )}
-                    <p className="text-[10px] text-white/35">
-                      Pulls the assigned (budgeted) amount for this category in the
-                      current month, plus the goal target if one is set.
-                    </p>
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
       </div>
+
+      {ynabConnected && (
+        <div
+          className="space-y-2 rounded-xl px-3 py-2.5"
+          style={{
+            background: "rgba(255,255,255,0.03)",
+            border: "1px solid rgba(255,255,255,0.08)",
+          }}
+        >
+          <Field label="YNAB category">
+            <GlassSelect
+              value={mappedCategoryId ?? ""}
+              onChange={(e) =>
+                useStore.getState().setCategoryMap(nodeId, e.target.value || null)
+              }
+            >
+              <option value="">— Not linked —</option>
+              {groups.map((g) => (
+                <optgroup key={g.id} label={g.name}>
+                  {g.categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </GlassSelect>
+          </Field>
+          <div className="flex items-center justify-between gap-2 text-[11px]">
+            <span className="text-white/45">
+              {fundedSyncedAt
+                ? `Last synced ${new Date(fundedSyncedAt).toLocaleString()}`
+                : mappedCategoryId
+                  ? "Not yet synced."
+                  : "Pick a category to sync."}
+            </span>
+            <button
+              type="button"
+              onClick={refresh}
+              disabled={!mappedCategoryId || refreshing}
+              className="rounded-full px-3 py-1 text-[11px] font-medium transition-opacity disabled:opacity-40"
+              style={{
+                background: "rgba(96, 165, 250, 0.16)",
+                border: "1px solid rgba(96, 165, 250, 0.45)",
+                color: "#dbeafe",
+              }}
+            >
+              {refreshing ? "Syncing…" : "Refresh from YNAB"}
+            </button>
+          </div>
+          {refreshError && (
+            <div className="text-[11px]" style={{ color: "#fecaca" }}>
+              {refreshError}
+            </div>
+          )}
+          <p className="text-[10px] text-white/35">
+            Pulls the current-month assigned amount, plus the goal target if set.
+            Single-mode only — items are managed locally.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
+
+const RECURRING_LABEL: Record<RecurringNodeId, string> = {
+  Rent: "Rent / mortgage",
+  Food: "Groceries",
+  Essential: "Utilities & essentials",
+  Income: "Transportation, internet, phone",
+  Health: "Insurance & health care",
+  MinDebt: "Total minimum payments",
+  NonEssential: "Non-essential subscriptions",
+};
+
+export const MENU_BY_NODE: Partial<Record<NodeId, () => JSX.Element>> = {
+  Rent: () => <RecurringGoalMenu nodeId="Rent" label={RECURRING_LABEL.Rent} />,
+  Food: () => <RecurringGoalMenu nodeId="Food" label={RECURRING_LABEL.Food} />,
+  Essential: () => <RecurringGoalMenu nodeId="Essential" label={RECURRING_LABEL.Essential} />,
+  Income: () => <RecurringGoalMenu nodeId="Income" label={RECURRING_LABEL.Income} />,
+  Health: () => <RecurringGoalMenu nodeId="Health" label={RECURRING_LABEL.Health} />,
+  MinDebt: () => <RecurringGoalMenu nodeId="MinDebt" label={RECURRING_LABEL.MinDebt} />,
+  NonEssential: () => <RecurringGoalMenu nodeId="NonEssential" label={RECURRING_LABEL.NonEssential} />,
+};
