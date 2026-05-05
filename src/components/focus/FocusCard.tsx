@@ -14,9 +14,10 @@ import { GoalBar } from "../glass/GoalBar";
 import { GlassTextarea } from "../glass/GlassInput";
 import { progressOf } from "./progressOf";
 import { FORM_BY_NODE, MENU_BY_NODE } from "./forms";
-import { StreakBadge } from "./StreakBadge";
+import { StreakChip } from "./StreakBadge";
 import { advance, findCurrentNode } from "./advance";
 import { KebabMenu } from "../glass/KebabMenu";
+import { isCheckedThisMonth, ymKey } from "../../state/recurring";
 
 export function FocusCard({ nodeId }: { nodeId: NodeId }) {
   const node = GRAPH_BY_ID[nodeId];
@@ -39,25 +40,42 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
   const isOnPath = status[nodeId] === "current";
   const isFreshCelebration = pendingCelebration === nodeId;
   const fullCelebration = isFreshCelebration && isOnPath;
+
+  const isMarkedDone = recurring
+    ? isCheckedThisMonth(nodeState)
+    : nodeState.completed;
+
   const upNextId = useMemo(() => {
-    if (isOnPath || nodeState.completed) return null;
+    if (isOnPath || isMarkedDone) return null;
     const cur = findCurrentNode();
     return cur === nodeId ? null : cur;
-  }, [nodeId, isOnPath, nodeState.completed]);
+  }, [nodeId, isOnPath, isMarkedDone]);
 
-  const canMarkComplete =
-    !nodeState.completed && (progress.kind !== "goal" || progress.ready);
+  const canMarkComplete = !isMarkedDone && (progress.kind !== "goal" || progress.ready);
+
+  const markRecurringDone = (done: boolean) => {
+    useStore.setState((s) => {
+      const node = s.nodes[nodeId];
+      const checks = { ...(node.monthlyChecks ?? {}) };
+      if (done) checks[ymKey()] = true;
+      else delete checks[ymKey()];
+      return {
+        nodes: { ...s.nodes, [nodeId]: { ...node, monthlyChecks: checks } },
+      };
+    });
+  };
 
   const onMarkComplete = () => {
-    if (canMarkComplete) {
-      useStore.getState().toggleComplete(nodeId);
-      triggerCelebration(nodeId);
-    }
+    if (!canMarkComplete) return;
+    if (recurring) markRecurringDone(true);
+    else useStore.getState().toggleComplete(nodeId);
+    triggerCelebration(nodeId);
     advance(nodeId);
   };
 
-  const onAdvanceOnly = () => {
-    advance(nodeId);
+  const onReopen = () => {
+    if (recurring) markRecurringDone(false);
+    else useStore.getState().toggleComplete(nodeId);
   };
 
   const onDecide = (answer: "yes" | "no") => {
@@ -113,7 +131,7 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
               >
                 {PHASE_LABELS[node.phase].replace(/^Step \d+: /, "")}
               </span>
-              {nodeState.completed && (
+              {isMarkedDone && (
                 <motion.span
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
@@ -125,9 +143,10 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
                     border: "1px solid rgba(52, 211, 153, 0.32)",
                   }}
                 >
-                  Complete
+                  {recurring ? "Done this month" : "Complete"}
                 </motion.span>
               )}
+              {recurring && <StreakChip node={nodeState} glow={phaseColor.glow} />}
             </div>
             {Menu && (
               <KebabMenu ariaLabel="Goal settings">
@@ -197,10 +216,6 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
               />
             )}
 
-            {recurring && (
-              <StreakBadge nodeId={nodeId} tint={phaseColor.tint} glow={phaseColor.glow} />
-            )}
-
             {Form && recurring && (
               <div>
                 <Form />
@@ -266,43 +281,40 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
               </AnimatePresence>
             </div>
 
-            <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:items-center sm:justify-between">
-              {nodeState.completed ? (
-                <GlassButton
-                  variant="secondary"
-                  size="lg"
-                  onClick={() => useStore.getState().toggleComplete(nodeId)}
-                >
-                  Reopen
-                </GlassButton>
-              ) : (
-                <span className="text-xs text-white/45">
-                  {progress.kind === "goal" && !progress.ready
-                    ? `${Math.max(0, Math.round(progress.max - progress.value)).toLocaleString()} to target`
-                    : recurring
-                      ? "Recurring — keep your streak."
-                      : "Mark complete when ready."}
-                </span>
-              )}
+            <div className="flex min-h-[44px] items-center justify-end pt-2">
               <AnimatePresence mode="wait" initial={false}>
-                <motion.div
-                  key={canMarkComplete ? "mark" : "next"}
-                  initial={{ opacity: 0, y: 6, scale: 0.96 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -6, scale: 0.96 }}
-                  transition={{ duration: 0.45, ease: EASE_FLOW }}
-                >
-                  <GlassButton
-                    variant="primary"
-                    size="lg"
-                    tint={canMarkComplete ? phaseColor.tint : "rgba(255,255,255,0.06)"}
-                    glow={buttonGlow}
-                    onClick={canMarkComplete ? onMarkComplete : onAdvanceOnly}
-                    style={{ minWidth: 140 }}
+                {isMarkedDone ? (
+                  <motion.div
+                    key="reopen"
+                    initial={{ opacity: 0, y: 6, scale: 0.96 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -6, scale: 0.96 }}
+                    transition={{ duration: 0.45, ease: EASE_FLOW }}
                   >
-                    {canMarkComplete ? "Mark complete" : "Next step →"}
-                  </GlassButton>
-                </motion.div>
+                    <GlassButton variant="secondary" size="lg" onClick={onReopen}>
+                      Reopen
+                    </GlassButton>
+                  </motion.div>
+                ) : canMarkComplete ? (
+                  <motion.div
+                    key="mark"
+                    initial={{ opacity: 0, y: 6, scale: 0.96 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -6, scale: 0.96 }}
+                    transition={{ duration: 0.45, ease: EASE_FLOW }}
+                  >
+                    <GlassButton
+                      variant="primary"
+                      size="lg"
+                      tint={phaseColor.tint}
+                      glow={buttonGlow}
+                      onClick={onMarkComplete}
+                      style={{ minWidth: 140 }}
+                    >
+                      Mark complete
+                    </GlassButton>
+                  </motion.div>
+                ) : null}
               </AnimatePresence>
             </div>
 
