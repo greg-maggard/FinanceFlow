@@ -5,7 +5,6 @@ import { useStore } from "../state/store";
 import { GRAPH_BY_ID } from "../graph/flowchart";
 import { PHASE_COLORS } from "../theme/phaseColors";
 import { MEDALS } from "../theme/identity";
-import { deriveStatus } from "../graph/derive";
 import { EASE_FLOW, M } from "../theme/motion";
 
 export function CelebrationLayer() {
@@ -22,16 +21,11 @@ export function CelebrationLayer() {
   }, [pendingCelebration, clearCelebration]);
 
   const phaseColor = useMemo(() => {
-    if (pendingCelebration) return PHASE_COLORS[GRAPH_BY_ID[pendingCelebration].phase];
+    if (pendingCelebration) return PHASE_COLORS[GRAPH_BY_ID[pendingCelebration.id].phase];
     return null;
   }, [pendingCelebration]);
 
-  // Determine if the celebration is on-path or muted (out-of-order)
-  const isOnPath = useMemo(() => {
-    if (!pendingCelebration) return false;
-    const status = deriveStatus(state);
-    return status[pendingCelebration] === "current" || state.nodes[pendingCelebration].completed;
-  }, [pendingCelebration, state]);
+  const isOnPath = pendingCelebration?.onPath ?? false;
 
   return (
     <>
@@ -39,7 +33,7 @@ export function CelebrationLayer() {
       <AnimatePresence>
         {pendingCelebration && phaseColor && isOnPath && (
           <motion.div
-            key={`bloom-${pendingCelebration}-${state.nodes[pendingCelebration].completedAt ?? ""}`}
+            key={`bloom-${pendingCelebration.id}-${state.nodes[pendingCelebration.id].completedAt ?? ""}`}
             aria-hidden
             className="pointer-events-none fixed inset-0 z-10"
             initial={{ opacity: 0 }}

@@ -51,8 +51,9 @@ export function OverviewSheet() {
 
   const toggle = (id: NodeId) => {
     const wasComplete = state.nodes[id].completed;
+    const wasOnPath = status[id] === "current";
     useStore.getState().toggleComplete(id);
-    if (!wasComplete) triggerCelebration(id);
+    if (!wasComplete) triggerCelebration(id, wasOnPath);
   };
 
   return (
