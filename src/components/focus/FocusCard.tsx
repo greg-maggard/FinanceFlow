@@ -38,8 +38,8 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
 
   const status = useMemo(() => deriveStatus(state), [state]);
   const isOnPath = status[nodeId] === "current";
-  const isFreshCelebration = pendingCelebration === nodeId;
-  const fullCelebration = isFreshCelebration && isOnPath;
+  const isFreshCelebration = pendingCelebration?.id === nodeId;
+  const fullCelebration = isFreshCelebration && (pendingCelebration?.onPath ?? false);
 
   const isMarkedDone = recurring
     ? isCheckedThisMonth(nodeState)
@@ -67,9 +67,10 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
 
   const onMarkComplete = () => {
     if (!canMarkComplete) return;
+    const wasOnPath = isOnPath;
     if (recurring) markRecurringDone(true);
     else useStore.getState().toggleComplete(nodeId);
-    triggerCelebration(nodeId);
+    triggerCelebration(nodeId, wasOnPath);
     advance(nodeId);
   };
 
@@ -80,8 +81,9 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
 
   const onDecide = (answer: "yes" | "no") => {
     if (node.decisionId) {
+      const wasOnPath = isOnPath;
       useStore.getState().setDecision(node.decisionId, answer);
-      triggerCelebration(nodeId);
+      triggerCelebration(nodeId, wasOnPath);
       advance(nodeId);
     }
   };
