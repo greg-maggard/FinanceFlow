@@ -1,0 +1,120 @@
+{
+  "$schema_note": "Retro extract from FinanceFlow Claude Code transcripts (198 .jsonl files, 17 logical sessions, 2025-04-29 → 2025-05-11, deduped to 34 unique user turns). Quality-curated; not exhaustive. Load each item via its target service.",
+  "extraction": {
+    "timestamp": "2026-05-11T06:50:00Z",
+    "transcripts_dir": "~/.claude/projects/-home-user-FinanceFlow/",
+    "transcripts_total": 198,
+    "unique_user_turns": 34,
+    "date_range": ["2026-04-29", "2026-05-11"]
+  },
+
+  "mem0": [
+    {
+      "id": "user-identity-platform",
+      "text": "Greg Maggard (GitHub: greg-maggard) works on macOS. Local dev workspace lives at /Users/gregmaggard/projects/.",
+      "categories": ["identity", "environment"],
+      "rationale": "Durable identity + platform fact. Useful for path defaults, OS-specific guidance."
+    },
+    {
+      "id": "sandbox-self-provisioned",
+      "text": "Greg provisions his own Claude Code Web sandbox and controls its MCP manifest configuration.",
+      "categories": ["environment", "infra"],
+      "rationale": "Explains why MCP-related questions should be directed at him rather than 'contact Anthropic'."
+    },
+    {
+      "id": "mcp-propagation-gap-may2026",
+      "text": "As of May 2026, Mem0 and Supermemory MCP Connectors added on claude.ai do NOT propagate to Greg's Claude Code Web sandbox manifest. The sandbox's host-managed MCP config (/tmp/mcp-config-cse_*.json) only carries Google Workspace (Gmail, Drive, Calendar) + GitHub. Workaround: write atoms to portable files (e.g., repo) and load later via API or future sessions.",
+      "categories": ["infra", "blocker", "status"],
+      "rationale": "Known blocker that affects all retro/memory work in the sandbox until resolved."
+    },
+    {
+      "id": "working-style-claude-leads-dev",
+      "text": "Greg prefers Claude to drive most of the dev work in sessions. He pulls changes locally on his Mac when needed. Workflow assumes Claude pushes; he pulls.",
+      "categories": ["working-style", "preference"],
+      "rationale": "Sets expectation that Claude should be proactive and execute, not just advise."
+    },
+    {
+      "id": "memory-protocol-adopted",
+      "text": "Greg adopted a four-layer memory protocol in May 2026: Hot = SESSION-STATE.md (project root, survives compaction); Warm = memory/YYYY-MM-DD.md (project root, chronological); Durable facts = Mem0 (cross-surface); Durable long-form = Supermemory (cross-surface). Writes happen BEFORE responding (write-ahead log).",
+      "categories": ["preference", "protocol"],
+      "rationale": "Defines how memory should be handled across all Greg's projects. Canonical reference is in his ~/.claude/CLAUDE.md."
+    },
+    {
+      "id": "design-aesthetic-liquid-glass",
+      "text": "Greg's UI design taste: iOS 26 / visionOS liquid-glass aesthetic — real backdrop-blur, translucent layered cards, phase-tinted ambient gradients, specular highlights. Explicitly NOT generic 'glassmorphism' or flat frosted-white overlays.",
+      "categories": ["design", "preference"],
+      "rationale": "Repeatedly reinforced design taste; applies beyond FinanceFlow to future UI projects."
+    },
+    {
+      "id": "animation-preference-slow-flow",
+      "text": "Greg's animation preference: slow, smooth, flowing. Explicitly dislikes 'snappy', 'jerky', 'stuttery', 'fast', 'flashing' motion. Multiple iterations consistently went toward longer durations, softer springs, and direction-aware morphs.",
+      "categories": ["design", "preference"],
+      "rationale": "Strong pattern across many turns. Defaults for any motion design work should lean slow/smooth."
+    },
+    {
+      "id": "engagement-design-psychology",
+      "text": "Greg favors engagement design rooted in behavioral psychology — goal-gradient effect, identity formation, endowed progress, positive-only streaks, peak-end-rule celebrations. Explicitly rejects 'gimmicky' or 'cheap-feeling' rewards (no emojis as core UI, no confetti, no fireworks, no arcade-style fanfare). Rewards should feel restrained and earned.",
+      "categories": ["design", "preference", "philosophy"],
+      "rationale": "Foundational design philosophy. Applies to any product targeting user behavior change."
+    },
+    {
+      "id": "ux-philosophy-minimal-taps",
+      "text": "UX philosophy Greg holds: touch-centered, intuitive navigation; minimize taps to accomplish anything; single contextual action visible at a time on a card. Hide actions until they're relevant (e.g., 'Mark complete' only appears when the goal is met).",
+      "categories": ["design", "preference"],
+      "rationale": "Drives many specific UI decisions; defaults to contextual / progressive disclosure."
+    },
+    {
+      "id": "communication-style-iterative",
+      "text": "Greg's communication style: direct, iterative refinement. Per turn, he typically lists 3–5 numbered bullets of feedback — what's wrong, what to keep, what to change. Expects responses that acknowledge each point and propose a concrete fix before coding.",
+      "categories": ["communication", "preference"],
+      "rationale": "Shaping Claude's response format: structured replies that map 1:1 to his bullets."
+    },
+    {
+      "id": "git-workflow-feature-branches",
+      "text": "Greg's git workflow on personal projects: develops on dev/feature branches off main; merges via PR; comfortable force-replacing main with dev if conflicts arise ('previous work on main no longer needed' was an actual statement). Standard merge commit preserves commit history; squash is not the default.",
+      "categories": ["workflow", "preference"],
+      "rationale": "Defaults for branch handling and merge strategy."
+    },
+    {
+      "id": "financeflow-project-summary",
+      "text": "FinanceFlow project: web app that tracks user progress through the r/PersonalFinance 'prime directive' flowchart. Repo: greg-maggard/FinanceFlow. Stack: Vite + React + TypeScript, Tailwind, Framer Motion, Zustand. MVP shipped May 2026 via PR #1 (merged commit 0a01d48 on main).",
+      "categories": ["project", "status"],
+      "rationale": "Foundational project context for future FinanceFlow-related conversations."
+    },
+    {
+      "id": "financeflow-saved-not-spent-reframe",
+      "text": "FinanceFlow conceptual reframe: progress bars fill as the user FUNDS / SAVES toward category goals (not as they spend). The product gamifies covering expenses through savings, not constraining spending. This is the philosophical heart of the app's behavior model.",
+      "categories": ["project", "design", "philosophy"],
+      "rationale": "Core product decision that should never be reverted; differentiates from typical budgeting apps."
+    },
+    {
+      "id": "financeflow-ynab-integration",
+      "text": "FinanceFlow integrates YNAB via Personal Access Token (PAT) entered in Settings. Per-recurring-category mapping (Rent → YNAB category). Manual 'Refresh from YNAB' pulls current-month 'Budgeted' amount as 'funded' and 'goal_target' as 'target'. PAT stored in a separate persisted Zustand store (ynabStore.ts), explicitly NOT in main AppState — so JSON export/import never includes the token.",
+      "categories": ["project", "integration"],
+      "rationale": "Architectural decision worth remembering: PAT segregation from exportable state."
+    },
+    {
+      "id": "financeflow-card-state-machine",
+      "text": "FinanceFlow card action-area rules: (1) No Mark Complete or Next Step button visible until goal bar is 100%. (2) Only ONE completion-related button visible at a time (single contextual slot, fade between states). (3) Recurring tasks (Rent, Food, etc.) use monthly completion via Mark Complete — sets monthlyChecks[currentMonth], NOT the permanent completed flag. (4) Streak count shown as a small non-interactive chip in the header (no fire emoji, just '3 mos').",
+      "categories": ["project", "design"],
+      "rationale": "Hard-won UI rules from many iterations; reverting any of them would re-introduce flagged problems."
+    }
+  ],
+
+  "supermemory": [
+    {
+      "id": "financeflow-source-flowchart",
+      "title": "r/PersonalFinance Prime Directive Flowchart (Mermaid spec)",
+      "description": "Foundational design document for FinanceFlow. The full Mermaid flowchart with all 7 phases, node IDs, edge conditions, decision branches, and phase color coding. This is the canonical spec the codebase implements.",
+      "source_turn_ts": "2026-04-29T09:31:28.183Z",
+      "content": "flowchart TD\n    %% ===== Step 0: Budget & essentials =====\n    Start([\"Create Budget\"])\n    Rent[\"Pay Rent/Mortgage<br/><i>incl. renters or homeowners insurance</i>\"]\n    Food[\"Buy Food/Groceries\"]\n    Essential[\"Pay Essential Items<br/><i>power, water, heat, toiletries</i>\"]\n    Income[\"Pay Income-Earning Expenses<br/><i>transportation, internet, phone</i>\"]\n    Health[\"Pay Health Care<br/><i>insurance and medical expenses</i>\"]\n    MinDebt[\"Make Minimum Payments<br/>on All Debts and Loans\"]\n\n    %% ===== Step 1: Emergency fund =====\n    SmallEF[\"Build Small Emergency Fund<br/><i>$1,000 or 1 month expenses,<br/>whichever is greater</i>\"]\n    NonEssential[\"Pay Non-Essential Bills in Full<br/><i>cable, internet, phone, etc.</i>\"]\n    BigEF[\"Grow Emergency Fund to<br/>3 to 6 Months Living Expenses\"]\n\n    %% ===== Step 2: Employer match =====\n    Q_Match{\"Employer offers<br/>retirement match?\"}\n    Match[\"Contribute just enough to get<br/>the full employer match\"]\n\n    %% ===== Step 3: Debt payoff =====\n    Q_HighDebt{\"High-interest debt?<br/><i>10%+ APR</i>\"}\n    HighDebt[\"Use Avalanche or Snowball<br/>method to pay off\"]\n    Q_ModDebt{\"Moderate-interest debt?<br/><i>4-5%+, excluding mortgage</i>\"}\n    ModDebt[\"Use Avalanche or Snowball<br/>method to pay off\"]\n\n    %% ===== Step 4: IRA & near-term goals =====\n    IRA[\"Evaluate Roth vs Traditional IRA<br/>and max yearly contributions\"]\n    Q_Purchase{\"Large required purchases<br/>coming up?<br/><i>college, car, certifications</i>\"}\n    SavePurchase[\"Save the amount needed in a<br/>savings or checking account\"]\n\n    %% ===== Step 5: More retirement =====\n    Q_15pct{\"Saving at least 15%<br/>of pre-tax income<br/>for retirement?\"}\n    Q_401k{\"Employer offers 401k,<br/>403b, or similar?\"}\n    Increase401k[\"Increase contributions<br/>until 15% pre-tax saved\"]\n    SelfEmp[\"If self-employed: Individual 401k,<br/>SEP-IRA, or SIMPLE IRA.<br/>Otherwise: taxable account\"]\n\n    %% ===== Step 6: Advanced goals =====\n    Q_HSA{\"HDHP? Eligible<br/>for an investable HSA?\"}\n    HSA[\"Max yearly HSA contributions\"]\n    Q_College{\"Kids - want to help<br/>with college costs?\"}\n    College[\"Evaluate 529 plan and<br/>contribute accordingly\"]\n    Options[\"You have options now -<br/>up to your personal goals\"]\n    Q_Early{\"Retire early?\"}\n    Early[\"Max 401k/403b, consider<br/>mega backdoor Roth IRA,<br/>then a taxable account\"]\n    Q_Goals{\"More immediate goals?\"}\n    Goals[\"Savings for goals under 3 years;<br/>conservative stock/bond mix<br/>for 3-5 year goals<br/><i>down payment, vehicle, vacation</i>\"]\n\n    %% ===== Edges =====\n    Start --> Rent --> Food --> Essential --> Income --> Health --> MinDebt --> SmallEF --> NonEssential\n    NonEssential --> Q_Match\n    Q_Match -->|Yes| Match --> Q_HighDebt\n    Q_Match -->|No| Q_HighDebt\n    Q_HighDebt -->|Yes| HighDebt --> BigEF\n    Q_HighDebt -->|No| BigEF\n    BigEF --> Q_ModDebt\n    Q_ModDebt -->|Yes| ModDebt --> IRA\n    Q_ModDebt -->|No| IRA\n    IRA --> Q_Purchase\n    Q_Purchase -->|Yes| SavePurchase --> Q_15pct\n    Q_Purchase -->|No| Q_15pct\n    Q_15pct -->|No| Q_401k\n    Q_401k -->|Yes| Increase401k --> Q_15pct\n    Q_401k -->|No| SelfEmp --> Q_15pct\n    Q_15pct -->|Yes| Q_HSA\n    Q_HSA -->|Yes| HSA --> Q_College\n    Q_HSA -->|No| Q_College\n    Q_College -->|Yes| College --> Options\n    Q_College -->|No| Options\n    Options --> Q_Early\n    Options --> Q_Goals\n    Q_Early -->|Yes| Early\n    Q_Goals -->|Yes| Goals\n\n    %% ===== Phase color coding =====\n    classDef step0 fill:#e8eaed,stroke:#5f6368,stroke-width:2px,color:#000\n    classDef step1 fill:#fde0e0,stroke:#d93025,stroke-width:2px,color:#000\n    classDef step2 fill:#fef3c7,stroke:#f59e0b,stroke-width:2px,color:#000\n    classDef step3 fill:#d4edda,stroke:#28a745,stroke-width:2px,color:#000\n    classDef step4 fill:#d6ecff,stroke:#5dade2,stroke-width:2px,color:#000\n    classDef step5 fill:#b8d8f0,stroke:#1f618d,stroke-width:2px,color:#000\n    classDef step6 fill:#e8d5f0,stroke:#7d3c98,stroke-width:2px,color:#000\n\n    class Start,Rent,Food,Essential,Income,Health,MinDebt step0\n    class SmallEF,NonEssential,BigEF step1\n    class Q_Match,Match step2\n    class Q_HighDebt,HighDebt,Q_ModDebt,ModDebt step3\n    class IRA,Q_Purchase,SavePurchase step4\n    class Q_15pct,Q_401k,Increase401k,SelfEmp step5\n    class Q_HSA,HSA,Q_College,College,Options,Q_Early,Early,Q_Goals,Goals step6"
+    },
+    {
+      "id": "global-memory-protocol",
+      "title": "Greg's Global Memory Protocol (CLAUDE.md content)",
+      "description": "Canonical Memory Architecture document Greg established in May 2026. Describes the four-layer memory system (hot SESSION-STATE.md, warm memory/YYYY-MM-DD.md, durable facts Mem0, durable long-form Supermemory), the write-ahead log protocol, cross-surface routing rules, and session-end promotion path. Originally pasted into the FinanceFlow sandbox as a one-time setup prompt.",
+      "source_turn_ts": "2026-05-11T06:19:49.863Z",
+      "content": "# Global Instructions\n\n## Memory Architecture\n\nFour layers, each with a distinct job:\n\n| Layer | Storage | Scope | Job |\n|---|---|---|---|\n| **Hot** | `SESSION-STATE.md` (project root) | Current Claude Code session | Survive context compaction |\n| **Warm** | `memory/YYYY-MM-DD.md` (project root) | Project, chronological | Local audit trail of activity |\n| **Durable facts** | **Mem0** (via MCP) | Cross-surface (Claude Code, claude.ai, Cowork) | Preferences, decisions, status |\n| **Durable long-form** | **Supermemory** (via MCP) | Cross-surface | Articles, PDFs, notes, reference material |\n\nHot + Warm are local files, Claude Code only. Mem0 + Supermemory are cloud-backed and reachable from every Claude surface (when configured as Connectors on claude.ai).\n\n---\n\n## Write-Ahead Log (WAL) Protocol — Hot/Warm Layers\n\nApply in every project. Writes happen *before* responding, not after — this is what makes them survive compaction.\n\n### On session start\n1. If `SESSION-STATE.md` exists in the project root, read it first.\n2. If today's `memory/YYYY-MM-DD.md` exists, skim it.\n3. If neither exists, proceed — they'll be created when warranted. Do not ask permission, just create.\n\n### Write to `SESSION-STATE.md` BEFORE responding when:\n- The user states a concrete decision, preference, or correction.\n- A task is started, paused, or completed.\n- A blocker or open question surfaces.\n- An architectural choice is made.\n\nUse Edit. Keep entries terse (bullets, not prose). Update the `_Last updated:_` timestamp.\n\n### On significant milestones\n- Append a one-line entry to `memory/YYYY-MM-DD.md` (create file/dir if missing).\n\n### Hygiene\n- When an \"Active Task\" completes, move the entry into the day's `memory/YYYY-MM-DD.md` and clear the slot.\n- Weekly: prune resolved entries from \"Recent Decisions\" and \"Open Questions\".\n\n### What does NOT belong in SESSION-STATE.md or daily logs\n- Code patterns, architecture, file paths — already in code + auto-memory.\n- Long narrative — keep it scannable.\n- Anything `git log` already captures.\n\n---\n\n## Cross-Surface Memory Routing — Durable Layers\n\nThe local WAL layer covers *this session, this project*. Mem0 and Supermemory cover *every Claude, every surface, forever*. Route deliberately.\n\n### Mem0 — preferences, decisions, facts\n\nSave to Mem0 when something is:\n- A durable fact about the user (role, goals, constraints, identity)\n- A preference or working style\n- A decision or rule\n- A status update that may change over time\n- Feedback or correction Claude should remember\n\nRule of thumb: **if it fits on one line and could be relevant in a future conversation on any topic → Mem0.**\n\nSearch Mem0 on every meaningful turn — it's atomic and token-cheap.\n\n### Supermemory — long-form content\n\nSave to Supermemory when something is:\n- An article, PDF, or document worth preserving verbatim\n- A long-form note, journal entry, or planning doc\n- A research write-up, methodology, or reference material\n- A great conversation worth keeping in full\n\nRule of thumb: **if it's multi-paragraph content you want preserved with source intact → Supermemory.**\n\nSearch Supermemory only when the conversation references stored material, or the user asks Claude to consult \"your notes\" / \"what we saved about X\". Don't search by default — chunks are large and noisy.\n\n### Collision rule\n\nWhen something could go either way, ask: *do I want Claude to recall the fact, or the source?*\n- Fact about what I'm doing → Mem0\n- The source document itself → Supermemory\n\nBoth layers can hold related entries — Mem0 the summary fact, Supermemory the source document.\n\n---\n\n## Session-End Promotion Path\n\nWhen closing out a session or hitting a meaningful milestone:\n\n1. **Local archive**: Append the day's events to `memory/YYYY-MM-DD.md`.\n2. **Durable fact?** → Save to Mem0.\n3. **Long-form content produced or referenced?** → Save to Supermemory.\n4. **`SESSION-STATE.md`**: Keep only what's still active. Move resolved items to the daily log.\n\nDo not duplicate aggressively. A decision saved to Mem0 doesn't need to be restated in `SESSION-STATE.md`.\n\n---\n\n## Memory Discipline\n\n- **Don't save what code or `git log` already tells you.**\n- **Don't save ephemeral state to durable layers.**\n- **Update beats append.** When a fact changes, update the existing memory.\n- **Verify before citing.** Memories are point-in-time — confirm before acting on a recalled fact."
+    }
+  ]
+}
