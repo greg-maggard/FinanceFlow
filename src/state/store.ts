@@ -84,6 +84,9 @@ if (typeof window !== "undefined") {
       settings: s.settings,
       decisions: s.decisions,
       nodes: s.nodes,
+      shownCelebrations: s.shownCelebrations,
+      earnedMedals: s.earnedMedals,
+      categoryMap: s.categoryMap,
     };
     void adapter.save(snapshot);
   });
