@@ -6,3 +6,11 @@ dist-ssr
 .vite
 coverage
 *.tsbuildinfo
+
+# Xcode / SwiftPM (iOS app)
+ios/FinanceFlow.xcodeproj/
+ios/**/.build/
+ios/**/xcuserdata/
+ios/**/*.xcworkspace/xcuserdata/
+ios/DerivedData/
+.swiftpm/
