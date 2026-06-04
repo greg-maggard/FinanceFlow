@@ -26,7 +26,7 @@ struct GraphScreen: View {
                         node: node,
                         status: status[node.id] ?? .upcoming,
                         completed: store.state.node(node.id).completed,
-                        answer: node.kind == .decision ? store.state.decisions[node.decisionId!] : nil,
+                        answer: node.decisionId.flatMap { store.state.decisions[$0] },
                         onTap: { onSelect(node.id) }
                     )
                     .position(GraphLayout.position(node.id))

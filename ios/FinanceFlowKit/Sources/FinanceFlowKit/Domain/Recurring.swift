@@ -23,21 +23,24 @@ public enum Recurring {
     }
 
     /// Consecutive months checked in, counting back from this month (or last).
-    /// Mirrors `streakLength`.
-    public static func streakLength(_ node: NodeState, calendar: Calendar = .current) -> Int {
+    /// `now` is injectable for deterministic tests. Mirrors `streakLength`.
+    public static func streakLength(_ node: NodeState, now: Date = Date(), calendar: Calendar = .current) -> Int {
         let checks = node.monthlyChecks
-        var cur = ymKey(Date(), calendar: calendar)
+        var cur = ymKey(now, calendar: calendar)
         if checks[cur] != true { cur = priorYm(cur, calendar: calendar) }
         var n = 0
-        while checks[cur] == true {
+        // Defensive cap: a contiguous run longer than a century is pathological
+        // data, not a real streak — stop rather than walk back unboundedly.
+        while checks[cur] == true && n < 1200 {
             n += 1
             cur = priorYm(cur, calendar: calendar)
         }
         return n
     }
 
-    /// Whether this month is checked in. Mirrors `isCheckedThisMonth`.
-    public static func isCheckedThisMonth(_ node: NodeState, calendar: Calendar = .current) -> Bool {
-        node.monthlyChecks[ymKey(Date(), calendar: calendar)] == true
+    /// Whether this month is checked in. `now` is injectable for deterministic
+    /// tests. Mirrors `isCheckedThisMonth`.
+    public static func isCheckedThisMonth(_ node: NodeState, now: Date = Date(), calendar: Calendar = .current) -> Bool {
+        node.monthlyChecks[ymKey(now, calendar: calendar)] == true
     }
 }

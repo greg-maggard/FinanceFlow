@@ -44,7 +44,7 @@ struct EdgeLayer: View {
 
         // A decision branch that was answered the other way is "not taken".
         var notTaken = false
-        if node.kind == .decision, let when = edge.when, let answer = state.decisions[node.decisionId!] {
+        if node.kind == .decision, let decisionId = node.decisionId, let when = edge.when, let answer = state.decisions[decisionId] {
             notTaken = when != answer
         }
 

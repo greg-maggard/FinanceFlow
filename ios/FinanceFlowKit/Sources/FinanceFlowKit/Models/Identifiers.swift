@@ -29,6 +29,14 @@ public enum Source: String, Codable, Sendable, Hashable {
     case manual
     case plaid
     case ynab
+
+    /// Forward-compatible decode: an unrecognized source (e.g. a provider added in
+    /// a newer build) falls back to `.manual` instead of throwing and failing the
+    /// entire document load.
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = Source(rawValue: raw) ?? .manual
+    }
 }
 
 /// Every node in the prime-directive flowchart. 22 tasks + 10 decisions.

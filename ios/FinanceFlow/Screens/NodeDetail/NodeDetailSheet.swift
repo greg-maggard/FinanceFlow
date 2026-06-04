@@ -70,14 +70,14 @@ struct NodeDetailSheet: View {
     // MARK: - Decision
 
     private func decisionControl(node: GraphNode, phase: PhaseColor) -> some View {
-        let id = node.decisionId!
-        let current = store.state.decisions[id]
+        let id = node.decisionId
+        let current = id.flatMap { store.state.decisions[$0] }
         return VStack(alignment: .leading, spacing: theme.spacing.md) {
             FieldLabel(text: "Your answer")
             HStack(spacing: theme.spacing.md) {
                 ForEach(Decision.allCases, id: \.self) { option in
                     Button {
-                        store.setDecision(id, current == option ? nil : option)
+                        if let id { store.setDecision(id, current == option ? nil : option) }
                     } label: {
                         Text(option.rawValue.capitalized)
                             .font(theme.typography.callout)

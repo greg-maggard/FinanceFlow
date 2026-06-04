@@ -63,7 +63,7 @@ struct PhaseTrailScreen: View {
                                 .font(theme.typography.callout)
                                 .foregroundStyle(s.text)
                                 .multilineTextAlignment(.leading)
-                            if node.kind == .decision, let answer = store.state.decisions[node.decisionId!] {
+                            if node.kind == .decision, let decisionId = node.decisionId, let answer = store.state.decisions[decisionId] {
                                 Text("Answered: \(answer.rawValue)")
                                     .font(theme.typography.caption)
                                     .foregroundStyle(theme.colors.textSecondary)

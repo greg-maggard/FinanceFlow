@@ -8,7 +8,7 @@ check-ins, and JSON export/import — with all data stored **on-device**.
 ## Requirements
 
 - Xcode 16+ (iOS 17 SDK)
-- [XcodeGen](https://github.com/yonyz/XcodeGen) — `brew install xcodegen`
+- [XcodeGen](https://github.com/yonaskolb/XcodeGen) — `brew install xcodegen`
 
 ## Generate & run
 

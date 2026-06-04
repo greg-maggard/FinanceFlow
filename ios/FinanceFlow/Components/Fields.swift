@@ -40,6 +40,21 @@ private struct FieldChrome: ViewModifier {
     }
 }
 
+/// Format a numeric value for display in a field ("" for zero, so the prompt shows).
+private func numericFieldDisplay(_ v: Double) -> String { v == 0 ? "" : NumberFormat.string(v) }
+
+/// Parse numeric-field input. Collapses to a single decimal point ("1.2.3" → "1.2")
+/// and returns `nil` for non-empty-but-unparseable input, so the caller can keep the
+/// previous value rather than silently zeroing the field.
+private func parseNumericField(_ s: String) -> Double? {
+    let filtered = s.filter { $0.isNumber || $0 == "." }
+    if filtered.isEmpty { return 0 }                                  // cleared field → 0
+    let parts = filtered.split(separator: ".", omittingEmptySubsequences: false)
+    let normalized = parts.count <= 1 ? filtered : String(parts[0]) + "." + String(parts[1])
+    if normalized == "." { return 0 }
+    return Double(normalized)
+}
+
 /// Currency entry. Mirrors the web's `NumberField`; shows a leading `$`.
 struct NumberField: View {
     @Environment(\.theme) private var theme
@@ -48,16 +63,18 @@ struct NumberField: View {
     var prompt: String = "0"
 
     @State private var text: String = ""
+    @FocusState private var focused: Bool
 
     var body: some View {
         HStack(spacing: theme.spacing.xs) {
             Text("$").foregroundStyle(theme.colors.textTertiary)
             TextField(prompt, text: $text)
                 .keyboardType(.decimalPad)
+                .focused($focused)
                 .foregroundStyle(theme.colors.textPrimary)
                 .onChange(of: text) { _, new in
-                    let parsed = parse(new)
-                    if parsed != value { onChange(parsed) }   // skip the no-op initial set
+                    guard let parsed = parseNumericField(new) else { return }   // unparseable → keep prior value
+                    if parsed != value { onChange(parsed) }
                 }
         }
         .font(theme.typography.body)
@@ -65,11 +82,12 @@ struct NumberField: View {
         .padding(.vertical, theme.spacing.sm + 2)
         .background(theme.colors.surface, in: RoundedRectangle(cornerRadius: theme.radii.md, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: theme.radii.md, style: .continuous).strokeBorder(theme.colors.stroke, lineWidth: 1))
-        .onAppear { text = value == 0 ? "" : NumberFormat.string(value) }
-    }
-
-    private func parse(_ s: String) -> Double {
-        Double(s.filter { $0.isNumber || $0 == "." }) ?? 0
+        .onAppear { text = numericFieldDisplay(value) }
+        .onChange(of: value) { _, newValue in
+            // Reflect external changes (e.g. a recomputed limit) without fighting
+            // the user while they're actively editing.
+            if !focused { text = numericFieldDisplay(newValue) }
+        }
     }
 }
 
@@ -80,14 +98,16 @@ struct PercentField: View {
     let onChange: (Double) -> Void
 
     @State private var text: String = ""
+    @FocusState private var focused: Bool
 
     var body: some View {
         HStack(spacing: theme.spacing.xs) {
             TextField("0", text: $text)
                 .keyboardType(.decimalPad)
+                .focused($focused)
                 .foregroundStyle(theme.colors.textPrimary)
                 .onChange(of: text) { _, new in
-                    let parsed = parse(new)
+                    guard let parsed = parse(new) else { return }   // unparseable → keep prior value
                     if parsed != value { onChange(parsed) }
                 }
             Text("%").foregroundStyle(theme.colors.textTertiary)
@@ -97,11 +117,16 @@ struct PercentField: View {
         .padding(.vertical, theme.spacing.sm + 2)
         .background(theme.colors.surface, in: RoundedRectangle(cornerRadius: theme.radii.md, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: theme.radii.md, style: .continuous).strokeBorder(theme.colors.stroke, lineWidth: 1))
-        .onAppear { text = value == 0 ? "" : NumberFormat.string(value) }
+        .onAppear { text = numericFieldDisplay(value) }
+        .onChange(of: value) { _, newValue in
+            if !focused { text = numericFieldDisplay(newValue) }
+        }
     }
 
-    private func parse(_ s: String) -> Double {
-        min(100, Double(s.filter { $0.isNumber || $0 == "." }) ?? 0)
+    /// Clamp to 0–100; nil (keep prior value) for unparseable input.
+    private func parse(_ s: String) -> Double? {
+        guard let v = parseNumericField(s) else { return nil }
+        return min(100, v)
     }
 }
 
