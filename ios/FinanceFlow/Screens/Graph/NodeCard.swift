@@ -13,7 +13,7 @@ struct NodeCard: View {
 
     var body: some View {
         let phase = theme.phaseColor(node.phase)
-        let s = theme.style(for: status, phase: phase)
+        let s = theme.style(for: status, phase: node.phase)
 
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 2) {

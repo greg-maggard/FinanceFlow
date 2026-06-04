@@ -35,9 +35,9 @@ public struct FileStorageAdapter: StorageAdapter {
     }
 }
 
-/// In-memory adapter for previews and tests.
-public final class MemoryStorageAdapter: StorageAdapter, @unchecked Sendable {
-    private let lock = NSLock()
+/// In-memory adapter for previews and tests. `actor` isolation gives us
+/// `Sendable` for free and avoids the `NSLock`-in-async warnings under Swift 6.
+public actor MemoryStorageAdapter: StorageAdapter {
     private var stored: AppState?
     public private(set) var saveCount = 0
 
@@ -46,12 +46,10 @@ public final class MemoryStorageAdapter: StorageAdapter, @unchecked Sendable {
     }
 
     public func load() async throws -> AppState? {
-        lock.lock(); defer { lock.unlock() }
-        return stored
+        stored
     }
 
     public func save(_ state: AppState) async throws {
-        lock.lock(); defer { lock.unlock() }
         stored = state
         saveCount += 1
     }
