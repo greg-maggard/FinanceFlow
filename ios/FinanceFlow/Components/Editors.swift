@@ -20,13 +20,13 @@ struct DebtListEditor: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var theme
     let nodeId: NodeId
-    let aprThreshold: Double
+    let aprThreshold: Int
 
     private var debts: [Debt] { store.state.node(nodeId).data?.debts ?? [] }
 
     var body: some View {
         VStack(alignment: .leading, spacing: theme.spacing.md) {
-            Text("Threshold: \(Int(aprThreshold))%+ APR. Avalanche (highest APR first) or snowball (smallest balance first).")
+            Text("Threshold: \(aprThreshold)%+ APR. Avalanche (highest APR first) or snowball (smallest balance first).")
                 .font(theme.typography.caption)
                 .foregroundStyle(theme.colors.textSecondary)
 
@@ -36,7 +36,7 @@ struct DebtListEditor: View {
 
             GlassButton(title: "Add debt", systemImage: "plus") {
                 var next = debts
-                next.append(Debt(apr: aprThreshold))
+                next.append(Debt(apr: Decimal(aprThreshold)))
                 write(next)
             }
         }

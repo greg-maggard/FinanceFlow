@@ -41,25 +41,28 @@ private struct FieldChrome: ViewModifier {
 }
 
 /// Format a numeric value for display in a field ("" for zero, so the prompt shows).
-private func numericFieldDisplay(_ v: Double) -> String { v == 0 ? "" : NumberFormat.string(v) }
+private func numericFieldDisplay(_ v: Decimal) -> String { v == 0 ? "" : NumberFormat.string(v) }
 
-/// Parse numeric-field input. Collapses to a single decimal point ("1.2.3" → "1.2")
-/// and returns `nil` for non-empty-but-unparseable input, so the caller can keep the
-/// previous value rather than silently zeroing the field.
-private func parseNumericField(_ s: String) -> Double? {
+/// Parse numeric-field input into an exact `Decimal`. Collapses to a single
+/// decimal point ("1.2.3" → "1.2") and returns `nil` for non-empty-but-unparseable
+/// input, so the caller can keep the previous value rather than silently zeroing
+/// the field. Parsing goes straight to `Decimal` (never via `Double`) and pins the
+/// locale to POSIX so a typed "." is always the decimal separator — that keeps
+/// "22.9" exact instead of the 22.8999…986 a `Double` round-trip would introduce.
+private func parseNumericField(_ s: String) -> Decimal? {
     let filtered = s.filter { $0.isNumber || $0 == "." }
     if filtered.isEmpty { return 0 }                                  // cleared field → 0
     let parts = filtered.split(separator: ".", omittingEmptySubsequences: false)
     let normalized = parts.count <= 1 ? filtered : String(parts[0]) + "." + String(parts[1])
     if normalized == "." { return 0 }
-    return Double(normalized)
+    return Decimal(string: normalized, locale: Locale(identifier: "en_US_POSIX"))
 }
 
 /// Currency entry. Mirrors the web's `NumberField`; shows a leading `$`.
 struct NumberField: View {
     @Environment(\.theme) private var theme
-    let value: Double
-    let onChange: (Double) -> Void
+    let value: Decimal
+    let onChange: (Decimal) -> Void
     var prompt: String = "0"
 
     @State private var text: String = ""
@@ -94,8 +97,8 @@ struct NumberField: View {
 /// Percentage entry (0–100), trailing `%`.
 struct PercentField: View {
     @Environment(\.theme) private var theme
-    let value: Double
-    let onChange: (Double) -> Void
+    let value: Decimal
+    let onChange: (Decimal) -> Void
 
     @State private var text: String = ""
     @FocusState private var focused: Bool
@@ -124,7 +127,7 @@ struct PercentField: View {
     }
 
     /// Clamp to 0–100; nil (keep prior value) for unparseable input.
-    private func parse(_ s: String) -> Double? {
+    private func parse(_ s: String) -> Decimal? {
         guard let v = parseNumericField(s) else { return nil }
         return min(100, v)
     }

@@ -1,4 +1,5 @@
 import SwiftUI
+import Foundation
 import FinanceFlowKit
 
 /// A subtle full-bleed gradient tinted by the active phase color.
@@ -177,10 +178,30 @@ enum CurrencyFormat {
     static func string(_ value: Double) -> String {
         value.formatted(.currency(code: "USD").precision(.fractionLength(value.rounded() == value ? 0 : 2)))
     }
+
+    /// Exact `Decimal` amounts (how money is stored): whole values show no cents,
+    /// fractional ones show two — matching the `Double` overload's behavior.
+    static func string(_ value: Decimal) -> String {
+        value.formatted(.currency(code: "USD").precision(.fractionLength(value.isWholeAmount ? 0 : 2)))
+    }
 }
 
 enum NumberFormat {
     static func string(_ value: Double) -> String {
         value.formatted(.number.precision(.fractionLength(0...2)))
+    }
+
+    static func string(_ value: Decimal) -> String {
+        value.formatted(.number.precision(.fractionLength(0...2)))
+    }
+}
+
+private extension Decimal {
+    /// True when there's no fractional part, so currency formatting hides cents.
+    var isWholeAmount: Bool {
+        var original = self
+        var rounded = Decimal()
+        NSDecimalRound(&rounded, &original, 0, .plain)
+        return rounded == self
     }
 }
