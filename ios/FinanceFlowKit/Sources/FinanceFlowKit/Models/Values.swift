@@ -115,6 +115,13 @@ public struct RecurringData: Codable, Equatable, Sendable {
 public enum IRAType: String, Codable, Sendable {
     case roth
     case traditional
+
+    /// Forward-compatible decode: an unrecognized type falls back to `.roth`
+    /// rather than failing the whole document load.
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = IRAType(rawValue: raw) ?? .roth
+    }
 }
 
 /// Payload for the IRA node. Mirrors the `IRA` shape in `NodeDataMap`.
@@ -133,6 +140,13 @@ public struct IRAData: Codable, Equatable, Sendable {
 public enum HSACoverage: String, Codable, Sendable {
     case `self`
     case family
+
+    /// Forward-compatible decode: an unrecognized coverage falls back to `.self`
+    /// rather than failing the whole document load.
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = HSACoverage(rawValue: raw) ?? .`self`
+    }
 }
 
 /// Payload for the HSA node. Mirrors the `HSA` shape in `NodeDataMap`.

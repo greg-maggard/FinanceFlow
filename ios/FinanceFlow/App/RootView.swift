@@ -62,6 +62,14 @@ struct RootView: View {
             CelebrationOverlay()
                 .allowsHitTesting(celebration.pendingMedal != nil)
         }
+        .alert("Couldn’t load saved data", isPresented: Binding(
+            get: { store.loadError != nil },
+            set: { if !$0 { store.dismissLoadError() } }
+        )) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(store.loadError ?? "")
+        }
     }
 
     private var topBar: some View {

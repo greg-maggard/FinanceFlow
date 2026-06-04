@@ -13,6 +13,7 @@ struct SettingsScreen: View {
     @State private var showImporter = false
     @State private var showResetConfirm = false
     @State private var importMessage: String?
+    @State private var importFailed = false
 
     var body: some View {
         NavigationStack {
@@ -103,7 +104,9 @@ struct SettingsScreen: View {
                     GlassButton(title: "Import", systemImage: "square.and.arrow.down") { showImporter = true }
                 }
                 if let importMessage {
-                    Text(importMessage).font(theme.typography.caption).foregroundStyle(theme.colors.success)
+                    Text(importMessage)
+                        .font(theme.typography.caption)
+                        .foregroundStyle(importFailed ? theme.colors.danger : theme.colors.success)
                 }
             }
         }
@@ -131,12 +134,16 @@ struct SettingsScreen: View {
         guard case let .success(url) = result else { return }
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        guard let data = try? Data(contentsOf: url) else {
-            importMessage = nil
-            return
+        do {
+            let data = try Data(contentsOf: url)
+            let imported = try IO.importJSON(data)
+            store.replaceState(imported)
+            importFailed = false
+            importMessage = "Imported \(store.progress.done)/\(store.progress.total) steps complete."
+        } catch {
+            importFailed = true
+            importMessage = "Couldn't read that backup — it may be corrupt or from a newer version."
         }
-        store.replaceState(IO.importJSON(data))
-        importMessage = "Imported \(store.progress.done)/\(store.progress.total) steps complete."
     }
 }
 

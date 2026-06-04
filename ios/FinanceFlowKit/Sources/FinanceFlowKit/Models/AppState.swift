@@ -72,8 +72,11 @@ extension AppState: Codable {
         if c.contains(.decisions) {
             let dc = try c.nestedContainer(keyedBy: DecisionId.self, forKey: .decisions)
             for id in DecisionId.allCases where dc.contains(id) {
-                if try !dc.decodeNil(forKey: id) {
-                    decisions[id] = try dc.decode(Decision.self, forKey: id)
+                // Unanswered (null) or an unrecognized value is left absent rather
+                // than failing the entire document.
+                if (try? dc.decodeNil(forKey: id)) == false,
+                   let answer = try? dc.decode(Decision.self, forKey: id) {
+                    decisions[id] = answer
                 }
             }
         }
@@ -84,12 +87,15 @@ extension AppState: Codable {
         if c.contains(.nodes) {
             let nc = try c.nestedContainer(keyedBy: NodeId.self, forKey: .nodes)
             for id in NodeId.allCases where nc.contains(id) {
-                if try !nc.decodeNil(forKey: id) {
-                    nodes[id] = try NodeState.decode(from: nc.superDecoder(forKey: id), kind: id.dataKind)
+                // A single unreadable node is skipped (and backfilled below) rather
+                // than failing the entire document load.
+                if (try? nc.decodeNil(forKey: id)) == false,
+                   let node = try? NodeState.decode(from: nc.superDecoder(forKey: id), kind: id.dataKind) {
+                    nodes[id] = node
                 }
             }
         }
-        // Backfill any missing nodes so the rest of the app can assume presence.
+        // Backfill any missing or unreadable nodes so the rest of the app can assume presence.
         for id in NodeId.allCases where nodes[id] == nil { nodes[id] = NodeState() }
         self.nodes = nodes
 
@@ -100,8 +106,9 @@ extension AppState: Codable {
         if c.contains(.categoryMap) {
             let cm = try c.nestedContainer(keyedBy: NodeId.self, forKey: .categoryMap)
             for id in NodeId.allCases where cm.contains(id) {
-                if try !cm.decodeNil(forKey: id) {
-                    categoryMap[id] = try cm.decode(String.self, forKey: id)
+                if (try? cm.decodeNil(forKey: id)) == false,
+                   let category = try? cm.decode(String.self, forKey: id) {
+                    categoryMap[id] = category
                 }
             }
         }

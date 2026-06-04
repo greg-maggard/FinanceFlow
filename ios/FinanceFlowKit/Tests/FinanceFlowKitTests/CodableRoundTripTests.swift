@@ -70,10 +70,11 @@ struct CodableRoundTripTests {
         #expect(decisions?["Q_Match"] as? String == "yes")
     }
 
-    @Test("import of garbage yields fresh state")
+    @Test("import of garbage throws instead of silently resetting")
     func importGarbage() {
-        let s = IO.importString("not json at all")
-        #expect(s == .makeInitial())
+        #expect(throws: (any Error).self) {
+            try IO.importString("not json at all")
+        }
     }
 
     @Test("export then import is identity")
@@ -82,14 +83,16 @@ struct CodableRoundTripTests {
         s.nodes[.Start]?.completed = true
         s.decisions[.Q_Match] = .no
         let exported = try IO.exportJSON(s)
-        let imported = IO.importJSON(exported)
+        let imported = try IO.importJSON(exported)
         #expect(imported == s)
     }
 
-    @Test("unknown version migrates to initial")
-    func unknownVersionMigrates() {
+    @Test("unsupported version throws and is never silently wiped")
+    func unsupportedVersionThrows() {
         var s = AppState.makeInitial()
         s.version = 99
-        #expect(IO.migrate(s) == .makeInitial())
+        #expect(throws: IO.ImportError.unsupportedVersion(99)) {
+            try IO.migrate(s)
+        }
     }
 }
