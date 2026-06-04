@@ -52,9 +52,9 @@ struct AppStoreTests {
         store.toggleComplete(.Start)
         store.setNotes(.Start, "a")
         store.setNotes(.Start, "ab")
-        #expect(memory.saveCount == 0)              // nothing yet — still debouncing
+        #expect(await memory.saveCount == 0)        // nothing yet — still debouncing
         try? await Task.sleep(for: .milliseconds(150))
-        #expect(memory.saveCount == 1)              // collapsed into a single write
+        #expect(await memory.saveCount == 1)        // collapsed into a single write
         let loaded = try? await memory.load()
         #expect(loaded?.node(.Start).notes == "ab")
     }

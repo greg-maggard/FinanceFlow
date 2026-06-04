@@ -42,10 +42,10 @@ private struct RecurringForm: View {
             if !hasItems {
                 HStack(spacing: theme.spacing.md) {
                     LabeledField(label: "Monthly target") {
-                        NumberField(value: data.target.value) { write { $0.target = .manual($1) } }
+                        NumberField(value: data.target.value) { v in write { $0.target = .manual(v) } }
                     }
                     LabeledField(label: "Saved this month") {
-                        NumberField(value: data.funded?.value ?? 0) { write { $0.funded = .manual($1) } }
+                        NumberField(value: data.funded?.value ?? 0) { v in write { $0.funded = .manual(v) } }
                     }
                 }
             }

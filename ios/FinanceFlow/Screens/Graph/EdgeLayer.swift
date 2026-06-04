@@ -1,6 +1,10 @@
 import SwiftUI
 import FinanceFlowKit
 
+// `Path` and `Edge` exist in both SwiftUI and FinanceFlowKit; alias here so
+// the drawing code uses SwiftUI's drawing path without qualifying every site.
+private typealias Path = SwiftUI.Path
+
 /// Draws all graph edges behind the node cards. Edge color follows the source
 /// node's status; decision branches not taken are muted/dashed; the two
 /// retirement loop-backs bow out to the right.
@@ -34,7 +38,7 @@ struct EdgeLayer: View {
         var dashed: Bool
     }
 
-    private func edgeStyle(from node: GraphNode, edge: Edge) -> EdgeStroke {
+    private func edgeStyle(from node: GraphNode, edge: FinanceFlowKit.Edge) -> EdgeStroke {
         let phase = theme.phaseColor(node.phase)
         let srcStatus = status[node.id] ?? .upcoming
 

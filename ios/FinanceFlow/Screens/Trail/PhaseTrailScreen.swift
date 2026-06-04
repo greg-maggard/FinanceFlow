@@ -50,7 +50,7 @@ struct PhaseTrailScreen: View {
     }
 
     private func trailRow(_ node: GraphNode, status: Status, phase: PhaseColor) -> some View {
-        let s = theme.style(for: status, phase: phase)
+        let s = theme.style(for: status, phase: node.phase)
         let progress = progressOf(store.state, node.id)
 
         return Button { onSelect(node.id) } label: {
