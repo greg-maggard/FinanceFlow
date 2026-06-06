@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 @testable import FinanceFlowKit
 
 @Suite("progressOf (money math)")
@@ -23,16 +24,24 @@ struct ProgressTests {
         #expect(ready == false)
     }
 
-    @Test("ready tolerates floating-point drift just below target")
-    func readyEpsilon() {
-        // target sums to 0.8; funded sums to 0.7999999… — must still read ready.
+    @Test("exact decimal sums meet the target with no floating-point drift")
+    func exactSumsAreReady() {
+        // As `Double`, funded 0.7 + 0.1 == 0.7999999999999999, a hair below the
+        // target 0.4 + 0.4 == 0.8 — so `ready` needed a half-cent tolerance to not
+        // get stuck false. As `Decimal` both sides sum to exactly 0.8, so plain
+        // `>=` is enough and the tolerance is gone.
         let s = state {
             $0.nodes[.Food]?.data = .recurring(RecurringData(items: [
-                RecurringItem(target: .manual(0.4), funded: .manual(0.7)),
-                RecurringItem(target: .manual(0.4), funded: .manual(0.1)),
+                RecurringItem(target: .manual(Decimal(string: "0.4")!), funded: .manual(Decimal(string: "0.7")!)),
+                RecurringItem(target: .manual(Decimal(string: "0.4")!), funded: .manual(Decimal(string: "0.1")!)),
             ]))
         }
-        #expect(progressOf(s, .Food).ready == true)
+        guard case let .goal(value, max, ready) = progressOf(s, .Food) else {
+            Issue.record("expected .goal"); return
+        }
+        #expect(max == 0.8)
+        #expect(value == 0.8)
+        #expect(ready == true)
     }
 
     @Test("debts: ready only when all paid; value/max aggregate balances")

@@ -16,12 +16,12 @@ public enum BalanceQuery: Sendable, Equatable {
 /// Mirrors `BalanceProvider` in `src/integrations/balanceProvider.ts`.
 public protocol BalanceProvider: Sendable {
     var id: Source { get }
-    func read(_ query: BalanceQuery) async throws -> Double?
+    func read(_ query: BalanceQuery) async throws -> Decimal?
 }
 
 /// The only provider in MVP — manual entry, so reads return nil.
 public struct ManualProvider: BalanceProvider {
     public let id: Source = .manual
     public init() {}
-    public func read(_ query: BalanceQuery) async throws -> Double? { nil }
+    public func read(_ query: BalanceQuery) async throws -> Decimal? { nil }
 }
