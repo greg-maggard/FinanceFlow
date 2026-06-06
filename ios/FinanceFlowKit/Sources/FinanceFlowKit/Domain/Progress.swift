@@ -16,15 +16,13 @@ public enum ProgressInfo: Equatable, Sendable {
     }
 }
 
-/// Tolerance for "have we met the target?" checks. Money and percentages are
-/// stored as `Double` (for byte-parity with the web), and sums of `Double` can
-/// land a hair below an exact target (e.g. 999.9999999 vs 1000). Treat "within
-/// half a cent" as meeting the target so the `ready` flag doesn't get stuck false.
-private let readyTolerance = 0.005
-
-/// Whether `value` meets/exceeds `target` within `readyTolerance`.
-private func meets(_ value: Double, _ target: Double) -> Bool {
-    value >= target - readyTolerance
+/// Lossy conversion used only to surface exact `Decimal` amounts as the `Double`
+/// display values carried by `ProgressInfo` (a goal bar's fraction and labels).
+/// Every "have we met the target?" decision below stays in exact `Decimal`, so a
+/// sum landing a hair below its target — the old `Double` drift — can't happen,
+/// and the half-cent `meets()` tolerance is no longer needed.
+private extension Decimal {
+    var asDouble: Double { NSDecimalNumber(decimal: self).doubleValue }
 }
 
 /// Compute progress for a node. Direct port of `progressOf`.
@@ -38,14 +36,14 @@ public func progressOf(_ state: AppState, _ id: NodeId) -> ProgressInfo {
             let target = items.reduce(0) { $0 + $1.target.value }
             let funded = items.reduce(0) { $0 + ($1.funded?.value ?? 0) }
             if target > 0 {
-                return .goal(value: funded, max: target, ready: meets(funded, target))
+                return .goal(value: funded.asDouble, max: target.asDouble, ready: funded >= target)
             }
             return .none(ready: true)
         }
         let target = data?.target.value ?? 0
         let funded = data?.funded?.value ?? 0
         if target > 0 {
-            return .goal(value: funded, max: target, ready: meets(funded, target))
+            return .goal(value: funded.asDouble, max: target.asDouble, ready: funded >= target)
         }
         return .none(ready: true)
     }
@@ -58,39 +56,39 @@ public func progressOf(_ state: AppState, _ id: NodeId) -> ProgressInfo {
     case .SmallEF:
         let balance = data?.smallEFBalance?.value ?? 0
         let target = emergencyFundTarget(monthlyExpenses: state.settings.monthlyExpenses)
-        return .goal(value: balance, max: target, ready: meets(balance, target))
+        return .goal(value: balance.asDouble, max: target.asDouble, ready: balance >= target)
     case .BigEF:
-        let months = Double(data?.bigEF?.targetMonths ?? 3)
+        let months = data?.bigEF?.targetMonths ?? 3
         let balance = data?.bigEF?.balance.value ?? 0
         let target = bigEmergencyFundTarget(months: months, monthlyExpenses: state.settings.monthlyExpenses)
-        return .goal(value: balance, max: target > 0 ? target : 1, ready: target > 0 && meets(balance, target))
+        return .goal(value: balance.asDouble, max: (target > 0 ? target : 1).asDouble, ready: target > 0 && balance >= target)
     case .Match:
         let matchPct = data?.match?.matchPct ?? 0
         let cur = data?.match?.currentContribPct ?? 0
-        return .goal(value: cur, max: matchPct > 0 ? matchPct : 1, ready: matchPct > 0 && meets(cur, matchPct))
+        return .goal(value: cur.asDouble, max: (matchPct > 0 ? matchPct : 1).asDouble, ready: matchPct > 0 && cur >= matchPct)
     case .IRA:
         let ytd = data?.ira?.ytdContribution.value ?? 0
         let limit = data?.ira?.annualLimit ?? state.settings.iraAnnualLimit
-        return .goal(value: ytd, max: limit, ready: meets(ytd, limit))
+        return .goal(value: ytd.asDouble, max: limit.asDouble, ready: ytd >= limit)
     case .HSA:
         let ytd = data?.hsa?.ytdContribution.value ?? 0
         let limit = data?.hsa?.annualLimit ?? state.settings.hsaSelfLimit
-        return .goal(value: ytd, max: limit, ready: meets(ytd, limit))
+        return .goal(value: ytd.asDouble, max: limit.asDouble, ready: ytd >= limit)
     case .Increase401k:
         let cur = data?.increase401k?.currentPct ?? 0
         let target = data?.increase401k?.targetPct ?? 15
-        return .goal(value: cur, max: target, ready: meets(cur, target))
+        return .goal(value: cur.asDouble, max: target.asDouble, ready: cur >= target)
     case .SavePurchase:
         let saved = data?.savePurchase?.saved.value ?? 0
         let target = data?.savePurchase?.target ?? 0
-        return .goal(value: saved, max: target > 0 ? target : 1, ready: target > 0 && meets(saved, target))
+        return .goal(value: saved.asDouble, max: (target > 0 ? target : 1).asDouble, ready: target > 0 && saved >= target)
     case .HighDebt, .ModDebt:
         let debts = data?.debts ?? []
         if debts.isEmpty { return .none(ready: false) }
         let total = debts.reduce(0) { $0 + $1.balance }
         let paidAmt = debts.filter(\.paid).reduce(0) { $0 + $1.balance }
         let allPaid = debts.allSatisfy(\.paid)
-        return .goal(value: paidAmt, max: total > 0 ? total : 1, ready: allPaid)
+        return .goal(value: paidAmt.asDouble, max: (total > 0 ? total : 1).asDouble, ready: allPaid)
     default:
         return .none(ready: true)
     }

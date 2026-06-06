@@ -149,7 +149,7 @@ private struct BigEFForm: View {
         let current = store.state.node(.BigEF).data?.bigEF
         let months = current?.targetMonths ?? 3
         let balance = current?.balance.value ?? 0
-        let target = bigEmergencyFundTarget(months: Double(months), monthlyExpenses: store.state.settings.monthlyExpenses)
+        let target = bigEmergencyFundTarget(months: months, monthlyExpenses: store.state.settings.monthlyExpenses)
 
         VStack(alignment: .leading, spacing: theme.spacing.md) {
             LabeledField(label: "Target months") {
@@ -238,7 +238,7 @@ private struct IRAForm: View {
         }
     }
 
-    private func write(_ d: IRAData, type: IRAType? = nil, ytd: Double? = nil, limit: Double? = nil) {
+    private func write(_ d: IRAData, type: IRAType? = nil, ytd: Decimal? = nil, limit: Decimal? = nil) {
         store.setNodeData(.IRA, .ira(IRAData(
             type: type ?? d.type,
             ytdContribution: .manual(ytd ?? d.ytdContribution.value),
@@ -312,7 +312,7 @@ private struct SavePurchaseForm: View {
         }
     }
 
-    private func write(_ d: SavePurchaseData, name: String? = nil, target: Double? = nil, saved: Double? = nil, byDate: String?? = nil) {
+    private func write(_ d: SavePurchaseData, name: String? = nil, target: Decimal? = nil, saved: Decimal? = nil, byDate: String?? = nil) {
         store.setNodeData(.SavePurchase, .savePurchase(SavePurchaseData(
             goalName: name ?? d.goalName,
             target: target ?? d.target,
@@ -338,7 +338,7 @@ private struct CollegeForm: View {
         }
     }
 
-    private func write(_ d: CollegeData, monthly: Double? = nil, balance: Double? = nil) {
+    private func write(_ d: CollegeData, monthly: Decimal? = nil, balance: Decimal? = nil) {
         store.setNodeData(.College, .college(CollegeData(
             monthlyContribution: monthly ?? d.monthlyContribution,
             balance: .manual(balance ?? d.balance.value),

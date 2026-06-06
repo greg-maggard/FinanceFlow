@@ -12,11 +12,11 @@ public enum NodeData: Equatable, Sendable {
     case recurring(RecurringData)                                   // Rent, Food, Essential, Income, Health, MinDebt, NonEssential
     case smallEF(balance: SourcedNumber)                            // SmallEF
     case bigEF(targetMonths: Int, balance: SourcedNumber)           // BigEF
-    case match(matchPct: Double, currentContribPct: Double)         // Match
+    case match(matchPct: Decimal, currentContribPct: Decimal)       // Match
     case debts([Debt])                                              // HighDebt, ModDebt
     case ira(IRAData)                                               // IRA
     case savePurchase(SavePurchaseData)                             // SavePurchase
-    case increase401k(currentPct: Double, targetPct: Double)        // Increase401k
+    case increase401k(currentPct: Decimal, targetPct: Decimal)      // Increase401k
     case hsa(HSAData)                                               // HSA
     case college(CollegeData)                                       // College
     case goals([Goal])                                             // Goals
@@ -91,8 +91,8 @@ extension NodeData {
         case .match:
             let c = try decoder.container(keyedBy: MatchKeys.self)
             self = .match(
-                matchPct: try c.decode(Double.self, forKey: .matchPct),
-                currentContribPct: try c.decode(Double.self, forKey: .currentContribPct)
+                matchPct: try c.decode(Decimal.self, forKey: .matchPct),
+                currentContribPct: try c.decode(Decimal.self, forKey: .currentContribPct)
             )
         case .debts:
             let c = try decoder.container(keyedBy: DebtsKeys.self)
@@ -104,8 +104,8 @@ extension NodeData {
         case .increase401k:
             let c = try decoder.container(keyedBy: Increase401kKeys.self)
             self = .increase401k(
-                currentPct: try c.decode(Double.self, forKey: .currentPct),
-                targetPct: try c.decode(Double.self, forKey: .targetPct)
+                currentPct: try c.decode(Decimal.self, forKey: .currentPct),
+                targetPct: try c.decode(Decimal.self, forKey: .targetPct)
             )
         case .hsa:
             self = .hsa(try HSAData(from: decoder))
@@ -166,13 +166,13 @@ public extension NodeData {
     var bigEF: (targetMonths: Int, balance: SourcedNumber)? {
         if case let .bigEF(m, b) = self { return (m, b) } else { return nil }
     }
-    var match: (matchPct: Double, currentContribPct: Double)? {
+    var match: (matchPct: Decimal, currentContribPct: Decimal)? {
         if case let .match(m, c) = self { return (m, c) } else { return nil }
     }
     var debts: [Debt]? { if case let .debts(v) = self { return v } else { return nil } }
     var ira: IRAData? { if case let .ira(v) = self { return v } else { return nil } }
     var savePurchase: SavePurchaseData? { if case let .savePurchase(v) = self { return v } else { return nil } }
-    var increase401k: (currentPct: Double, targetPct: Double)? {
+    var increase401k: (currentPct: Decimal, targetPct: Decimal)? {
         if case let .increase401k(c, t) = self { return (c, t) } else { return nil }
     }
     var hsa: HSAData? { if case let .hsa(v) = self { return v } else { return nil } }

@@ -33,7 +33,9 @@ struct CodableRoundTripTests {
         s.nodes[.BigEF]?.data = .bigEF(targetMonths: 6, balance: .manual(9000))
         s.nodes[.Match]?.data = .match(matchPct: 5, currentContribPct: 5)
         s.nodes[.HighDebt]?.data = .debts([
-            Debt(name: "Card", balance: 4200, apr: 22.9, minPayment: 120, paid: false),
+            // apr via Decimal(string:) — a `22.9` float literal would route through
+            // Double and store 22.8999…986, which is exactly the drift we're removing.
+            Debt(name: "Card", balance: 4200, apr: Decimal(string: "22.9")!, minPayment: 120, paid: false),
         ])
         s.nodes[.IRA]?.data = .ira(IRAData(type: .roth, ytdContribution: .manual(3500), annualLimit: 7000))
         s.nodes[.SavePurchase]?.data = .savePurchase(SavePurchaseData(goalName: "Car", target: 12000, saved: .manual(4000), byDate: "2027-01"))
