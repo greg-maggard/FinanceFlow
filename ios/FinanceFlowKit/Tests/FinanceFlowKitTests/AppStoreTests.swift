@@ -46,17 +46,27 @@ struct AppStoreTests {
     }
 
     @Test("debounced save fires once for a burst of mutations")
-    func debouncedSave() async {
+    func debouncedSave() async throws {
         let memory = MemoryStorageAdapter()
-        let store = AppStore(storage: memory, saveDebounce: .milliseconds(50))
+        let store = AppStore(storage: memory, saveDebounce: .milliseconds(200))
         store.toggleComplete(.Start)
         store.setNotes(.Start, "a")
         store.setNotes(.Start, "ab")
         #expect(await memory.saveCount == 0)        // nothing yet — still debouncing
-        try? await Task.sleep(for: .milliseconds(150))
+
+        // A fixed sleep flakes on slow CI runners (the save task can lag well
+        // past the debounce), so wait on the condition with a bounded deadline.
+        let deadline = ContinuousClock.now + .seconds(5)
+        while await memory.saveCount == 0, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
         #expect(await memory.saveCount == 1)        // collapsed into a single write
         let loaded = try? await memory.load()
         #expect(loaded?.node(.Start).notes == "ab")
+
+        // …and stays collapsed: no second write arrives afterwards.
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(await memory.saveCount == 1)
     }
 
     @Test("replaceState migrates and replaces")
