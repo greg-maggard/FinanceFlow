@@ -35,11 +35,12 @@ private struct RecurringForm: View {
     let nodeId: NodeId
 
     private var data: RecurringData { store.state.node(nodeId).data?.recurring ?? RecurringData() }
+    private var phaseColor: Color { theme.phaseColor(Flowchart.node(nodeId).phase).base }
 
     var body: some View {
-        let hasItems = !(data.items?.isEmpty ?? true)
+        let items = data.items ?? []
         VStack(alignment: .leading, spacing: theme.spacing.md) {
-            if !hasItems {
+            if items.isEmpty {
                 HStack(spacing: theme.spacing.md) {
                     LabeledField(label: "Monthly target") {
                         NumberField(value: data.target.value) { v in write { $0.target = .manual(v) } }
@@ -48,46 +49,57 @@ private struct RecurringForm: View {
                         NumberField(value: data.funded?.value ?? 0) { v in write { $0.funded = .manual(v) } }
                     }
                 }
+                GlassButton(title: "Split into items", systemImage: "list.bullet") {
+                    // Seed item #1 from the single amounts so the node total carries over.
+                    writeItems([RecurringItem(target: data.target, funded: data.funded)])
+                }
+            } else {
+                itemsEditor(items)
             }
-
-            DisclosureGroup {
-                itemsEditor
-            } label: {
-                Text(hasItems ? "Items — bar totals their goals" : "Or split into items")
-                    .font(theme.typography.caption)
-                    .foregroundStyle(theme.colors.textSecondary)
-            }
-            .tint(theme.colors.textSecondary)
         }
     }
 
-    private var itemsEditor: some View {
-        let items = data.items ?? []
-        return VStack(alignment: .leading, spacing: theme.spacing.sm) {
+    private func itemsEditor(_ items: [RecurringItem]) -> some View {
+        VStack(alignment: .leading, spacing: theme.spacing.sm) {
+            FieldLabel(text: "Items")
             ForEach(items) { item in
-                GlassCard(padding: theme.spacing.md) {
-                    VStack(spacing: theme.spacing.sm) {
-                        HStack {
-                            PlainTextField(placeholder: "Item (e.g. Power)", text: itemBinding(item, \.name))
-                            Button(role: .destructive) { writeItems(items.filter { $0.id != item.id }) } label: {
-                                Image(systemName: "trash").foregroundStyle(theme.colors.danger)
-                            }
-                            .buttonStyle(.plain)
+                SubGoalCard(
+                    namePlaceholder: "Item (e.g. Power)",
+                    name: itemBinding(item, \.name),
+                    value: item.funded?.value ?? 0,
+                    target: item.target.value,
+                    color: phaseColor,
+                    onDelete: { writeItems(items.filter { $0.id != item.id }) }
+                ) {
+                    HStack(spacing: theme.spacing.sm) {
+                        LabeledField(label: "Target") {
+                            NumberField(value: item.target.value) { v in patchItem(item.id) { $0.target = .manual(v) } }
                         }
-                        HStack(spacing: theme.spacing.sm) {
-                            LabeledField(label: "Target") {
-                                NumberField(value: item.target.value) { v in patchItem(item.id) { $0.target = .manual(v) } }
-                            }
-                            LabeledField(label: "Saved") {
-                                NumberField(value: item.funded?.value ?? 0) { v in patchItem(item.id) { $0.funded = .manual(v) } }
-                            }
+                        LabeledField(label: "Saved") {
+                            NumberField(value: item.funded?.value ?? 0) { v in patchItem(item.id) { $0.funded = .manual(v) } }
                         }
                     }
                 }
             }
+            Text("Total \(CurrencyFormat.string(data.effectiveFunded)) of \(CurrencyFormat.string(data.effectiveTarget))")
+                .font(theme.typography.caption)
+                .foregroundStyle(theme.colors.textSecondary)
             GlassButton(title: "Add item", systemImage: "plus") {
                 writeItems(items + [RecurringItem()])
             }
+            Button {
+                // Collapse back to a single pair, keeping the totals.
+                write {
+                    $0.target = .manual($0.effectiveTarget)
+                    $0.funded = .manual($0.effectiveFunded)
+                    $0.items = nil
+                }
+            } label: {
+                Text("Use single amount")
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.textSecondary)
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -128,17 +140,31 @@ private struct SmallEFForm: View {
     @Environment(\.theme) private var theme
 
     var body: some View {
-        let balance = store.state.node(.SmallEF).data?.smallEFBalance?.value ?? 0
-        let target = emergencyFundTarget(monthlyExpenses: store.state.settings.monthlyExpenses)
-        VStack(alignment: .leading, spacing: theme.spacing.sm) {
-            Text("Target: \(CurrencyFormat.string(target))")
+        let data = store.state.node(.SmallEF).data?.smallEF ?? SmallEFData()
+        let computed = emergencyFundTarget(monthlyExpenses: store.state.settings.monthlyExpenses)
+        let buckets = data.items ?? []
+
+        VStack(alignment: .leading, spacing: theme.spacing.md) {
+            Text("Target: \(CurrencyFormat.string(data.effectiveTarget(computed: computed)))")
                 .font(theme.typography.caption)
                 .foregroundStyle(theme.colors.textSecondary)
-            LabeledField(label: "Current balance") {
-                NumberField(value: balance) { store.setNodeData(.SmallEF, .smallEF(balance: .manual($0))) }
+            if buckets.isEmpty {
+                LabeledField(label: "Current balance") {
+                    NumberField(value: data.balance.value) { write(SmallEFData(balance: .manual($0))) }
+                }
+                GlassButton(title: "Split into buckets", systemImage: "list.bullet") {
+                    // Seed bucket #1 with the current balance so the node total carries over.
+                    write(SmallEFData(balance: data.balance, items: [EFBucket(balance: data.balance)]))
+                }
+            } else {
+                EFBucketEditor(buckets: buckets, computedTarget: computed, nodeId: .SmallEF) { items in
+                    write(SmallEFData(balance: data.balance, items: items))
+                }
             }
         }
     }
+
+    private func write(_ d: SmallEFData) { store.setNodeData(.SmallEF, .smallEF(d)) }
 }
 
 private struct BigEFForm: View {
@@ -146,28 +172,109 @@ private struct BigEFForm: View {
     @Environment(\.theme) private var theme
 
     var body: some View {
-        let current = store.state.node(.BigEF).data?.bigEF
-        let months = current?.targetMonths ?? 3
-        let balance = current?.balance.value ?? 0
-        let target = bigEmergencyFundTarget(months: months, monthlyExpenses: store.state.settings.monthlyExpenses)
+        let data = store.state.node(.BigEF).data?.bigEF ?? BigEFData()
+        let computed = bigEmergencyFundTarget(months: data.targetMonths, monthlyExpenses: store.state.settings.monthlyExpenses)
+        let buckets = data.items ?? []
+        let target = data.effectiveTarget(computed: computed)
 
         VStack(alignment: .leading, spacing: theme.spacing.md) {
             LabeledField(label: "Target months") {
                 Picker("", selection: Binding(
-                    get: { months },
-                    set: { store.setNodeData(.BigEF, .bigEF(targetMonths: $0, balance: .manual(balance))) }
+                    get: { data.targetMonths },
+                    set: { write(BigEFData(targetMonths: $0, balance: data.balance, items: data.items)) }
                 )) {
                     ForEach([3, 4, 5, 6], id: \.self) { Text("\($0) mo").tag($0) }
                 }
                 .pickerStyle(.segmented)
             }
-            LabeledField(label: "Balance") {
-                NumberField(value: balance) { store.setNodeData(.BigEF, .bigEF(targetMonths: months, balance: .manual($0))) }
+            if buckets.isEmpty {
+                LabeledField(label: "Balance") {
+                    NumberField(value: data.balance.value) { write(BigEFData(targetMonths: data.targetMonths, balance: .manual($0))) }
+                }
+                GlassButton(title: "Split into buckets", systemImage: "list.bullet") {
+                    // Seed bucket #1 with the current balance so the node total carries over.
+                    write(BigEFData(targetMonths: data.targetMonths, balance: data.balance, items: [EFBucket(balance: data.balance)]))
+                }
+            } else {
+                EFBucketEditor(buckets: buckets, computedTarget: computed, nodeId: .BigEF) { items in
+                    write(BigEFData(targetMonths: data.targetMonths, balance: data.balance, items: items))
+                }
             }
             Text(target > 0 ? "Target: \(CurrencyFormat.string(target))" : "Set monthly expenses in Settings to compute target.")
                 .font(theme.typography.caption)
                 .foregroundStyle(theme.colors.textSecondary)
         }
+    }
+
+    private func write(_ d: BigEFData) { store.setNodeData(.BigEF, .bigEF(d)) }
+}
+
+/// Bucket list editor shared by the two emergency-fund forms: per-bucket cards
+/// with their own goal bars, the unallocated hint, and add/collapse actions.
+private struct EFBucketEditor: View {
+    @Environment(\.theme) private var theme
+    let buckets: [EFBucket]
+    let computedTarget: Decimal
+    let nodeId: NodeId
+    /// Receives the next bucket list; nil collapses back to the single balance.
+    let write: ([EFBucket]?) -> Void
+
+    var body: some View {
+        let bucketTargets = buckets.reduce(Decimal(0)) { $0 + $1.target }
+        let color = theme.phaseColor(Flowchart.node(nodeId).phase).base
+        VStack(alignment: .leading, spacing: theme.spacing.sm) {
+            FieldLabel(text: "Buckets")
+            ForEach(buckets) { bucket in
+                SubGoalCard(
+                    namePlaceholder: "Bucket (e.g. Medical)",
+                    name: nameBinding(bucket),
+                    value: bucket.balance.value,
+                    target: bucket.target,
+                    color: color,
+                    onDelete: { write(buckets.filter { $0.id != bucket.id }) }
+                ) {
+                    HStack(spacing: theme.spacing.sm) {
+                        LabeledField(label: "Target") {
+                            NumberField(value: bucket.target) { v in patch(bucket.id) { $0.target = v } }
+                        }
+                        LabeledField(label: "Balance") {
+                            NumberField(value: bucket.balance.value) { v in patch(bucket.id) { $0.balance = .manual(v) } }
+                        }
+                    }
+                }
+            }
+            if bucketTargets < computedTarget {
+                Text("Buckets cover \(CurrencyFormat.string(bucketTargets)) of your \(CurrencyFormat.string(computedTarget)) target — \(CurrencyFormat.string(computedTarget - bucketTargets)) unallocated.")
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.textSecondary)
+            }
+            GlassButton(title: "Add bucket", systemImage: "plus") {
+                write(buckets + [EFBucket()])
+            }
+            Button {
+                // Collapse to the single balance; the mirrored total carries over.
+                write(nil)
+            } label: {
+                Text("Use single balance")
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.textSecondary)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func patch(_ id: String, _ change: (inout EFBucket) -> Void) {
+        var next = buckets
+        guard let idx = next.firstIndex(where: { $0.id == id }) else { return }
+        change(&next[idx])
+        write(next)
+    }
+
+    private func nameBinding(_ bucket: EFBucket) -> Binding<String> {
+        Binding(
+            get: { (buckets.first { $0.id == bucket.id })?.name ?? bucket.name },
+            set: { newValue in patch(bucket.id) { $0.name = newValue } }
+        )
     }
 }
 
@@ -291,34 +398,81 @@ private struct SavePurchaseForm: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var theme
 
+    private var data: SavePurchaseData { store.state.node(.SavePurchase).data?.savePurchase ?? SavePurchaseData() }
+
+    /// The goals shown: the stored list, else the legacy single-goal fields
+    /// surfaced as goal #1 (written back as a list on first edit). The fixed id
+    /// keeps the card stable across renders while the legacy fields are live.
+    private var goals: [PurchaseGoal] {
+        if let items = data.items, !items.isEmpty { return items }
+        return [PurchaseGoal(id: "legacy", name: data.goalName, target: data.target, saved: data.saved, byDate: data.byDate)]
+    }
+
     var body: some View {
-        let d = store.state.node(.SavePurchase).data?.savePurchase ?? SavePurchaseData()
+        let goals = self.goals
+        let color = theme.phaseColor(Flowchart.node(.SavePurchase).phase).base
         VStack(alignment: .leading, spacing: theme.spacing.md) {
-            LabeledField(label: "Goal name") {
-                PlainTextField(placeholder: "e.g. New car", text: Binding(
-                    get: { d.goalName },
-                    set: { write(d, name: $0) }
-                ))
-            }
-            HStack(spacing: theme.spacing.md) {
-                LabeledField(label: "Target") {
-                    NumberField(value: d.target) { write(d, target: $0) }
+            FieldLabel(text: goals.count > 1 ? "Goals" : "Goal")
+            ForEach(goals) { goal in
+                SubGoalCard(
+                    namePlaceholder: "Goal (e.g. New car)",
+                    name: nameBinding(goal),
+                    value: goal.saved.value,
+                    target: goal.target,
+                    color: color,
+                    onDelete: { remove(goal.id) }
+                ) {
+                    VStack(spacing: theme.spacing.sm) {
+                        HStack(spacing: theme.spacing.sm) {
+                            LabeledField(label: "Target") {
+                                NumberField(value: goal.target) { v in patch(goal.id) { $0.target = v } }
+                            }
+                            LabeledField(label: "Saved") {
+                                NumberField(value: goal.saved.value) { v in patch(goal.id) { $0.saved = .manual(v) } }
+                            }
+                        }
+                        MonthYearField(label: "By date", value: goal.byDate) { v in patch(goal.id) { $0.byDate = v } }
+                    }
                 }
-                LabeledField(label: "Saved") {
-                    NumberField(value: d.saved.value) { write(d, saved: $0) }
-                }
             }
-            MonthYearField(label: "By date", value: d.byDate) { write(d, byDate: $0) }
+            if goals.count > 1 {
+                Text("Total \(CurrencyFormat.string(data.effectiveSaved)) of \(CurrencyFormat.string(data.effectiveTarget))")
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.textSecondary)
+            }
+            GlassButton(title: "Add goal", systemImage: "plus") {
+                writeGoals(goals + [PurchaseGoal()])
+            }
         }
     }
 
-    private func write(_ d: SavePurchaseData, name: String? = nil, target: Decimal? = nil, saved: Decimal? = nil, byDate: String?? = nil) {
-        store.setNodeData(.SavePurchase, .savePurchase(SavePurchaseData(
-            goalName: name ?? d.goalName,
-            target: target ?? d.target,
-            saved: .manual(saved ?? d.saved.value),
-            byDate: byDate ?? d.byDate
-        )))
+    private func writeGoals(_ goals: [PurchaseGoal]) {
+        var d = data
+        d.items = goals
+        store.setNodeData(.SavePurchase, .savePurchase(d))   // normalization mirrors the legacy scalars
+    }
+
+    private func remove(_ id: String) {
+        let remaining = goals.filter { $0.id != id }
+        if remaining.isEmpty {
+            store.setNodeData(.SavePurchase, .savePurchase(SavePurchaseData()))
+        } else {
+            writeGoals(remaining)
+        }
+    }
+
+    private func patch(_ id: String, _ change: (inout PurchaseGoal) -> Void) {
+        var next = goals
+        guard let idx = next.firstIndex(where: { $0.id == id }) else { return }
+        change(&next[idx])
+        writeGoals(next)
+    }
+
+    private func nameBinding(_ goal: PurchaseGoal) -> Binding<String> {
+        Binding(
+            get: { (goals.first { $0.id == goal.id })?.name ?? goal.name },
+            set: { v in patch(goal.id) { $0.name = v } }
+        )
     }
 }
 

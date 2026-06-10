@@ -1,7 +1,28 @@
-import type { AppState, NodeId } from "../../state/schema";
+import type { AppState, EFBucket, NodeId, PurchaseGoal, RecurringData } from "../../state/schema";
 import { bigEmergencyFundTarget, emergencyFundTarget } from "../../state/schema";
 import { RECURRING } from "../../theme/identity";
 import { GRAPH_BY_ID } from "../../graph/flowchart";
+import { recurringTotals } from "../../graph/derive";
+
+/**
+ * Emergency-fund totals when the fund is split into buckets: balance is the
+ * bucket sum, and buckets may grow the goal beyond the flowchart-computed
+ * target but never shrink it. Mirrors `SmallEFData/BigEFData.effective*` in
+ * FinanceFlowKit.
+ */
+function efTotals(
+  buckets: EFBucket[] | undefined,
+  singleBalance: number,
+  computed: number,
+): { balance: number; target: number } {
+  if (buckets && buckets.length > 0) {
+    return {
+      balance: buckets.reduce((s, b) => s + (b.balance?.value ?? 0), 0),
+      target: Math.max(computed, buckets.reduce((s, b) => s + (b.target ?? 0), 0)),
+    };
+  }
+  return { balance: singleBalance, target: computed };
+}
 
 export type ProgressInfo =
   | { kind: "goal"; value: number; max: number; ready: boolean }
@@ -12,24 +33,9 @@ export function progressOf(state: AppState, id: NodeId): ProgressInfo {
   const node = GRAPH_BY_ID[id];
   if (node.kind === "decision") return { kind: "none", ready: false };
   if (RECURRING.has(id)) {
-    const recurring = state.nodes[id].data as
-      | {
-          target?: { value: number };
-          funded?: { value: number };
-          items?: { target: { value: number }; funded?: { value: number } }[];
-        }
-      | undefined;
-    const items = recurring?.items;
-    if (items && items.length > 0) {
-      const target = items.reduce((s, it) => s + (it.target?.value ?? 0), 0);
-      const funded = items.reduce((s, it) => s + (it.funded?.value ?? 0), 0);
-      if (target > 0) {
-        return { kind: "goal", value: funded, max: target, ready: funded >= target };
-      }
-      return { kind: "none", ready: true };
-    }
-    const target = recurring?.target?.value ?? 0;
-    const funded = recurring?.funded?.value ?? 0;
+    const { target, funded } = recurringTotals(
+      state.nodes[id].data as RecurringData | undefined,
+    );
     if (target > 0) {
       return { kind: "goal", value: funded, max: target, ready: funded >= target };
     }
@@ -42,15 +48,16 @@ export function progressOf(state: AppState, id: NodeId): ProgressInfo {
     case "Start":
       return { kind: "none", ready: true };
     case "SmallEF": {
-      const balance =
-        ((data?.balance as { value: number } | undefined)?.value ?? 0);
-      const target = emergencyFundTarget(state.settings.monthlyExpenses);
+      const single = ((data?.balance as { value: number } | undefined)?.value ?? 0);
+      const computed = emergencyFundTarget(state.settings.monthlyExpenses);
+      const { balance, target } = efTotals(data?.items as EFBucket[] | undefined, single, computed);
       return { kind: "goal", value: balance, max: target, ready: balance >= target };
     }
     case "BigEF": {
       const months = (data?.targetMonths as number | undefined) ?? 3;
-      const balance = ((data?.balance as { value: number } | undefined)?.value ?? 0);
-      const target = bigEmergencyFundTarget(months, state.settings.monthlyExpenses);
+      const single = ((data?.balance as { value: number } | undefined)?.value ?? 0);
+      const computed = bigEmergencyFundTarget(months, state.settings.monthlyExpenses);
+      const { balance, target } = efTotals(data?.items as EFBucket[] | undefined, single, computed);
       return { kind: "goal", value: balance, max: target || 1, ready: target > 0 && balance >= target };
     }
     case "Match": {
@@ -74,6 +81,12 @@ export function progressOf(state: AppState, id: NodeId): ProgressInfo {
       return { kind: "goal", value: cur, max: target, ready: cur >= target };
     }
     case "SavePurchase": {
+      const items = data?.items as PurchaseGoal[] | undefined;
+      if (items && items.length > 0) {
+        const saved = items.reduce((s, g) => s + (g.saved?.value ?? 0), 0);
+        const target = items.reduce((s, g) => s + (g.target ?? 0), 0);
+        return { kind: "goal", value: saved, max: target || 1, ready: target > 0 && saved >= target };
+      }
       const saved = ((data?.saved as { value: number } | undefined)?.value ?? 0);
       const target = (data?.target as number | undefined) ?? 0;
       return { kind: "goal", value: saved, max: target || 1, ready: target > 0 && saved >= target };

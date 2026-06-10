@@ -31,17 +31,9 @@ public func progressOf(_ state: AppState, _ id: NodeId) -> ProgressInfo {
     if node.kind == .decision { return .none(ready: false) }
 
     if recurringNodes.contains(id) {
-        let data = state.node(id).data?.recurring
-        if let items = data?.items, !items.isEmpty {
-            let target = items.reduce(0) { $0 + $1.target.value }
-            let funded = items.reduce(0) { $0 + ($1.funded?.value ?? 0) }
-            if target > 0 {
-                return .goal(value: funded.asDouble, max: target.asDouble, ready: funded >= target)
-            }
-            return .none(ready: true)
-        }
-        let target = data?.target.value ?? 0
-        let funded = data?.funded?.value ?? 0
+        let data = state.node(id).data?.recurring ?? RecurringData()
+        let target = data.effectiveTarget
+        let funded = data.effectiveFunded
         if target > 0 {
             return .goal(value: funded.asDouble, max: target.asDouble, ready: funded >= target)
         }
@@ -54,13 +46,16 @@ public func progressOf(_ state: AppState, _ id: NodeId) -> ProgressInfo {
     case .Start:
         return .none(ready: true)
     case .SmallEF:
-        let balance = data?.smallEFBalance?.value ?? 0
-        let target = emergencyFundTarget(monthlyExpenses: state.settings.monthlyExpenses)
+        let ef = data?.smallEF ?? SmallEFData()
+        let computed = emergencyFundTarget(monthlyExpenses: state.settings.monthlyExpenses)
+        let balance = ef.effectiveBalance
+        let target = ef.effectiveTarget(computed: computed)
         return .goal(value: balance.asDouble, max: target.asDouble, ready: balance >= target)
     case .BigEF:
-        let months = data?.bigEF?.targetMonths ?? 3
-        let balance = data?.bigEF?.balance.value ?? 0
-        let target = bigEmergencyFundTarget(months: months, monthlyExpenses: state.settings.monthlyExpenses)
+        let ef = data?.bigEF ?? BigEFData()
+        let computed = bigEmergencyFundTarget(months: ef.targetMonths, monthlyExpenses: state.settings.monthlyExpenses)
+        let balance = ef.effectiveBalance
+        let target = ef.effectiveTarget(computed: computed)
         return .goal(value: balance.asDouble, max: (target > 0 ? target : 1).asDouble, ready: target > 0 && balance >= target)
     case .Match:
         let matchPct = data?.match?.matchPct ?? 0
@@ -79,8 +74,9 @@ public func progressOf(_ state: AppState, _ id: NodeId) -> ProgressInfo {
         let target = data?.increase401k?.targetPct ?? 15
         return .goal(value: cur.asDouble, max: target.asDouble, ready: cur >= target)
     case .SavePurchase:
-        let saved = data?.savePurchase?.saved.value ?? 0
-        let target = data?.savePurchase?.target ?? 0
+        let purchase = data?.savePurchase ?? SavePurchaseData()
+        let saved = purchase.effectiveSaved
+        let target = purchase.effectiveTarget
         return .goal(value: saved.asDouble, max: (target > 0 ? target : 1).asDouble, ready: target > 0 && saved >= target)
     case .HighDebt, .ModDebt:
         let debts = data?.debts ?? []

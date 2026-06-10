@@ -19,6 +19,7 @@ import FinanceFlowKit
 struct GraphScreen: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var theme
+    var topInset: CGFloat = 96
     let onSelect: (NodeId) -> Void
 
     private let minZoom: CGFloat = 0.5
@@ -36,7 +37,7 @@ struct GraphScreen: View {
             // Match the old `.padding`: clear the floating top bar and bottom.
             // Insets are in screen points (unscaled), like the original padding
             // which sat outside the `scaleEffect`.
-            insets: UIEdgeInsets(top: 96, left: 0, bottom: 80, right: 0),
+            insets: UIEdgeInsets(top: topInset, left: 0, bottom: 80, right: 0),
             onTap: { point in
                 if let id = GraphLayout.node(at: point) { onSelect(id) }
             }

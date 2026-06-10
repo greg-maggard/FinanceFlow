@@ -46,6 +46,21 @@ export type RecurringItem = {
   funded?: SourcedNumber;
 };
 
+export type EFBucket = {
+  id: string;
+  name: string;
+  target: number;
+  balance: SourcedNumber;
+};
+
+export type PurchaseGoal = {
+  id: string;
+  name: string;
+  target: number;
+  saved: SourcedNumber;
+  byDate?: string;
+};
+
 export type RecurringData = {
   target: SourcedNumber;
   funded?: SourcedNumber;
@@ -60,8 +75,8 @@ export type NodeDataMap = {
   Health: RecurringData;
   MinDebt: RecurringData;
   NonEssential: RecurringData;
-  SmallEF: { balance: SourcedNumber };
-  BigEF: { targetMonths: 3 | 4 | 5 | 6; balance: SourcedNumber };
+  SmallEF: { balance: SourcedNumber; items?: EFBucket[] };
+  BigEF: { targetMonths: 3 | 4 | 5 | 6; balance: SourcedNumber; items?: EFBucket[] };
   Match: { matchPct: number; currentContribPct: number };
   HighDebt: { debts: Debt[] };
   ModDebt: { debts: Debt[] };
@@ -71,10 +86,13 @@ export type NodeDataMap = {
     annualLimit: number;
   };
   SavePurchase: {
+    // When items is present the scalar fields are legacy mirrors maintained on
+    // write (first goal's name/date, summed target/saved) for older readers.
     goalName: string;
     target: number;
     saved: SourcedNumber;
     byDate?: string;
+    items?: PurchaseGoal[];
   };
   Increase401k: { currentPct: number; targetPct: number };
   HSA: {

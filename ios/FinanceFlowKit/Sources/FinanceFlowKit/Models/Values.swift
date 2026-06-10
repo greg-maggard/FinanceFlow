@@ -128,6 +128,53 @@ public struct RecurringData: Codable, Equatable, Sendable {
     }
 }
 
+/// A named sub-goal within an emergency fund (e.g. "Medical", "Car", "Home").
+/// Mirrors `EFBucket` in `src/state/schema.ts`.
+public struct EFBucket: Codable, Equatable, Sendable, Identifiable {
+    public var id: String
+    public var name: String
+    public var target: Decimal
+    public var balance: SourcedNumber
+
+    public init(
+        id: String = ShortID.make(),
+        name: String = "",
+        target: Decimal = 0,
+        balance: SourcedNumber = .manual(0)
+    ) {
+        self.id = id
+        self.name = name
+        self.target = target
+        self.balance = balance
+    }
+}
+
+/// Payload for the SmallEF node: a single balance, optionally split into named
+/// buckets. Mirrors the `SmallEF` shape in `NodeDataMap`.
+public struct SmallEFData: Codable, Equatable, Sendable {
+    public var balance: SourcedNumber
+    public var items: [EFBucket]?
+
+    public init(balance: SourcedNumber = .manual(0), items: [EFBucket]? = nil) {
+        self.balance = balance
+        self.items = items
+    }
+}
+
+/// Payload for the BigEF node: target months + balance, optionally split into
+/// named buckets. Mirrors the `BigEF` shape in `NodeDataMap`.
+public struct BigEFData: Codable, Equatable, Sendable {
+    public var targetMonths: Int
+    public var balance: SourcedNumber
+    public var items: [EFBucket]?
+
+    public init(targetMonths: Int = 3, balance: SourcedNumber = .manual(0), items: [EFBucket]? = nil) {
+        self.targetMonths = targetMonths
+        self.balance = balance
+        self.items = items
+    }
+}
+
 public enum IRAType: String, Codable, Sendable {
     case roth
     case traditional
@@ -178,18 +225,53 @@ public struct HSAData: Codable, Equatable, Sendable {
     }
 }
 
+/// A single savings goal within the SavePurchase node (e.g. "Down payment").
+/// Mirrors `PurchaseGoal` in `src/state/schema.ts`.
+public struct PurchaseGoal: Codable, Equatable, Sendable, Identifiable {
+    public var id: String
+    public var name: String
+    public var target: Decimal
+    public var saved: SourcedNumber
+    public var byDate: String?
+
+    public init(
+        id: String = ShortID.make(),
+        name: String = "",
+        target: Decimal = 0,
+        saved: SourcedNumber = .manual(0),
+        byDate: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.target = target
+        self.saved = saved
+        self.byDate = byDate
+    }
+}
+
 /// Payload for the SavePurchase node. Mirrors the `SavePurchase` shape in `NodeDataMap`.
+/// When `items` is present the scalar fields are legacy mirrors maintained by
+/// `normalized()` (goalName/byDate from the first goal, target/saved as sums)
+/// so readers that predate the list still display correct totals.
 public struct SavePurchaseData: Codable, Equatable, Sendable {
     public var goalName: String
     public var target: Decimal
     public var saved: SourcedNumber
     public var byDate: String?
+    public var items: [PurchaseGoal]?
 
-    public init(goalName: String = "", target: Decimal = 0, saved: SourcedNumber = .manual(0), byDate: String? = nil) {
+    public init(
+        goalName: String = "",
+        target: Decimal = 0,
+        saved: SourcedNumber = .manual(0),
+        byDate: String? = nil,
+        items: [PurchaseGoal]? = nil
+    ) {
         self.goalName = goalName
         self.target = target
         self.saved = saved
         self.byDate = byDate
+        self.items = items
     }
 }
 

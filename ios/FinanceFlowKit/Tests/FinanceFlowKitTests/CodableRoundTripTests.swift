@@ -29,8 +29,11 @@ struct CodableRoundTripTests {
             items: [RecurringItem(name: "Base rent", target: .manual(1500), funded: .manual(1500))]
         ))
         s.nodes[.Rent]?.monthlyChecks = ["2026-05": true, "2026-04": true]
-        s.nodes[.SmallEF]?.data = .smallEF(balance: .manual(1000))
-        s.nodes[.BigEF]?.data = .bigEF(targetMonths: 6, balance: .manual(9000))
+        s.nodes[.SmallEF]?.data = .smallEF(SmallEFData(balance: .manual(1000)))
+        s.nodes[.BigEF]?.data = .bigEF(BigEFData(targetMonths: 6, balance: .manual(9000), items: [
+            EFBucket(name: "Car", target: 4000, balance: .manual(2500)),
+            EFBucket(name: "Medical", target: 5000, balance: .manual(6500)),
+        ]))
         s.nodes[.Match]?.data = .match(matchPct: 5, currentContribPct: 5)
         s.nodes[.HighDebt]?.data = .debts([
             // apr via Decimal(string:) — a `22.9` float literal would route through
@@ -38,7 +41,10 @@ struct CodableRoundTripTests {
             Debt(name: "Card", balance: 4200, apr: Decimal(string: "22.9")!, minPayment: 120, paid: false),
         ])
         s.nodes[.IRA]?.data = .ira(IRAData(type: .roth, ytdContribution: .manual(3500), annualLimit: 7000))
-        s.nodes[.SavePurchase]?.data = .savePurchase(SavePurchaseData(goalName: "Car", target: 12000, saved: .manual(4000), byDate: "2027-01"))
+        s.nodes[.SavePurchase]?.data = .savePurchase(SavePurchaseData(
+            goalName: "Car", target: 12000, saved: .manual(4000), byDate: "2027-01",
+            items: [PurchaseGoal(name: "Car", target: 12000, saved: .manual(4000), byDate: "2027-01")]
+        ))
         s.nodes[.Increase401k]?.data = .increase401k(currentPct: 8, targetPct: 15)
         s.nodes[.HSA]?.data = .hsa(HSAData(coverage: .family, ytdContribution: .manual(2000), annualLimit: 8550))
         s.nodes[.College]?.data = .college(CollegeData(monthlyContribution: 200, balance: .manual(5000), targetAge: 18))
