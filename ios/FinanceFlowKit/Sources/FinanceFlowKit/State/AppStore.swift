@@ -72,6 +72,7 @@ public final class AppStore {
 
     public var status: [NodeId: Status] { Derive.status(state) }
     public var progress: Derive.Progress { Derive.overallProgress(state) }
+    public var budget: BudgetSummary { Derive.monthlyBudgetSummary(state) }
     public func status(of id: NodeId) -> Status { status[id] ?? .upcoming }
 
     // MARK: - Mutations (mirror store.ts)
@@ -104,7 +105,7 @@ public final class AppStore {
     }
 
     public func setNodeData(_ id: NodeId, _ data: NodeData) {
-        mutate { $0.nodes[id, default: NodeState()].data = data }
+        mutate { $0.nodes[id, default: NodeState()].data = data.normalized() }
     }
 
     public func toggleMonthlyCheck(_ id: NodeId, _ ymKey: String) {

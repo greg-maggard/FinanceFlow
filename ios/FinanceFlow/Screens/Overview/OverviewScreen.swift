@@ -20,6 +20,7 @@ struct OverviewScreen: View {
             ScrollView {
                 VStack(spacing: theme.spacing.xl) {
                     overallCard(progress: progress)
+                    if store.budget.target > 0 { budgetCard(store.budget) }
                     if let node = currentNode { nextUpCard(node) }
                     phasesCard
                 }
@@ -56,6 +57,21 @@ struct OverviewScreen: View {
                         .foregroundStyle(theme.colors.textSecondary)
                 }
                 Spacer()
+            }
+        }
+    }
+
+    private func budgetCard(_ budget: BudgetSummary) -> some View {
+        let c = theme.phaseColor(.foundations)
+        return GlassCard {
+            VStack(alignment: .leading, spacing: theme.spacing.sm) {
+                Text("Monthly budget")
+                    .font(theme.typography.headline)
+                    .foregroundStyle(theme.colors.textPrimary)
+                GoalBar(value: budget.funded.displayDouble, max: budget.target.displayDouble, color: c.base)
+                Text("Funded \(CurrencyFormat.string(budget.funded)) of \(CurrencyFormat.string(budget.target)) this month")
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.textSecondary)
             }
         }
     }

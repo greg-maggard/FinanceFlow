@@ -10,8 +10,8 @@ import Foundation
 /// `kind` is supplied by `NodeId.dataKind`. `AppState`'s decoder wires this up.
 public enum NodeData: Equatable, Sendable {
     case recurring(RecurringData)                                   // Rent, Food, Essential, Income, Health, MinDebt, NonEssential
-    case smallEF(balance: SourcedNumber)                            // SmallEF
-    case bigEF(targetMonths: Int, balance: SourcedNumber)           // BigEF
+    case smallEF(SmallEFData)                                       // SmallEF
+    case bigEF(BigEFData)                                           // BigEF
     case match(matchPct: Decimal, currentContribPct: Decimal)       // Match
     case debts([Debt])                                              // HighDebt, ModDebt
     case ira(IRAData)                                               // IRA
@@ -65,8 +65,6 @@ public extension NodeId {
 // Cases whose payload is a small object (rather than a single Codable struct or
 // array) need explicit keys so the encoded JSON matches the web exactly.
 
-private enum SmallEFKeys: String, CodingKey { case balance }
-private enum BigEFKeys: String, CodingKey { case targetMonths, balance }
 private enum MatchKeys: String, CodingKey { case matchPct, currentContribPct }
 private enum DebtsKeys: String, CodingKey { case debts }
 private enum Increase401kKeys: String, CodingKey { case currentPct, targetPct }
@@ -80,14 +78,9 @@ extension NodeData {
         case .recurring:
             self = .recurring(try RecurringData(from: decoder))
         case .smallEF:
-            let c = try decoder.container(keyedBy: SmallEFKeys.self)
-            self = .smallEF(balance: try c.decode(SourcedNumber.self, forKey: .balance))
+            self = .smallEF(try SmallEFData(from: decoder))
         case .bigEF:
-            let c = try decoder.container(keyedBy: BigEFKeys.self)
-            self = .bigEF(
-                targetMonths: try c.decode(Int.self, forKey: .targetMonths),
-                balance: try c.decode(SourcedNumber.self, forKey: .balance)
-            )
+            self = .bigEF(try BigEFData(from: decoder))
         case .match:
             let c = try decoder.container(keyedBy: MatchKeys.self)
             self = .match(
@@ -124,13 +117,10 @@ extension NodeData {
         switch self {
         case let .recurring(data):
             try data.encode(to: encoder)
-        case let .smallEF(balance):
-            var c = encoder.container(keyedBy: SmallEFKeys.self)
-            try c.encode(balance, forKey: .balance)
-        case let .bigEF(targetMonths, balance):
-            var c = encoder.container(keyedBy: BigEFKeys.self)
-            try c.encode(targetMonths, forKey: .targetMonths)
-            try c.encode(balance, forKey: .balance)
+        case let .smallEF(data):
+            try data.encode(to: encoder)
+        case let .bigEF(data):
+            try data.encode(to: encoder)
         case let .match(matchPct, currentContribPct):
             var c = encoder.container(keyedBy: MatchKeys.self)
             try c.encode(matchPct, forKey: .matchPct)
@@ -157,15 +147,87 @@ extension NodeData {
     }
 }
 
+// MARK: - Write normalization
+//
+// Sub-goal lists keep a legacy scalar mirror so documents written here stay
+// meaningful to readers that predate the lists (the web app reads the single
+// `balance` until its items UI ships). Applied centrally in
+// `AppStore.setNodeData`, so every write path maintains the invariants.
+
+public extension SmallEFData {
+    /// Canonical write shape: mirror `balance` = Σ bucket balances while
+    /// buckets exist; collapse an empty list to nil.
+    func normalized() -> SmallEFData {
+        var d = self
+        if let items = d.items, !items.isEmpty {
+            d.balance = .manual(items.reduce(0) { $0 + $1.balance.value })
+        } else {
+            d.items = nil
+        }
+        return d
+    }
+}
+
+public extension BigEFData {
+    /// Canonical write shape: mirror `balance` = Σ bucket balances while
+    /// buckets exist; collapse an empty list to nil.
+    func normalized() -> BigEFData {
+        var d = self
+        if let items = d.items, !items.isEmpty {
+            d.balance = .manual(items.reduce(0) { $0 + $1.balance.value })
+        } else {
+            d.items = nil
+        }
+        return d
+    }
+}
+
+public extension RecurringData {
+    /// Canonical write shape: an empty `items` list is the same as no items.
+    func normalized() -> RecurringData {
+        var d = self
+        if d.items?.isEmpty == true { d.items = nil }
+        return d
+    }
+}
+
+public extension SavePurchaseData {
+    /// Canonical write shape: while goals exist, the legacy scalars mirror them
+    /// (first goal's name/date, summed target/saved); an empty list collapses.
+    func normalized() -> SavePurchaseData {
+        var d = self
+        if let items = d.items, !items.isEmpty {
+            d.goalName = items[0].name
+            d.target = items.reduce(0) { $0 + $1.target }
+            d.saved = .manual(items.reduce(0) { $0 + $1.saved.value })
+            d.byDate = items[0].byDate
+        } else {
+            d.items = nil
+        }
+        return d
+    }
+}
+
+public extension NodeData {
+    /// Canonical write shape for payloads with sub-goal lists; identity for the rest.
+    func normalized() -> NodeData {
+        switch self {
+        case let .recurring(d): return .recurring(d.normalized())
+        case let .smallEF(d): return .smallEF(d.normalized())
+        case let .bigEF(d): return .bigEF(d.normalized())
+        case let .savePurchase(d): return .savePurchase(d.normalized())
+        default: return self
+        }
+    }
+}
+
 // MARK: - Typed accessors
 //
 // Convenience for views/forms to read a case without an exhaustive switch.
 public extension NodeData {
     var recurring: RecurringData? { if case let .recurring(v) = self { return v } else { return nil } }
-    var smallEFBalance: SourcedNumber? { if case let .smallEF(v) = self { return v } else { return nil } }
-    var bigEF: (targetMonths: Int, balance: SourcedNumber)? {
-        if case let .bigEF(m, b) = self { return (m, b) } else { return nil }
-    }
+    var smallEF: SmallEFData? { if case let .smallEF(v) = self { return v } else { return nil } }
+    var bigEF: BigEFData? { if case let .bigEF(v) = self { return v } else { return nil } }
     var match: (matchPct: Decimal, currentContribPct: Decimal)? {
         if case let .match(m, c) = self { return (m, c) } else { return nil }
     }
