@@ -107,6 +107,7 @@ struct JSONWireFormatTests {
         var s = AppState.makeInitial()
         s.nodes[.SmallEF]?.data = .smallEF(SmallEFData(balance: .manual(500)))
         s.nodes[.BigEF]?.data = .bigEF(BigEFData(targetMonths: 4, balance: .manual(2000)))
+        s.nodes[.SavePurchase]?.data = .savePurchase(SavePurchaseData(goalName: "Car", target: 12000, saved: .manual(4000)))
 
         let data = try JSONCoder.encode(s)
         let obj = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -116,6 +117,34 @@ struct JSONWireFormatTests {
         #expect(smallEF.keys.sorted() == ["balance"])
         let bigEF = try #require((nodes["BigEF"] as? [String: Any])?["data"] as? [String: Any])
         #expect(bigEF.keys.sorted() == ["balance", "targetMonths"])
+        let purchase = try #require((nodes["SavePurchase"] as? [String: Any])?["data"] as? [String: Any])
+        #expect(purchase.keys.sorted() == ["goalName", "saved", "target"])
+    }
+
+    @Test("web-authored purchase goals decode; legacy single-goal documents decode with nil items")
+    func decodesPurchaseGoals() throws {
+        let webJSON = """
+        {
+          "version": 1,
+          "settings": { "iraAnnualLimit": 7000, "hsaSelfLimit": 4300, "hsaFamilyLimit": 8550 },
+          "decisions": {},
+          "nodes": {
+            "SavePurchase": { "completed": false, "notes": "", "data": {
+              "goalName": "Down payment", "target": 52000, "saved": { "value": 15000.1, "source": "manual" },
+              "items": [
+                { "id": "g1", "name": "Down payment", "target": 40000, "saved": { "value": 15000, "source": "manual" }, "byDate": "2028-06" },
+                { "id": "g2", "name": "New car", "target": 12000, "saved": { "value": 0.1, "source": "manual" } }
+              ]
+            } }
+          }
+        }
+        """
+        let decoded = try IO.importString(webJSON)
+        let goals = try #require(decoded.node(.SavePurchase).data?.savePurchase?.items)
+        #expect(goals.count == 2)
+        #expect(goals[0].byDate == "2028-06")
+        #expect(goals[1].saved.value == Decimal(string: "0.1")!)
+        #expect(goals[1].byDate == nil)
     }
 
     @Test("web-authored EF buckets decode to exact Decimals; absent buckets decode as nil")

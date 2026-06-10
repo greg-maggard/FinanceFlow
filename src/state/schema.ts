@@ -53,6 +53,14 @@ export type EFBucket = {
   balance: SourcedNumber;
 };
 
+export type PurchaseGoal = {
+  id: string;
+  name: string;
+  target: number;
+  saved: SourcedNumber;
+  byDate?: string;
+};
+
 export type RecurringData = {
   target: SourcedNumber;
   funded?: SourcedNumber;
@@ -78,10 +86,13 @@ export type NodeDataMap = {
     annualLimit: number;
   };
   SavePurchase: {
+    // When items is present the scalar fields are legacy mirrors maintained on
+    // write (first goal's name/date, summed target/saved) for older readers.
     goalName: string;
     target: number;
     saved: SourcedNumber;
     byDate?: string;
+    items?: PurchaseGoal[];
   };
   Increase401k: { currentPct: number; targetPct: number };
   HSA: {

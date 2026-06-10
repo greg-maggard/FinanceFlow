@@ -28,6 +28,20 @@ struct NormalizationTests {
         #expect(SmallEFData(balance: .manual(500), items: []).normalized().items == nil)
         #expect(BigEFData(targetMonths: 3, balance: .manual(0), items: []).normalized().items == nil)
         #expect(RecurringData(target: .manual(100), items: []).normalized().items == nil)
+        #expect(SavePurchaseData(goalName: "Car", items: []).normalized().items == nil)
+    }
+
+    @Test("SavePurchase mirrors the legacy scalars from its goals")
+    func savePurchaseMirrors() {
+        let d = SavePurchaseData(goalName: "stale", target: 1, saved: .manual(1), byDate: "2020-01", items: [
+            PurchaseGoal(name: "Down payment", target: 40000, saved: .manual(15000), byDate: "2028-06"),
+            PurchaseGoal(name: "New car", target: 12000, saved: .manual(Decimal(string: "0.1")!)),
+        ]).normalized()
+        #expect(d.goalName == "Down payment")
+        #expect(d.target == 52000)
+        #expect(d.saved == .manual(Decimal(string: "15000.1")!))
+        #expect(d.byDate == "2028-06")
+        #expect(d.items?.count == 2)
     }
 
     @Test("data without lists is untouched")
