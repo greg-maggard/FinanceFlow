@@ -72,6 +72,18 @@ The on-device document and JSON export use the **same shape as the web app**
 implements a custom `Codable` to keep `decisions` / `nodes` / `categoryMap` as
 keyed JSON objects and to decode each node's payload by its id.
 
+### The graph board zoom is UIKit-backed
+
+The app is otherwise pure SwiftUI, but `Screens/Graph/GraphScreen` hosts the
+32-node canvas inside a `UIScrollView` (`ZoomableScrollView`). SwiftUI's
+`ScrollView` + `scaleEffect` can only scale from a *fixed* anchor, so a pinch
+always jumped to that corner; `UIScrollView` gives native focal-point pinch
+zoom and pan-while-zoomed for free. Node taps are resolved by a tap recognizer
+that hit-tests `GraphLayout.node(at:)` rather than per-node `Button`s — a
+`Button`'s gesture recognizer would claim a finger that lands on a card and
+starve the scroll view's two-finger pinch. `NodeCard` is therefore purely
+visual; nodes keep an `accessibilityAction` so VoiceOver can still open them.
+
 ## Deferred to v2 (seams already in place)
 
 - **YNAB / Plaid** — `BalanceProvider` protocol ships; only `ManualProvider` is wired.
