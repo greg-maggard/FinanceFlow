@@ -35,6 +35,9 @@ swift test
 `DeriveTests` is a direct port of the web's `src/graph/derive.test.ts` and is the
 load-bearing contract: the iOS graph must route identically to the web app.
 
+These tests also run in CI on every PR that touches `ios/`
+(`.github/workflows/ios.yml`).
+
 ## Architecture
 
 ```
