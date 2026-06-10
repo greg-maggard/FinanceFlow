@@ -46,6 +46,13 @@ export type RecurringItem = {
   funded?: SourcedNumber;
 };
 
+export type EFBucket = {
+  id: string;
+  name: string;
+  target: number;
+  balance: SourcedNumber;
+};
+
 export type RecurringData = {
   target: SourcedNumber;
   funded?: SourcedNumber;
@@ -60,8 +67,8 @@ export type NodeDataMap = {
   Health: RecurringData;
   MinDebt: RecurringData;
   NonEssential: RecurringData;
-  SmallEF: { balance: SourcedNumber };
-  BigEF: { targetMonths: 3 | 4 | 5 | 6; balance: SourcedNumber };
+  SmallEF: { balance: SourcedNumber; items?: EFBucket[] };
+  BigEF: { targetMonths: 3 | 4 | 5 | 6; balance: SourcedNumber; items?: EFBucket[] };
   Match: { matchPct: number; currentContribPct: number };
   HighDebt: { debts: Debt[] };
   ModDebt: { debts: Debt[] };

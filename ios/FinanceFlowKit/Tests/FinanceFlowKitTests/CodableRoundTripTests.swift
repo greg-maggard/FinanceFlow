@@ -29,8 +29,11 @@ struct CodableRoundTripTests {
             items: [RecurringItem(name: "Base rent", target: .manual(1500), funded: .manual(1500))]
         ))
         s.nodes[.Rent]?.monthlyChecks = ["2026-05": true, "2026-04": true]
-        s.nodes[.SmallEF]?.data = .smallEF(balance: .manual(1000))
-        s.nodes[.BigEF]?.data = .bigEF(targetMonths: 6, balance: .manual(9000))
+        s.nodes[.SmallEF]?.data = .smallEF(SmallEFData(balance: .manual(1000)))
+        s.nodes[.BigEF]?.data = .bigEF(BigEFData(targetMonths: 6, balance: .manual(9000), items: [
+            EFBucket(name: "Car", target: 4000, balance: .manual(2500)),
+            EFBucket(name: "Medical", target: 5000, balance: .manual(6500)),
+        ]))
         s.nodes[.Match]?.data = .match(matchPct: 5, currentContribPct: 5)
         s.nodes[.HighDebt]?.data = .debts([
             // apr via Decimal(string:) — a `22.9` float literal would route through

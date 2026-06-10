@@ -78,7 +78,7 @@ struct ProgressTests {
     func smallEF() {
         let s = state {
             $0.settings.monthlyExpenses = 3000
-            $0.nodes[.SmallEF]?.data = .smallEF(balance: .manual(3000))
+            $0.nodes[.SmallEF]?.data = .smallEF(SmallEFData(balance: .manual(3000)))
         }
         guard case let .goal(value, max, ready) = progressOf(s, .SmallEF) else {
             Issue.record("expected .goal"); return
@@ -90,11 +90,77 @@ struct ProgressTests {
 
     @Test("SmallEF floors at $1000 when expenses are unset")
     func smallEFFloor() {
-        let s = state { $0.nodes[.SmallEF]?.data = .smallEF(balance: .manual(1000)) }
+        let s = state { $0.nodes[.SmallEF]?.data = .smallEF(SmallEFData(balance: .manual(1000))) }
         guard case let .goal(_, max, ready) = progressOf(s, .SmallEF) else {
             Issue.record("expected .goal"); return
         }
         #expect(max == 1000)
+        #expect(ready == true)
+    }
+
+    @Test("EF buckets: balance is the bucket sum; under-allocated buckets keep the computed target")
+    func efBucketsUnderComputed() {
+        let s = state {
+            $0.settings.monthlyExpenses = 3000
+            $0.nodes[.SmallEF]?.data = .smallEF(SmallEFData(balance: .manual(0), items: [
+                EFBucket(name: "Medical", target: 1000, balance: .manual(800)),
+                EFBucket(name: "Car", target: 500, balance: .manual(500)),
+            ]))
+        }
+        guard case let .goal(value, max, ready) = progressOf(s, .SmallEF) else {
+            Issue.record("expected .goal"); return
+        }
+        // Bucket targets (1500) are below one month of expenses (3000): the
+        // flowchart milestone wins, so naming buckets never shrinks the goal.
+        #expect(max == 3000)
+        #expect(value == 1300)
+        #expect(ready == false)
+    }
+
+    @Test("EF buckets: targets beyond the computed milestone grow the goal")
+    func efBucketsOverComputed() {
+        let s = state {
+            $0.settings.monthlyExpenses = 3000
+            $0.nodes[.BigEF]?.data = .bigEF(BigEFData(targetMonths: 3, balance: .manual(0), items: [
+                EFBucket(name: "Medical", target: 6000, balance: .manual(6000)),
+                EFBucket(name: "Home", target: 5000, balance: .manual(4000)),
+            ]))
+        }
+        guard case let .goal(value, max, ready) = progressOf(s, .BigEF) else {
+            Issue.record("expected .goal"); return
+        }
+        // Σ bucket targets (11000) exceeds 3 × 3000: the user's real goal shows.
+        #expect(max == 11000)
+        #expect(value == 10000)
+        #expect(ready == false)
+    }
+
+    @Test("BigEF buckets define the goal when expenses are unset (computed target is 0)")
+    func bigEFBucketsNoExpenses() {
+        let s = state {
+            $0.nodes[.BigEF]?.data = .bigEF(BigEFData(targetMonths: 6, balance: .manual(0), items: [
+                EFBucket(name: "Car", target: 4000, balance: .manual(4000)),
+            ]))
+        }
+        guard case let .goal(value, max, ready) = progressOf(s, .BigEF) else {
+            Issue.record("expected .goal"); return
+        }
+        #expect(max == 4000)
+        #expect(value == 4000)
+        #expect(ready == true)
+    }
+
+    @Test("EF without buckets keeps the single-balance behavior")
+    func bigEFSingleBalance() {
+        let s = state {
+            $0.settings.monthlyExpenses = 3000
+            $0.nodes[.BigEF]?.data = .bigEF(BigEFData(targetMonths: 6, balance: .manual(18000)))
+        }
+        guard case let .goal(value, max, ready) = progressOf(s, .BigEF) else {
+            Issue.record("expected .goal"); return
+        }
+        #expect(max == 18000)
+        #expect(value == 18000)
         #expect(ready == true)
     }
 
