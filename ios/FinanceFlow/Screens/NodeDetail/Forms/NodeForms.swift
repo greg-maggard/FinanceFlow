@@ -140,17 +140,31 @@ private struct SmallEFForm: View {
     @Environment(\.theme) private var theme
 
     var body: some View {
-        let balance = store.state.node(.SmallEF).data?.smallEFBalance?.value ?? 0
-        let target = emergencyFundTarget(monthlyExpenses: store.state.settings.monthlyExpenses)
-        VStack(alignment: .leading, spacing: theme.spacing.sm) {
-            Text("Target: \(CurrencyFormat.string(target))")
+        let data = store.state.node(.SmallEF).data?.smallEF ?? SmallEFData()
+        let computed = emergencyFundTarget(monthlyExpenses: store.state.settings.monthlyExpenses)
+        let buckets = data.items ?? []
+
+        VStack(alignment: .leading, spacing: theme.spacing.md) {
+            Text("Target: \(CurrencyFormat.string(data.effectiveTarget(computed: computed)))")
                 .font(theme.typography.caption)
                 .foregroundStyle(theme.colors.textSecondary)
-            LabeledField(label: "Current balance") {
-                NumberField(value: balance) { store.setNodeData(.SmallEF, .smallEF(balance: .manual($0))) }
+            if buckets.isEmpty {
+                LabeledField(label: "Current balance") {
+                    NumberField(value: data.balance.value) { write(SmallEFData(balance: .manual($0))) }
+                }
+                GlassButton(title: "Split into buckets", systemImage: "list.bullet") {
+                    // Seed bucket #1 with the current balance so the node total carries over.
+                    write(SmallEFData(balance: data.balance, items: [EFBucket(balance: data.balance)]))
+                }
+            } else {
+                EFBucketEditor(buckets: buckets, computedTarget: computed, nodeId: .SmallEF) { items in
+                    write(SmallEFData(balance: data.balance, items: items))
+                }
             }
         }
     }
+
+    private func write(_ d: SmallEFData) { store.setNodeData(.SmallEF, .smallEF(d)) }
 }
 
 private struct BigEFForm: View {
@@ -158,28 +172,109 @@ private struct BigEFForm: View {
     @Environment(\.theme) private var theme
 
     var body: some View {
-        let current = store.state.node(.BigEF).data?.bigEF
-        let months = current?.targetMonths ?? 3
-        let balance = current?.balance.value ?? 0
-        let target = bigEmergencyFundTarget(months: months, monthlyExpenses: store.state.settings.monthlyExpenses)
+        let data = store.state.node(.BigEF).data?.bigEF ?? BigEFData()
+        let computed = bigEmergencyFundTarget(months: data.targetMonths, monthlyExpenses: store.state.settings.monthlyExpenses)
+        let buckets = data.items ?? []
+        let target = data.effectiveTarget(computed: computed)
 
         VStack(alignment: .leading, spacing: theme.spacing.md) {
             LabeledField(label: "Target months") {
                 Picker("", selection: Binding(
-                    get: { months },
-                    set: { store.setNodeData(.BigEF, .bigEF(targetMonths: $0, balance: .manual(balance))) }
+                    get: { data.targetMonths },
+                    set: { write(BigEFData(targetMonths: $0, balance: data.balance, items: data.items)) }
                 )) {
                     ForEach([3, 4, 5, 6], id: \.self) { Text("\($0) mo").tag($0) }
                 }
                 .pickerStyle(.segmented)
             }
-            LabeledField(label: "Balance") {
-                NumberField(value: balance) { store.setNodeData(.BigEF, .bigEF(targetMonths: months, balance: .manual($0))) }
+            if buckets.isEmpty {
+                LabeledField(label: "Balance") {
+                    NumberField(value: data.balance.value) { write(BigEFData(targetMonths: data.targetMonths, balance: .manual($0))) }
+                }
+                GlassButton(title: "Split into buckets", systemImage: "list.bullet") {
+                    // Seed bucket #1 with the current balance so the node total carries over.
+                    write(BigEFData(targetMonths: data.targetMonths, balance: data.balance, items: [EFBucket(balance: data.balance)]))
+                }
+            } else {
+                EFBucketEditor(buckets: buckets, computedTarget: computed, nodeId: .BigEF) { items in
+                    write(BigEFData(targetMonths: data.targetMonths, balance: data.balance, items: items))
+                }
             }
             Text(target > 0 ? "Target: \(CurrencyFormat.string(target))" : "Set monthly expenses in Settings to compute target.")
                 .font(theme.typography.caption)
                 .foregroundStyle(theme.colors.textSecondary)
         }
+    }
+
+    private func write(_ d: BigEFData) { store.setNodeData(.BigEF, .bigEF(d)) }
+}
+
+/// Bucket list editor shared by the two emergency-fund forms: per-bucket cards
+/// with their own goal bars, the unallocated hint, and add/collapse actions.
+private struct EFBucketEditor: View {
+    @Environment(\.theme) private var theme
+    let buckets: [EFBucket]
+    let computedTarget: Decimal
+    let nodeId: NodeId
+    /// Receives the next bucket list; nil collapses back to the single balance.
+    let write: ([EFBucket]?) -> Void
+
+    var body: some View {
+        let bucketTargets = buckets.reduce(Decimal(0)) { $0 + $1.target }
+        let color = theme.phaseColor(Flowchart.node(nodeId).phase).base
+        VStack(alignment: .leading, spacing: theme.spacing.sm) {
+            FieldLabel(text: "Buckets")
+            ForEach(buckets) { bucket in
+                SubGoalCard(
+                    namePlaceholder: "Bucket (e.g. Medical)",
+                    name: nameBinding(bucket),
+                    value: bucket.balance.value,
+                    target: bucket.target,
+                    color: color,
+                    onDelete: { write(buckets.filter { $0.id != bucket.id }) }
+                ) {
+                    HStack(spacing: theme.spacing.sm) {
+                        LabeledField(label: "Target") {
+                            NumberField(value: bucket.target) { v in patch(bucket.id) { $0.target = v } }
+                        }
+                        LabeledField(label: "Balance") {
+                            NumberField(value: bucket.balance.value) { v in patch(bucket.id) { $0.balance = .manual(v) } }
+                        }
+                    }
+                }
+            }
+            if bucketTargets < computedTarget {
+                Text("Buckets cover \(CurrencyFormat.string(bucketTargets)) of your \(CurrencyFormat.string(computedTarget)) target — \(CurrencyFormat.string(computedTarget - bucketTargets)) unallocated.")
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.textSecondary)
+            }
+            GlassButton(title: "Add bucket", systemImage: "plus") {
+                write(buckets + [EFBucket()])
+            }
+            Button {
+                // Collapse to the single balance; the mirrored total carries over.
+                write(nil)
+            } label: {
+                Text("Use single balance")
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.textSecondary)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func patch(_ id: String, _ change: (inout EFBucket) -> Void) {
+        var next = buckets
+        guard let idx = next.firstIndex(where: { $0.id == id }) else { return }
+        change(&next[idx])
+        write(next)
+    }
+
+    private func nameBinding(_ bucket: EFBucket) -> Binding<String> {
+        Binding(
+            get: { (buckets.first { $0.id == bucket.id })?.name ?? bucket.name },
+            set: { newValue in patch(bucket.id) { $0.name = newValue } }
+        )
     }
 }
 

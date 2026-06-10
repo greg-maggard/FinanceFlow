@@ -105,7 +105,7 @@ public final class AppStore {
     }
 
     public func setNodeData(_ id: NodeId, _ data: NodeData) {
-        mutate { $0.nodes[id, default: NodeState()].data = data }
+        mutate { $0.nodes[id, default: NodeState()].data = data.normalized() }
     }
 
     public func toggleMonthlyCheck(_ id: NodeId, _ ymKey: String) {

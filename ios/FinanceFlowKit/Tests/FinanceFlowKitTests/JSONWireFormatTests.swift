@@ -21,7 +21,7 @@ struct JSONWireFormatTests {
             target: .manual(Decimal(string: "1800.99")!),
             funded: .manual(Decimal(string: "1234.56")!)
         ))
-        s.nodes[.SmallEF]?.data = .smallEF(balance: .manual(1000))
+        s.nodes[.SmallEF]?.data = .smallEF(SmallEFData(balance: .manual(1000)))
         s.nodes[.Match]?.data = .match(matchPct: Decimal(string: "4.5")!, currentContribPct: 3)
         s.nodes[.HighDebt]?.data = .debts([
             Debt(name: "Card", balance: Decimal(string: "4200.25")!, apr: Decimal(string: "22.9")!, minPayment: 120, paid: false),
@@ -97,6 +97,55 @@ struct JSONWireFormatTests {
         let once = try JSONCoder.encode(richMoneyState())
         let twice = try JSONCoder.encode(JSONCoder.decode(once))
         #expect(once == twice)
+    }
+
+    @Test("states that never touch sub-goal lists encode without items keys")
+    func absentSubGoalListsStayAbsent() throws {
+        // The sub-goal lists are additive optional fields on version-1 payloads.
+        // A document that never used them must keep exactly its old keys, or
+        // we've silently changed the bytes of every existing save file.
+        var s = AppState.makeInitial()
+        s.nodes[.SmallEF]?.data = .smallEF(SmallEFData(balance: .manual(500)))
+        s.nodes[.BigEF]?.data = .bigEF(BigEFData(targetMonths: 4, balance: .manual(2000)))
+
+        let data = try JSONCoder.encode(s)
+        let obj = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let nodes = try #require(obj["nodes"] as? [String: Any])
+
+        let smallEF = try #require((nodes["SmallEF"] as? [String: Any])?["data"] as? [String: Any])
+        #expect(smallEF.keys.sorted() == ["balance"])
+        let bigEF = try #require((nodes["BigEF"] as? [String: Any])?["data"] as? [String: Any])
+        #expect(bigEF.keys.sorted() == ["balance", "targetMonths"])
+    }
+
+    @Test("web-authored EF buckets decode to exact Decimals; absent buckets decode as nil")
+    func decodesEFBuckets() throws {
+        let webJSON = """
+        {
+          "version": 1,
+          "settings": { "iraAnnualLimit": 7000, "hsaSelfLimit": 4300, "hsaFamilyLimit": 8550 },
+          "decisions": {},
+          "nodes": {
+            "SmallEF": { "completed": false, "notes": "", "data": {
+              "balance": { "value": 1000, "source": "manual" }
+            } },
+            "BigEF": { "completed": false, "notes": "", "data": {
+              "targetMonths": 6,
+              "balance": { "value": 9000, "source": "manual" },
+              "items": [
+                { "id": "b1", "name": "Car", "target": 4000.25, "balance": { "value": 2500.5, "source": "manual" } }
+              ]
+            } }
+          }
+        }
+        """
+        let decoded = try IO.importString(webJSON)
+
+        #expect(decoded.node(.SmallEF).data?.smallEF?.items == nil)
+        let buckets = try #require(decoded.node(.BigEF).data?.bigEF?.items)
+        #expect(buckets.count == 1)
+        #expect(buckets[0].target == Decimal(string: "4000.25")!)
+        #expect(buckets[0].balance.value == Decimal(string: "2500.5")!)
     }
 
     @Test("a sum that drifts as Double stays exact as Decimal end-to-end")

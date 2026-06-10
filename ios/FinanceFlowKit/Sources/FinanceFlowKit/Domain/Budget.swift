@@ -22,6 +22,42 @@ public extension RecurringData {
     }
 }
 
+// MARK: - Emergency fund buckets
+
+public extension SmallEFData {
+    /// Σ bucket balances when the fund is split into buckets, else the single balance.
+    var effectiveBalance: Decimal {
+        if let items, !items.isEmpty {
+            return items.reduce(0) { $0 + $1.balance.value }
+        }
+        return balance.value
+    }
+
+    /// The node's goal given the flowchart-computed target: buckets may *grow*
+    /// the goal beyond the prescribed milestone but can never shrink it.
+    func effectiveTarget(computed: Decimal) -> Decimal {
+        guard let items, !items.isEmpty else { return computed }
+        return max(computed, items.reduce(0) { $0 + $1.target })
+    }
+}
+
+public extension BigEFData {
+    /// Σ bucket balances when the fund is split into buckets, else the single balance.
+    var effectiveBalance: Decimal {
+        if let items, !items.isEmpty {
+            return items.reduce(0) { $0 + $1.balance.value }
+        }
+        return balance.value
+    }
+
+    /// The node's goal given the flowchart-computed target: buckets may *grow*
+    /// the goal beyond the prescribed milestone but can never shrink it.
+    func effectiveTarget(computed: Decimal) -> Decimal {
+        guard let items, !items.isEmpty else { return computed }
+        return max(computed, items.reduce(0) { $0 + $1.target })
+    }
+}
+
 // MARK: - Monthly budget rollup
 
 /// Dollar-denominated rollup of the monthly budget across the seven recurring
