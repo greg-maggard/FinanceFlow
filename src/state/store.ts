@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { AppState, Decision, DecisionId, NodeDataMap, NodeId, Settings } from "./schema";
 import { makeInitialState } from "./schema";
+import { migrate } from "./io";
 import { LocalStorageAdapter } from "./storage";
 import type { StorageAdapter } from "./storage";
 
@@ -22,10 +23,8 @@ function loadInitial(): AppState {
   if (typeof localStorage === "undefined") return makeInitialState();
   try {
     const raw = localStorage.getItem("financeflow:state:v1");
-    if (raw) {
-      const parsed = JSON.parse(raw) as AppState;
-      if (parsed.version === 1) return parsed;
-    }
+    // migrate() upgrades v1 documents in place; the key name is historic.
+    if (raw) return migrate(JSON.parse(raw));
   } catch {
     // fall through
   }
@@ -84,6 +83,7 @@ if (typeof window !== "undefined") {
       settings: s.settings,
       decisions: s.decisions,
       nodes: s.nodes,
+      budget: s.budget,
       shownCelebrations: s.shownCelebrations,
       earnedMedals: s.earnedMedals,
       categoryMap: s.categoryMap,

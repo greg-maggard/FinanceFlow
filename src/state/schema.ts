@@ -158,11 +158,94 @@ export type Settings = {
   hsaFamilyLimit: number;
 };
 
+// ---------------------------------------------------------------------------
+// Budget book (v2): the zero-based envelope core.
+//
+// Money stays dollars-as-`number` on the wire (matching every other field);
+// all arithmetic must go through the cents-exact helpers in
+// `src/budget/ledger.ts` so float drift can never corrupt envelope math.
+
+export type AccountKind = "checking" | "savings" | "cash" | "credit" | "loan" | "tracking";
+
+export type Account = {
+  id: string;
+  name: string;
+  kind: AccountKind;
+  /** Annual rate, for credit/loan accounts. */
+  apr?: number;
+  minPayment?: number;
+  closed?: boolean;
+  source: Source;
+  plaidAccountId?: string;
+};
+
+/**
+ * A single ledger line. Outflows are negative, inflows positive. Income
+ * enters the budget categorized as `RTA_CATEGORY_ID`. Transfers carry
+ * `transferAccountId` on both paired rows and no category — except transfers
+ * to an off-budget account, which must be categorized because the money
+ * leaves the budget.
+ */
+export type Txn = {
+  id: string;
+  accountId: string;
+  /** Local calendar date, "YYYY-MM-DD". */
+  date: string;
+  payee?: string;
+  amount: number;
+  categoryId?: string;
+  transferAccountId?: string;
+  memo?: string;
+  source: Source;
+  plaidTxnId?: string;
+};
+
+export type CategoryGroup = {
+  id: string;
+  name: string;
+  order: number;
+};
+
+export type Category = {
+  id: string;
+  groupId: string;
+  name: string;
+  order: number;
+  /** Needed-for-spending target per month. */
+  monthlyTarget?: number;
+  /** Save-a-total target (purchase goals, EF buckets). */
+  balanceTarget?: number;
+  targetDate?: string;
+  hidden?: boolean;
+  /** Flowchart node this category reports into, if any. */
+  nodeId?: NodeId;
+};
+
+/** "YYYY-MM", local time — the same convention as `monthlyChecks`. */
+export type MonthKey = string;
+
+/** Reserved category id for inflows that fund Ready-to-Assign. */
+export const RTA_CATEGORY_ID = "rta";
+
+export type BudgetBook = {
+  accounts: Account[];
+  transactions: Txn[];
+  groups: CategoryGroup[];
+  categories: Category[];
+  /** assignments[month][categoryId] = dollars assigned to that envelope in that month. */
+  assignments: Record<MonthKey, Record<string, number>>;
+};
+
+export function emptyBudgetBook(): BudgetBook {
+  return { accounts: [], transactions: [], groups: [], categories: [], assignments: {} };
+}
+
 export type AppState = {
-  version: 1;
+  version: 2;
   settings: Settings;
   decisions: Decisions;
   nodes: Record<NodeId, NodeState>;
+  budget: BudgetBook;
   shownCelebrations?: NodeId[];
   earnedMedals?: number[];
   categoryMap?: Partial<Record<NodeId, string>>;
@@ -194,8 +277,9 @@ export function makeInitialState(): AppState {
   const nodes = {} as Record<NodeId, NodeState>;
   for (const id of ids) nodes[id] = emptyNodeState();
   return {
-    version: 1,
+    version: 2,
     settings: { ...DEFAULT_SETTINGS },
+    budget: emptyBudgetBook(),
     shownCelebrations: [],
     earnedMedals: [],
     decisions: {
