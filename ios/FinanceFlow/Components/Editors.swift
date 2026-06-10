@@ -15,6 +15,38 @@ struct SourceBadge: View {
     }
 }
 
+/// Card chrome shared by sub-goal list editors (recurring items, EF buckets,
+/// purchase goals): a name + delete header, caller-supplied fields, and a mini
+/// goal bar once the sub-goal has a target.
+struct SubGoalCard<Fields: View>: View {
+    @Environment(\.theme) private var theme
+    let namePlaceholder: String
+    @Binding var name: String
+    let value: Decimal
+    let target: Decimal
+    var color: Color
+    let onDelete: () -> Void
+    @ViewBuilder var fields: Fields
+
+    var body: some View {
+        GlassCard(padding: theme.spacing.md) {
+            VStack(alignment: .leading, spacing: theme.spacing.sm) {
+                HStack {
+                    PlainTextField(placeholder: namePlaceholder, text: $name)
+                    Button(role: .destructive, action: onDelete) {
+                        Image(systemName: "trash").foregroundStyle(theme.colors.danger)
+                    }
+                    .buttonStyle(.plain)
+                }
+                fields
+                if target > 0 {
+                    GoalBar(value: value.displayDouble, max: target.displayDouble, color: color)
+                }
+            }
+        }
+    }
+}
+
 /// Editable list of debts for HighDebt / ModDebt. Mirrors `DebtFields`.
 struct DebtListEditor: View {
     @Environment(AppStore.self) private var store

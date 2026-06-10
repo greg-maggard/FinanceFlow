@@ -196,6 +196,12 @@ enum NumberFormat {
     }
 }
 
+extension Decimal {
+    /// Lossy conversion for views that animate/draw in `Double` (bars, rings).
+    /// Comparisons and sums must stay in exact `Decimal`; this is display-only.
+    var displayDouble: Double { NSDecimalNumber(decimal: self).doubleValue }
+}
+
 private extension Decimal {
     /// True when there's no fractional part, so currency formatting hides cents.
     var isWholeAmount: Bool {

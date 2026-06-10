@@ -31,17 +31,9 @@ public func progressOf(_ state: AppState, _ id: NodeId) -> ProgressInfo {
     if node.kind == .decision { return .none(ready: false) }
 
     if recurringNodes.contains(id) {
-        let data = state.node(id).data?.recurring
-        if let items = data?.items, !items.isEmpty {
-            let target = items.reduce(0) { $0 + $1.target.value }
-            let funded = items.reduce(0) { $0 + ($1.funded?.value ?? 0) }
-            if target > 0 {
-                return .goal(value: funded.asDouble, max: target.asDouble, ready: funded >= target)
-            }
-            return .none(ready: true)
-        }
-        let target = data?.target.value ?? 0
-        let funded = data?.funded?.value ?? 0
+        let data = state.node(id).data?.recurring ?? RecurringData()
+        let target = data.effectiveTarget
+        let funded = data.effectiveFunded
         if target > 0 {
             return .goal(value: funded.asDouble, max: target.asDouble, ready: funded >= target)
         }
