@@ -11,15 +11,19 @@ public struct AppState: Equatable, Sendable {
     /// Absence of a key == unanswered (web stores explicit `null`; we omit).
     public var decisions: [DecisionId: Decision]
     public var nodes: [NodeId: NodeState]
+    /// The zero-based envelope core (v2). Empty on documents migrated from v1
+    /// builds until `IO.migrate` seeds it.
+    public var budget: BudgetBook
     public var shownCelebrations: [NodeId]
     public var earnedMedals: [Int]
     public var categoryMap: [NodeId: String]
 
     public init(
-        version: Int = 1,
+        version: Int = 2,
         settings: Settings,
         decisions: [DecisionId: Decision],
         nodes: [NodeId: NodeState],
+        budget: BudgetBook = BudgetBook(),
         shownCelebrations: [NodeId] = [],
         earnedMedals: [Int] = [],
         categoryMap: [NodeId: String] = [:]
@@ -28,6 +32,7 @@ public struct AppState: Equatable, Sendable {
         self.settings = settings
         self.decisions = decisions
         self.nodes = nodes
+        self.budget = budget
         self.shownCelebrations = shownCelebrations
         self.earnedMedals = earnedMedals
         self.categoryMap = categoryMap
@@ -39,10 +44,11 @@ public struct AppState: Equatable, Sendable {
         var nodes: [NodeId: NodeState] = [:]
         for id in NodeId.allCases { nodes[id] = NodeState() }
         return AppState(
-            version: 1,
+            version: 2,
             settings: .default,
             decisions: [:],
             nodes: nodes,
+            budget: BudgetBook(),
             shownCelebrations: [],
             earnedMedals: [],
             categoryMap: [:]
@@ -58,7 +64,7 @@ public struct AppState: Equatable, Sendable {
 
 extension AppState: Codable {
     enum CodingKeys: String, CodingKey {
-        case version, settings, decisions, nodes, shownCelebrations, earnedMedals, categoryMap
+        case version, settings, decisions, nodes, budget, shownCelebrations, earnedMedals, categoryMap
     }
 
     public init(from decoder: Decoder) throws {
@@ -66,6 +72,9 @@ extension AppState: Codable {
 
         version = try c.decodeIfPresent(Int.self, forKey: .version) ?? 1
         settings = try c.decodeIfPresent(Settings.self, forKey: .settings) ?? .default
+        // Absent on v1 documents; a present-but-malformed book is a hard error
+        // (the quarantine path preserves the file) rather than silent data loss.
+        budget = try c.decodeIfPresent(BudgetBook.self, forKey: .budget) ?? BudgetBook()
 
         // decisions: { "Q_Match": "yes" | null, ... } — null/absent == unanswered.
         var decisions: [DecisionId: Decision] = [:]
@@ -119,6 +128,7 @@ extension AppState: Codable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(version, forKey: .version)
         try c.encode(settings, forKey: .settings)
+        try c.encode(budget, forKey: .budget)
 
         // Write all ten decision keys (null when unanswered) to match the web.
         var dc = c.nestedContainer(keyedBy: DecisionId.self, forKey: .decisions)
