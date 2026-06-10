@@ -107,6 +107,8 @@ struct RootView: View {
                             Text("FinanceFlow")
                                 .font(theme.typography.headline)
                                 .foregroundStyle(theme.colors.textPrimary)
+                                .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
                             Text("\(progress.done)/\(progress.total) · \(progress.pct)%")
                                 .font(theme.typography.caption)
                                 .foregroundStyle(theme.colors.textSecondary)
@@ -117,15 +119,7 @@ struct RootView: View {
 
                 Spacer()
 
-                Picker("View", selection: $mode.animation(theme.motion.standard)) {
-                    ForEach(BoardMode.allCases, id: \.self) { m in
-                        Image(systemName: m.icon)
-                            .accessibilityLabel(m.label)
-                            .tag(m)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 160)
+                ModeSwitcher(mode: $mode)
 
                 GlassIconButton(systemName: "gearshape.fill") { showSettings = true }
             }
@@ -170,6 +164,47 @@ struct RootView: View {
             }
             .frame(height: 4)
         }
+    }
+}
+
+/// Collapsed-by-default board switcher: shows only the current screen's icon
+/// (sized and styled like its `GlassIconButton` siblings), unfolds to reveal
+/// the alternatives on tap, and folds back once one is chosen.
+private struct ModeSwitcher: View {
+    @Environment(\.theme) private var theme
+    @Binding var mode: BoardMode
+    @State private var expanded = false
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(visibleModes, id: \.self) { m in
+                Button {
+                    withAnimation(theme.motion.standard) {
+                        if expanded { mode = m }
+                        expanded.toggle()
+                    }
+                } label: {
+                    Image(systemName: m.icon)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(m == mode ? theme.colors.textPrimary : theme.colors.textSecondary)
+                        .frame(width: 38, height: 38)
+                        .background {
+                            if expanded && m == mode {
+                                Circle().fill(theme.colors.surfaceElevated)
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(expanded ? m.label : "Switch screen, current: \(m.label)")
+                .transition(.opacity.combined(with: .scale(scale: 0.6)))
+            }
+        }
+        .background(theme.colors.surface, in: Capsule())
+        .overlay(Capsule().strokeBorder(theme.colors.stroke, lineWidth: 1))
+    }
+
+    private var visibleModes: [BoardMode] {
+        expanded ? BoardMode.allCases : [mode]
     }
 }
 
