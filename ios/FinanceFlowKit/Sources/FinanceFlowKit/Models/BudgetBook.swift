@@ -68,6 +68,8 @@ public struct Txn: Codable, Equatable, Sendable, Identifiable {
     public var amount: Decimal
     public var categoryId: String?
     public var transferAccountId: String?
+    /// The other row of a transfer pair, so the pair can be edited/deleted atomically.
+    public var transferPairId: String?
     public var memo: String?
     public var source: Source
     public var plaidTxnId: String?
@@ -80,6 +82,7 @@ public struct Txn: Codable, Equatable, Sendable, Identifiable {
         amount: Decimal,
         categoryId: String? = nil,
         transferAccountId: String? = nil,
+        transferPairId: String? = nil,
         memo: String? = nil,
         source: Source = .manual,
         plaidTxnId: String? = nil
@@ -91,6 +94,7 @@ public struct Txn: Codable, Equatable, Sendable, Identifiable {
         self.amount = amount
         self.categoryId = categoryId
         self.transferAccountId = transferAccountId
+        self.transferPairId = transferPairId
         self.memo = memo
         self.source = source
         self.plaidTxnId = plaidTxnId

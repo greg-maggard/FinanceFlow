@@ -166,6 +166,43 @@ struct LedgerTests {
         #expect(june.categories["phone"]?.available == 0)
     }
 
+    @Test("builds transfer pairs: linked ids, opposite amounts, no category between on-budget accounts")
+    func transferPairOnToOn() {
+        let accounts = makeBook().accounts
+        let pair = Ledger.pairTransfer(
+            accounts: accounts, from: "checking", to: "savings",
+            amount: 200, date: "2026-06-05", categoryID: "should-be-stripped"
+        )
+        #expect(pair.out.amount == -200)
+        #expect(pair.inflow.amount == 200)
+        #expect(pair.out.transferPairId == pair.inflow.id)
+        #expect(pair.inflow.transferPairId == pair.out.id)
+        #expect(pair.out.transferAccountId == "savings")
+        #expect(pair.inflow.transferAccountId == "checking")
+        #expect(pair.out.categoryId == nil)
+        #expect(pair.inflow.categoryId == nil)
+    }
+
+    @Test("puts the category on the on-budget row of an on->off transfer")
+    func transferPairOnToOff() {
+        let pair = Ledger.pairTransfer(
+            accounts: makeBook().accounts, from: "checking", to: "ira",
+            amount: 500, date: "2026-06-10", categoryID: "retirement"
+        )
+        #expect(pair.out.categoryId == "retirement")
+        #expect(pair.inflow.categoryId == nil)
+    }
+
+    @Test("puts the category on the on-budget row of an off->on transfer")
+    func transferPairOffToOn() {
+        let pair = Ledger.pairTransfer(
+            accounts: makeBook().accounts, from: "ira", to: "checking",
+            amount: 300, date: "2026-06-12", categoryID: "windfall"
+        )
+        #expect(pair.out.categoryId == nil)
+        #expect(pair.inflow.categoryId == "windfall")
+    }
+
     @Test("accumulates a multi-month funded-vs-spent chain")
     func multiMonthChain() {
         let months = ["2026-04", "2026-05", "2026-06"]
