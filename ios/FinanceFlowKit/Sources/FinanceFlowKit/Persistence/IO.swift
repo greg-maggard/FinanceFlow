@@ -29,12 +29,13 @@ public enum IO {
         try importJSON(Data(raw.utf8))
     }
 
-    /// Forward-migration hook. Today only version 1 exists. A newer/unknown
-    /// version is a hard error — the caller must preserve the file, not reset it
-    /// to empty state. Add `case 2:` here as the schema evolves.
-    public static func migrate(_ state: AppState) throws -> AppState {
+    /// Forward-migration hook. A newer/unknown version is a hard error — the
+    /// caller must preserve the file, not reset it to empty state.
+    public static func migrate(_ state: AppState, now: Date = Date()) throws -> AppState {
         switch state.version {
         case 1:
+            return Migration.v1ToV2(state, now: now)
+        case 2:
             return state
         default:
             throw ImportError.unsupportedVersion(state.version)
