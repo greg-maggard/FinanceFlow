@@ -135,6 +135,91 @@ public final class AppStore {
         }
     }
 
+    // MARK: - Budget mutations (mirror the budget actions in store.ts)
+
+    /// Set (or clear, with `amount <= 0`) a category's assignment for a month.
+    public func assign(month: String, categoryID: String, amount: Decimal) {
+        mutate { state in
+            var table = state.budget.assignments[month] ?? [:]
+            if amount > 0 { table[categoryID] = amount } else { table[categoryID] = nil }
+            state.budget.assignments[month] = table.isEmpty ? nil : table
+        }
+    }
+
+    public func addAccount(_ account: Account) {
+        mutate { $0.budget.accounts.append(account) }
+    }
+
+    public func updateAccount(_ account: Account) {
+        mutate { state in
+            if let i = state.budget.accounts.firstIndex(where: { $0.id == account.id }) {
+                state.budget.accounts[i] = account
+            }
+        }
+    }
+
+    public func addTxn(_ txn: Txn) {
+        mutate { $0.budget.transactions.append(txn) }
+    }
+
+    public func updateTxn(_ txn: Txn) {
+        mutate { state in
+            if let i = state.budget.transactions.firstIndex(where: { $0.id == txn.id }) {
+                state.budget.transactions[i] = txn
+            }
+        }
+    }
+
+    /// Delete a transaction — and its pair, when it's one row of a transfer.
+    public func deleteTxn(_ id: String) {
+        mutate { state in
+            guard let txn = state.budget.transactions.first(where: { $0.id == id }) else { return }
+            var ids: Set<String> = [id]
+            if let pair = txn.transferPairId { ids.insert(pair) }
+            state.budget.transactions.removeAll { ids.contains($0.id) }
+        }
+    }
+
+    public func addTransfer(
+        from: String,
+        to: String,
+        amount: Decimal,
+        date: String,
+        payee: String? = nil,
+        categoryID: String? = nil
+    ) {
+        mutate { state in
+            let pair = Ledger.pairTransfer(
+                accounts: state.budget.accounts,
+                from: from, to: to, amount: amount, date: date,
+                payee: payee, categoryID: categoryID
+            )
+            state.budget.transactions.append(contentsOf: [pair.out, pair.inflow])
+        }
+    }
+
+    public func addGroup(name: String) {
+        mutate {
+            $0.budget.groups.append(CategoryGroup(id: ShortID.make(), name: name, order: $0.budget.groups.count))
+        }
+    }
+
+    public func addCategory(groupID: String, name: String) {
+        mutate {
+            $0.budget.categories.append(
+                BudgetCategory(id: ShortID.make(), groupId: groupID, name: name, order: $0.budget.categories.count)
+            )
+        }
+    }
+
+    public func updateCategory(_ category: BudgetCategory) {
+        mutate { state in
+            if let i = state.budget.categories.firstIndex(where: { $0.id == category.id }) {
+                state.budget.categories[i] = category
+            }
+        }
+    }
+
     /// Mark a node's completion celebration as shown (idempotent).
     public func markCelebrationShown(_ id: NodeId) {
         mutate {

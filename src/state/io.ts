@@ -13,7 +13,7 @@ import {
   emptyBudgetBook,
 } from "./schema";
 import { ymKey } from "./recurring";
-import { fromCents, toCents } from "../budget/ledger";
+import { fromCents, isoDay, toCents } from "../budget/ledger";
 
 export function exportJson(state: AppState): string {
   return JSON.stringify(state, null, 2);
@@ -60,12 +60,6 @@ const RECURRING_NODES = [
   "MinDebt",
   "NonEssential",
 ] as const;
-
-function isoDay(d: Date): string {
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${mm}-${dd}`;
-}
 
 function migrateV1(v1: V1State, now: Date): AppState {
   const book = emptyBudgetBook();
