@@ -6,15 +6,18 @@ An app to track your progress through the
 per-node tracking (emergency fund balance, debt list with APRs, IRA/HSA YTD
 vs. limits, 529, savings goals).
 
-MVP is a single-page static web app. Data lives in your browser
-(`localStorage`) with JSON export/import for backup. The architecture leaves
-clean seams for two planned future additions: Plaid/YNAB integration and user
-accounts with cloud sync.
+A single-page static web app. Data lives in your browser (`localStorage`)
+with JSON export/import for backup. The architecture leaves clean seams for
+two planned future additions: Plaid integration and user accounts with cloud
+sync.
+
+A native SwiftUI iOS port with full feature parity lives in
+[`ios/`](ios/README.md).
 
 ## Stack
 
 - Vite + React + TypeScript
-- React Flow (`@xyflow/react`) for the interactive graph
+- Framer Motion for the focus-stage and phase-trail animations
 - Zustand for state
 - Tailwind CSS
 - Vitest for unit tests
@@ -28,18 +31,28 @@ npm test         # vitest
 npm run build    # static dist/
 ```
 
+CI (GitHub Actions) runs the web tests + build and the FinanceFlowKit Swift
+tests on every PR — see `.github/workflows/`.
+
 ## Deploying
 
 `npm run build` produces `dist/`, which deploys as-is to GitHub Pages, Vercel,
 Netlify, or any static host.
 
+## Integrations
+
+- **YNAB** (`src/integrations/ynab.ts`, `src/state/ynabStore.ts`) — connect
+  with a personal access token (Settings → YNAB), map recurring expense
+  categories to YNAB categories, and "Refresh from YNAB" pulls each mapped
+  category's budgeted amount and goal target for the current month.
+
 ## Extension seams (designed in, not built)
 
 - **`StorageAdapter` interface** (`src/state/storage.ts`) — only
-  `LocalStorageAdapter` ships in MVP. A future `RemoteStorageAdapter` for
+  `LocalStorageAdapter` ships today. A future `RemoteStorageAdapter` for
   Supabase or similar drops in without touching the store.
 - **`BalanceProvider` interface** (`src/integrations/balanceProvider.ts`) —
-  only `ManualProvider` ships in MVP. Per-field `source: "manual" | "plaid" |
-  "ynab"` attribution is already in the schema, so a future Plaid/YNAB
-  provider can populate fields without schema churn.
+  only `ManualProvider` is wired. Per-field `source: "manual" | "plaid" |
+  "ynab"` attribution is already in the schema, so a future Plaid provider
+  can populate fields without schema churn.
 - **`AppState.version`** is in place for forward migrations.

@@ -1,0 +1,38 @@
+# FinanceFlowKit is a pure Swift package (no UIKit/SwiftUI, no simulator),
+# so `swift test` on a bare macOS runner covers the whole domain layer.
+# macOS runners bill at 10x on private repos — hence the ios/** path filter,
+# the concurrency cancellation, and the tight timeout.
+name: iOS CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+  pull_request:
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: macos-15
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: ios/FinanceFlowKit
+    steps:
+      - uses: actions/checkout@v5
+      # The tests use Swift Testing, which needs a Swift 6+ toolchain.
+      - name: Select newest installed Xcode
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -n 1)/Contents/Developer"
+          swift --version
+      - name: Run FinanceFlowKit tests
+        run: swift test
