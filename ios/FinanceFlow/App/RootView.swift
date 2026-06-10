@@ -32,7 +32,8 @@ struct RootView: View {
             Group {
                 switch mode {
                 case .graph:
-                    GraphScreen(onSelect: { selectedNode = $0 })
+                    // The pill grows a row when a budget is set; keep the board clear of it.
+                    GraphScreen(topInset: showBudgetRow ? 128 : 96, onSelect: { selectedNode = $0 })
                 case .trail:
                     PhaseTrailScreen(onSelect: { selectedNode = $0 })
                 }
@@ -72,38 +73,45 @@ struct RootView: View {
         }
     }
 
+    private var showBudgetRow: Bool { store.budget.target > 0 }
+
     private var topBar: some View {
         let progress = store.progress
-        return HStack(spacing: theme.spacing.sm) {
-            Button {
-                showOverview = true
-            } label: {
-                HStack(spacing: theme.spacing.sm) {
-                    ProgressRing(fraction: Double(progress.pct) / 100, color: theme.phaseColor(activePhase).base)
-                        .frame(width: 26, height: 26)
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("FinanceFlow")
-                            .font(theme.typography.headline)
-                            .foregroundStyle(theme.colors.textPrimary)
-                        Text("\(progress.done)/\(progress.total) · \(progress.pct)%")
-                            .font(theme.typography.caption)
-                            .foregroundStyle(theme.colors.textSecondary)
+        return VStack(spacing: theme.spacing.sm) {
+            HStack(spacing: theme.spacing.sm) {
+                Button {
+                    showOverview = true
+                } label: {
+                    HStack(spacing: theme.spacing.sm) {
+                        ProgressRing(fraction: Double(progress.pct) / 100, color: theme.phaseColor(activePhase).base)
+                            .frame(width: 26, height: 26)
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text("FinanceFlow")
+                                .font(theme.typography.headline)
+                                .foregroundStyle(theme.colors.textPrimary)
+                            Text("\(progress.done)/\(progress.total) · \(progress.pct)%")
+                                .font(theme.typography.caption)
+                                .foregroundStyle(theme.colors.textSecondary)
+                        }
                     }
                 }
-            }
-            .buttonStyle(.plain)
+                .buttonStyle(.plain)
 
-            Spacer()
+                Spacer()
 
-            Picker("View", selection: $mode.animation(theme.motion.standard)) {
-                ForEach(BoardMode.allCases, id: \.self) { m in
-                    Image(systemName: m.icon).tag(m)
+                Picker("View", selection: $mode.animation(theme.motion.standard)) {
+                    ForEach(BoardMode.allCases, id: \.self) { m in
+                        Image(systemName: m.icon).tag(m)
+                    }
                 }
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 110)
+                .pickerStyle(.segmented)
+                .frame(width: 110)
 
-            GlassIconButton(systemName: "gearshape.fill") { showSettings = true }
+                GlassIconButton(systemName: "gearshape.fill") { showSettings = true }
+            }
+            if showBudgetRow {
+                budgetRow(store.budget)
+            }
         }
         .padding(.horizontal, theme.spacing.lg)
         .padding(.vertical, theme.spacing.md)
@@ -116,6 +124,32 @@ struct RootView: View {
                 .strokeBorder(theme.colors.stroke, lineWidth: 1)
         )
         .padding(.horizontal, theme.spacing.md)
+    }
+
+    /// Compact dollar rollup of the monthly budget (the seven recurring nodes).
+    private func budgetRow(_ budget: BudgetSummary) -> some View {
+        let fraction = budget.target > 0 ? min(1, (budget.funded / budget.target).displayDouble) : 0
+        return VStack(alignment: .leading, spacing: theme.spacing.xs) {
+            HStack {
+                Text("Monthly budget")
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.textSecondary)
+                Spacer()
+                Text("\(CurrencyFormat.string(budget.funded)) of \(CurrencyFormat.string(budget.target))")
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.textPrimary)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(theme.colors.surface)
+                    Capsule()
+                        .fill(theme.phaseColor(.foundations).base)
+                        .frame(width: geo.size.width * fraction)
+                        .animation(theme.motion.bar, value: fraction)
+                }
+            }
+            .frame(height: 4)
+        }
     }
 }
 

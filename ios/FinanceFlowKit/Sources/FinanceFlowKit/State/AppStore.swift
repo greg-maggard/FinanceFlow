@@ -72,6 +72,7 @@ public final class AppStore {
 
     public var status: [NodeId: Status] { Derive.status(state) }
     public var progress: Derive.Progress { Derive.overallProgress(state) }
+    public var budget: BudgetSummary { Derive.monthlyBudgetSummary(state) }
     public func status(of id: NodeId) -> Status { status[id] ?? .upcoming }
 
     // MARK: - Mutations (mirror store.ts)

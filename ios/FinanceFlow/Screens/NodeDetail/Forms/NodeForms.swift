@@ -35,11 +35,12 @@ private struct RecurringForm: View {
     let nodeId: NodeId
 
     private var data: RecurringData { store.state.node(nodeId).data?.recurring ?? RecurringData() }
+    private var phaseColor: Color { theme.phaseColor(Flowchart.node(nodeId).phase).base }
 
     var body: some View {
-        let hasItems = !(data.items?.isEmpty ?? true)
+        let items = data.items ?? []
         VStack(alignment: .leading, spacing: theme.spacing.md) {
-            if !hasItems {
+            if items.isEmpty {
                 HStack(spacing: theme.spacing.md) {
                     LabeledField(label: "Monthly target") {
                         NumberField(value: data.target.value) { v in write { $0.target = .manual(v) } }
@@ -48,46 +49,57 @@ private struct RecurringForm: View {
                         NumberField(value: data.funded?.value ?? 0) { v in write { $0.funded = .manual(v) } }
                     }
                 }
+                GlassButton(title: "Split into items", systemImage: "list.bullet") {
+                    // Seed item #1 from the single amounts so the node total carries over.
+                    writeItems([RecurringItem(target: data.target, funded: data.funded)])
+                }
+            } else {
+                itemsEditor(items)
             }
-
-            DisclosureGroup {
-                itemsEditor
-            } label: {
-                Text(hasItems ? "Items — bar totals their goals" : "Or split into items")
-                    .font(theme.typography.caption)
-                    .foregroundStyle(theme.colors.textSecondary)
-            }
-            .tint(theme.colors.textSecondary)
         }
     }
 
-    private var itemsEditor: some View {
-        let items = data.items ?? []
-        return VStack(alignment: .leading, spacing: theme.spacing.sm) {
+    private func itemsEditor(_ items: [RecurringItem]) -> some View {
+        VStack(alignment: .leading, spacing: theme.spacing.sm) {
+            FieldLabel(text: "Items")
             ForEach(items) { item in
-                GlassCard(padding: theme.spacing.md) {
-                    VStack(spacing: theme.spacing.sm) {
-                        HStack {
-                            PlainTextField(placeholder: "Item (e.g. Power)", text: itemBinding(item, \.name))
-                            Button(role: .destructive) { writeItems(items.filter { $0.id != item.id }) } label: {
-                                Image(systemName: "trash").foregroundStyle(theme.colors.danger)
-                            }
-                            .buttonStyle(.plain)
+                SubGoalCard(
+                    namePlaceholder: "Item (e.g. Power)",
+                    name: itemBinding(item, \.name),
+                    value: item.funded?.value ?? 0,
+                    target: item.target.value,
+                    color: phaseColor,
+                    onDelete: { writeItems(items.filter { $0.id != item.id }) }
+                ) {
+                    HStack(spacing: theme.spacing.sm) {
+                        LabeledField(label: "Target") {
+                            NumberField(value: item.target.value) { v in patchItem(item.id) { $0.target = .manual(v) } }
                         }
-                        HStack(spacing: theme.spacing.sm) {
-                            LabeledField(label: "Target") {
-                                NumberField(value: item.target.value) { v in patchItem(item.id) { $0.target = .manual(v) } }
-                            }
-                            LabeledField(label: "Saved") {
-                                NumberField(value: item.funded?.value ?? 0) { v in patchItem(item.id) { $0.funded = .manual(v) } }
-                            }
+                        LabeledField(label: "Saved") {
+                            NumberField(value: item.funded?.value ?? 0) { v in patchItem(item.id) { $0.funded = .manual(v) } }
                         }
                     }
                 }
             }
+            Text("Total \(CurrencyFormat.string(data.effectiveFunded)) of \(CurrencyFormat.string(data.effectiveTarget))")
+                .font(theme.typography.caption)
+                .foregroundStyle(theme.colors.textSecondary)
             GlassButton(title: "Add item", systemImage: "plus") {
                 writeItems(items + [RecurringItem()])
             }
+            Button {
+                // Collapse back to a single pair, keeping the totals.
+                write {
+                    $0.target = .manual($0.effectiveTarget)
+                    $0.funded = .manual($0.effectiveFunded)
+                    $0.items = nil
+                }
+            } label: {
+                Text("Use single amount")
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.textSecondary)
+            }
+            .buttonStyle(.plain)
         }
     }
 
