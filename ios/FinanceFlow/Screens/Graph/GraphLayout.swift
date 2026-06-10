@@ -62,6 +62,22 @@ enum GraphLayout {
         height: margin * 2 + maxRow * rowSpacing + nodeSize.height
     )
 
+    /// Hit-test a point in canvas coordinates against the node frames. Nodes are
+    /// laid out with spacing larger than `nodeSize`, so they never overlap and
+    /// the first match is unambiguous. Used by the graph's tap recognizer.
+    static func node(at point: CGPoint) -> NodeId? {
+        grid.keys.first { id in
+            let c = position(id)
+            let frame = CGRect(
+                x: c.x - nodeSize.width / 2,
+                y: c.y - nodeSize.height / 2,
+                width: nodeSize.width,
+                height: nodeSize.height
+            )
+            return frame.contains(point)
+        }
+    }
+
     /// True if an edge goes "upward" on the board (the retirement loop-backs).
     static func isLoopBack(from: NodeId, to: NodeId) -> Bool {
         (grid[to]?.row ?? 0) < (grid[from]?.row ?? 0)
