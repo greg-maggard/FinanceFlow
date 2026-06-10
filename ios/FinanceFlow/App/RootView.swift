@@ -4,9 +4,23 @@ import FinanceFlowKit
 enum BoardMode: String, CaseIterable {
     case graph
     case trail
+    case budget
 
-    var icon: String { self == .graph ? "point.3.connected.trianglepath.dotted" : "list.bullet.indent" }
-    var label: String { self == .graph ? "Map" : "Trail" }
+    var icon: String {
+        switch self {
+        case .graph: return "point.3.connected.trianglepath.dotted"
+        case .trail: return "list.bullet.indent"
+        case .budget: return "dollarsign.circle"
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .graph: return "Map"
+        case .trail: return "Trail"
+        case .budget: return "Budget"
+        }
+    }
 }
 
 struct RootView: View {
@@ -36,6 +50,10 @@ struct RootView: View {
                     GraphScreen(topInset: showBudgetRow ? 128 : 96, onSelect: { selectedNode = $0 })
                 case .trail:
                     PhaseTrailScreen(onSelect: { selectedNode = $0 })
+                case .budget:
+                    // Mirror Trail's 112pt clearance under the floating bar, plus
+                    // the same +32 the graph gets when the budget pill row shows.
+                    BudgetScreen(topInset: showBudgetRow ? 144 : 112)
                 }
             }
             .transition(.opacity)
@@ -101,11 +119,13 @@ struct RootView: View {
 
                 Picker("View", selection: $mode.animation(theme.motion.standard)) {
                     ForEach(BoardMode.allCases, id: \.self) { m in
-                        Image(systemName: m.icon).tag(m)
+                        Image(systemName: m.icon)
+                            .accessibilityLabel(m.label)
+                            .tag(m)
                     }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 110)
+                .frame(width: 160)
 
                 GlassIconButton(systemName: "gearshape.fill") { showSettings = true }
             }

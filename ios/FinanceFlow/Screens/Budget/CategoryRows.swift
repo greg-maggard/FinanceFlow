@@ -1,0 +1,232 @@
+import SwiftUI
+import FinanceFlowKit
+
+/// Category groups with their envelope rows for the displayed month, plus the
+/// add-group / add-category affordances. Assigned is the number you edit here;
+/// activity and available are derived by `Ledger` and only read.
+struct CategoriesSection: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var theme
+    let book: BudgetBook
+    let month: String
+    let snapshot: Ledger.MonthSnapshot
+
+    /// What the single name-entry alert is creating.
+    private enum AddTarget {
+        case group
+        case category(CategoryGroup)
+    }
+
+    @State private var addTarget: AddTarget?
+    @State private var newName = ""
+
+    private var groups: [CategoryGroup] {
+        book.groups.sorted { ($0.order, $0.name) < ($1.order, $1.name) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.md) {
+            if groups.isEmpty {
+                emptyState
+            } else {
+                ForEach(groups) { group in
+                    groupCard(group)
+                }
+                GlassButton(title: "Add group", systemImage: "plus") {
+                    newName = ""
+                    addTarget = .group
+                }
+            }
+        }
+        .alert(alertTitle, isPresented: alertShown, presenting: addTarget) { target in
+            TextField("Name", text: $newName)
+            Button("Add") { commit(target) }
+            Button("Cancel", role: .cancel) { }
+        } message: { target in
+            switch target {
+            case .group:
+                Text("Groups organize related envelopes — Bills, Everyday, Fun.")
+            case .category:
+                Text("A category is an envelope you assign dollars into.")
+            }
+        }
+    }
+
+    // MARK: - Group card
+
+    private func groupCard(_ group: CategoryGroup) -> some View {
+        let cats = book.categories
+            .filter { $0.groupId == group.id && $0.hidden != true }
+            .sorted { ($0.order, $0.name) < ($1.order, $1.name) }
+
+        return GlassCard(padding: theme.spacing.md) {
+            VStack(alignment: .leading, spacing: theme.spacing.md) {
+                Text(group.name)
+                    .font(theme.typography.headline)
+                    .foregroundStyle(theme.colors.textPrimary)
+
+                if cats.isEmpty {
+                    Text("No categories yet.")
+                        .font(theme.typography.caption)
+                        .foregroundStyle(theme.colors.textSecondary)
+                } else {
+                    ForEach(cats) { category in
+                        CategoryRow(
+                            category: category,
+                            month: month,
+                            entry: snapshot.categories[category.id]
+                                ?? Ledger.CategoryMonth(assigned: 0, activity: 0, available: 0)
+                        )
+                        if category.id != cats.last?.id {
+                            Rectangle()
+                                .fill(theme.colors.separator)
+                                .frame(height: 1)
+                        }
+                    }
+                }
+
+                Button {
+                    newName = ""
+                    addTarget = .category(group)
+                } label: {
+                    Label("Add category", systemImage: "plus")
+                        .font(theme.typography.caption)
+                        .foregroundStyle(theme.colors.primary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Add category to \(group.name)")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    // MARK: - Empty state
+
+    private var emptyState: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: theme.spacing.sm) {
+                Text("Give every dollar a job")
+                    .font(theme.typography.headline)
+                    .foregroundStyle(theme.colors.textPrimary)
+                Text("Create your first category group — envelopes live inside groups like Bills or Everyday.")
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.textSecondary)
+                GlassButton(title: "Add group", systemImage: "plus") {
+                    newName = ""
+                    addTarget = .group
+                }
+            }
+        }
+    }
+
+    // MARK: - Add alert plumbing
+
+    private var alertShown: Binding<Bool> {
+        Binding(
+            get: { addTarget != nil },
+            set: { if !$0 { addTarget = nil } }
+        )
+    }
+
+    private var alertTitle: String {
+        switch addTarget {
+        case .category(let group): return "New category in \(group.name)"
+        default: return "New group"
+        }
+    }
+
+    private func commit(_ target: AddTarget) {
+        let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        switch target {
+        case .group:
+            store.addGroup(name: name)
+        case .category(let group):
+            store.addCategory(groupID: group.id, name: name)
+        }
+    }
+}
+
+/// One envelope for the month: name, tappable assigned amount (edits commit
+/// through `store.assign`), derived activity, the color-coded available
+/// balance, and a thin progress bar once the category has a target.
+private struct CategoryRow: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var theme
+    let category: BudgetCategory
+    let month: String
+    let entry: Ledger.CategoryMonth
+
+    @State private var isEditing = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.xs) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(category.name)
+                    .font(theme.typography.callout)
+                    .foregroundStyle(theme.colors.textPrimary)
+                Spacer()
+                Text(CurrencyFormat.string(entry.available))
+                    .font(theme.typography.callout)
+                    .foregroundStyle(availableColor)
+            }
+
+            if isEditing {
+                HStack(spacing: theme.spacing.sm) {
+                    NumberField(value: entry.assigned) { v in
+                        store.assign(month: month, categoryID: category.id, amount: v)
+                    }
+                    GlassIconButton(systemName: "checkmark") {
+                        withAnimation(theme.motion.standard) { isEditing = false }
+                    }
+                    .accessibilityLabel("Done assigning to \(category.name)")
+                }
+            } else {
+                HStack {
+                    Button {
+                        withAnimation(theme.motion.standard) { isEditing = true }
+                    } label: {
+                        HStack(spacing: theme.spacing.xs) {
+                            Image(systemName: "pencil")
+                            Text("Assigned \(CurrencyFormat.string(entry.assigned))")
+                        }
+                        .font(theme.typography.caption)
+                        .foregroundStyle(theme.colors.primary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Edit assigned for \(category.name)")
+                    Spacer()
+                    Text("Activity \(CurrencyFormat.string(entry.activity))")
+                        .font(theme.typography.caption)
+                        .foregroundStyle(theme.colors.textSecondary)
+                }
+            }
+
+            if let target = category.monthlyTarget ?? category.balanceTarget, target > 0 {
+                targetBar(target: target)
+            }
+        }
+    }
+
+    private var availableColor: Color {
+        if entry.available > 0 { return theme.colors.success }
+        if entry.available < 0 { return theme.colors.danger }
+        return theme.colors.textSecondary
+    }
+
+    /// Same thin capsule as RootView's budget pill row: available vs target.
+    private func targetBar(target: Decimal) -> some View {
+        let fraction = min(1, max(0, (entry.available / target).displayDouble))
+        return GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(theme.colors.surface)
+                Capsule()
+                    .fill(fraction >= 1 ? theme.colors.success : theme.colors.primary)
+                    .frame(width: geo.size.width * fraction)
+                    .animation(theme.motion.bar, value: fraction)
+            }
+        }
+        .frame(height: 4)
+        .accessibilityHidden(true)
+    }
+}
