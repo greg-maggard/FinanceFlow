@@ -398,34 +398,81 @@ private struct SavePurchaseForm: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var theme
 
+    private var data: SavePurchaseData { store.state.node(.SavePurchase).data?.savePurchase ?? SavePurchaseData() }
+
+    /// The goals shown: the stored list, else the legacy single-goal fields
+    /// surfaced as goal #1 (written back as a list on first edit). The fixed id
+    /// keeps the card stable across renders while the legacy fields are live.
+    private var goals: [PurchaseGoal] {
+        if let items = data.items, !items.isEmpty { return items }
+        return [PurchaseGoal(id: "legacy", name: data.goalName, target: data.target, saved: data.saved, byDate: data.byDate)]
+    }
+
     var body: some View {
-        let d = store.state.node(.SavePurchase).data?.savePurchase ?? SavePurchaseData()
+        let goals = self.goals
+        let color = theme.phaseColor(Flowchart.node(.SavePurchase).phase).base
         VStack(alignment: .leading, spacing: theme.spacing.md) {
-            LabeledField(label: "Goal name") {
-                PlainTextField(placeholder: "e.g. New car", text: Binding(
-                    get: { d.goalName },
-                    set: { write(d, name: $0) }
-                ))
-            }
-            HStack(spacing: theme.spacing.md) {
-                LabeledField(label: "Target") {
-                    NumberField(value: d.target) { write(d, target: $0) }
+            FieldLabel(text: goals.count > 1 ? "Goals" : "Goal")
+            ForEach(goals) { goal in
+                SubGoalCard(
+                    namePlaceholder: "Goal (e.g. New car)",
+                    name: nameBinding(goal),
+                    value: goal.saved.value,
+                    target: goal.target,
+                    color: color,
+                    onDelete: { remove(goal.id) }
+                ) {
+                    VStack(spacing: theme.spacing.sm) {
+                        HStack(spacing: theme.spacing.sm) {
+                            LabeledField(label: "Target") {
+                                NumberField(value: goal.target) { v in patch(goal.id) { $0.target = v } }
+                            }
+                            LabeledField(label: "Saved") {
+                                NumberField(value: goal.saved.value) { v in patch(goal.id) { $0.saved = .manual(v) } }
+                            }
+                        }
+                        MonthYearField(label: "By date", value: goal.byDate) { v in patch(goal.id) { $0.byDate = v } }
+                    }
                 }
-                LabeledField(label: "Saved") {
-                    NumberField(value: d.saved.value) { write(d, saved: $0) }
-                }
             }
-            MonthYearField(label: "By date", value: d.byDate) { write(d, byDate: $0) }
+            if goals.count > 1 {
+                Text("Total \(CurrencyFormat.string(data.effectiveSaved)) of \(CurrencyFormat.string(data.effectiveTarget))")
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.textSecondary)
+            }
+            GlassButton(title: "Add goal", systemImage: "plus") {
+                writeGoals(goals + [PurchaseGoal()])
+            }
         }
     }
 
-    private func write(_ d: SavePurchaseData, name: String? = nil, target: Decimal? = nil, saved: Decimal? = nil, byDate: String?? = nil) {
-        store.setNodeData(.SavePurchase, .savePurchase(SavePurchaseData(
-            goalName: name ?? d.goalName,
-            target: target ?? d.target,
-            saved: .manual(saved ?? d.saved.value),
-            byDate: byDate ?? d.byDate
-        )))
+    private func writeGoals(_ goals: [PurchaseGoal]) {
+        var d = data
+        d.items = goals
+        store.setNodeData(.SavePurchase, .savePurchase(d))   // normalization mirrors the legacy scalars
+    }
+
+    private func remove(_ id: String) {
+        let remaining = goals.filter { $0.id != id }
+        if remaining.isEmpty {
+            store.setNodeData(.SavePurchase, .savePurchase(SavePurchaseData()))
+        } else {
+            writeGoals(remaining)
+        }
+    }
+
+    private func patch(_ id: String, _ change: (inout PurchaseGoal) -> Void) {
+        var next = goals
+        guard let idx = next.firstIndex(where: { $0.id == id }) else { return }
+        change(&next[idx])
+        writeGoals(next)
+    }
+
+    private func nameBinding(_ goal: PurchaseGoal) -> Binding<String> {
+        Binding(
+            get: { (goals.first { $0.id == goal.id })?.name ?? goal.name },
+            set: { v in patch(goal.id) { $0.name = v } }
+        )
     }
 }
 

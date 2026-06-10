@@ -1,4 +1,4 @@
-import type { AppState, EFBucket, NodeId, RecurringData } from "../../state/schema";
+import type { AppState, EFBucket, NodeId, PurchaseGoal, RecurringData } from "../../state/schema";
 import { bigEmergencyFundTarget, emergencyFundTarget } from "../../state/schema";
 import { RECURRING } from "../../theme/identity";
 import { GRAPH_BY_ID } from "../../graph/flowchart";
@@ -81,6 +81,12 @@ export function progressOf(state: AppState, id: NodeId): ProgressInfo {
       return { kind: "goal", value: cur, max: target, ready: cur >= target };
     }
     case "SavePurchase": {
+      const items = data?.items as PurchaseGoal[] | undefined;
+      if (items && items.length > 0) {
+        const saved = items.reduce((s, g) => s + (g.saved?.value ?? 0), 0);
+        const target = items.reduce((s, g) => s + (g.target ?? 0), 0);
+        return { kind: "goal", value: saved, max: target || 1, ready: target > 0 && saved >= target };
+      }
       const saved = ((data?.saved as { value: number } | undefined)?.value ?? 0);
       const target = (data?.target as number | undefined) ?? 0;
       return { kind: "goal", value: saved, max: target || 1, ready: target > 0 && saved >= target };

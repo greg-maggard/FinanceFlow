@@ -191,6 +191,23 @@ public extension RecurringData {
     }
 }
 
+public extension SavePurchaseData {
+    /// Canonical write shape: while goals exist, the legacy scalars mirror them
+    /// (first goal's name/date, summed target/saved); an empty list collapses.
+    func normalized() -> SavePurchaseData {
+        var d = self
+        if let items = d.items, !items.isEmpty {
+            d.goalName = items[0].name
+            d.target = items.reduce(0) { $0 + $1.target }
+            d.saved = .manual(items.reduce(0) { $0 + $1.saved.value })
+            d.byDate = items[0].byDate
+        } else {
+            d.items = nil
+        }
+        return d
+    }
+}
+
 public extension NodeData {
     /// Canonical write shape for payloads with sub-goal lists; identity for the rest.
     func normalized() -> NodeData {
@@ -198,6 +215,7 @@ public extension NodeData {
         case let .recurring(d): return .recurring(d.normalized())
         case let .smallEF(d): return .smallEF(d.normalized())
         case let .bigEF(d): return .bigEF(d.normalized())
+        case let .savePurchase(d): return .savePurchase(d.normalized())
         default: return self
         }
     }

@@ -41,7 +41,10 @@ struct CodableRoundTripTests {
             Debt(name: "Card", balance: 4200, apr: Decimal(string: "22.9")!, minPayment: 120, paid: false),
         ])
         s.nodes[.IRA]?.data = .ira(IRAData(type: .roth, ytdContribution: .manual(3500), annualLimit: 7000))
-        s.nodes[.SavePurchase]?.data = .savePurchase(SavePurchaseData(goalName: "Car", target: 12000, saved: .manual(4000), byDate: "2027-01"))
+        s.nodes[.SavePurchase]?.data = .savePurchase(SavePurchaseData(
+            goalName: "Car", target: 12000, saved: .manual(4000), byDate: "2027-01",
+            items: [PurchaseGoal(name: "Car", target: 12000, saved: .manual(4000), byDate: "2027-01")]
+        ))
         s.nodes[.Increase401k]?.data = .increase401k(currentPct: 8, targetPct: 15)
         s.nodes[.HSA]?.data = .hsa(HSAData(coverage: .family, ytdContribution: .manual(2000), annualLimit: 8550))
         s.nodes[.College]?.data = .college(CollegeData(monthlyContribution: 200, balance: .manual(5000), targetAge: 18))

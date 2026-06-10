@@ -172,6 +172,35 @@ struct ProgressTests {
         #expect(progressOf(s, .IRA).ready == true)
     }
 
+    @Test("SavePurchase with goals aggregates saved and target")
+    func savePurchaseGoals() {
+        let s = state {
+            $0.nodes[.SavePurchase]?.data = .savePurchase(SavePurchaseData(items: [
+                PurchaseGoal(name: "Down payment", target: 40000, saved: .manual(15000)),
+                PurchaseGoal(name: "New car", target: 12000, saved: .manual(12000)),
+            ]))
+        }
+        guard case let .goal(value, max, ready) = progressOf(s, .SavePurchase) else {
+            Issue.record("expected .goal"); return
+        }
+        #expect(max == 52000)
+        #expect(value == 27000)
+        #expect(ready == false)
+    }
+
+    @Test("SavePurchase without goals keeps the legacy single-goal behavior")
+    func savePurchaseLegacy() {
+        let s = state {
+            $0.nodes[.SavePurchase]?.data = .savePurchase(SavePurchaseData(goalName: "Car", target: 12000, saved: .manual(12000)))
+        }
+        guard case let .goal(value, max, ready) = progressOf(s, .SavePurchase) else {
+            Issue.record("expected .goal"); return
+        }
+        #expect(max == 12000)
+        #expect(value == 12000)
+        #expect(ready == true)
+    }
+
     @Test("decision nodes carry no goal progress")
     func decisionNode() {
         #expect(progressOf(.makeInitial(), .Q_Match) == .none(ready: false))

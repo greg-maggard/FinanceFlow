@@ -74,8 +74,9 @@ public func progressOf(_ state: AppState, _ id: NodeId) -> ProgressInfo {
         let target = data?.increase401k?.targetPct ?? 15
         return .goal(value: cur.asDouble, max: target.asDouble, ready: cur >= target)
     case .SavePurchase:
-        let saved = data?.savePurchase?.saved.value ?? 0
-        let target = data?.savePurchase?.target ?? 0
+        let purchase = data?.savePurchase ?? SavePurchaseData()
+        let saved = purchase.effectiveSaved
+        let target = purchase.effectiveTarget
         return .goal(value: saved.asDouble, max: (target > 0 ? target : 1).asDouble, ready: target > 0 && saved >= target)
     case .HighDebt, .ModDebt:
         let debts = data?.debts ?? []

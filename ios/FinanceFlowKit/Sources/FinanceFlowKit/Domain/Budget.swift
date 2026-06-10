@@ -58,6 +58,26 @@ public extension BigEFData {
     }
 }
 
+// MARK: - Purchase goals
+
+public extension SavePurchaseData {
+    /// Σ goal targets when split into goals, else the single legacy target.
+    var effectiveTarget: Decimal {
+        if let items, !items.isEmpty {
+            return items.reduce(0) { $0 + $1.target }
+        }
+        return target
+    }
+
+    /// Σ saved across goals when split, else the single legacy amount.
+    var effectiveSaved: Decimal {
+        if let items, !items.isEmpty {
+            return items.reduce(0) { $0 + $1.saved.value }
+        }
+        return saved.value
+    }
+}
+
 // MARK: - Monthly budget rollup
 
 /// Dollar-denominated rollup of the monthly budget across the seven recurring
