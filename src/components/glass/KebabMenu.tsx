@@ -5,9 +5,12 @@ import { EASE_FLOW } from "../../theme/motion";
 export function KebabMenu({
   children,
   ariaLabel = "Settings",
+  drop = "down",
 }: {
   children: ReactNode;
   ariaLabel?: string;
+  /** Which way the panel unfolds — rows near a card's clipped bottom edge open "up". */
+  drop?: "down" | "up";
 }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -59,11 +62,15 @@ export function KebabMenu({
       <AnimatePresence>
         {open && (
           <motion.div
-            initial={{ opacity: 0, y: -6, scale: 0.96 }}
+            initial={{ opacity: 0, y: drop === "up" ? 6 : -6, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -6, scale: 0.96 }}
+            exit={{ opacity: 0, y: drop === "up" ? 6 : -6, scale: 0.96 }}
             transition={{ duration: 0.22, ease: EASE_FLOW }}
-            className="absolute right-0 top-full z-30 mt-2 w-80 origin-top-right overflow-hidden rounded-2xl"
+            className={`absolute right-0 z-30 w-80 overflow-hidden rounded-2xl ${
+              drop === "up"
+                ? "bottom-full mb-2 origin-bottom-right"
+                : "top-full mt-2 origin-top-right"
+            }`}
             style={{
               background: "rgba(18, 22, 34, 0.85)",
               backdropFilter: "blur(36px) saturate(180%)",
