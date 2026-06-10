@@ -1,0 +1,363 @@
+import { motion } from "framer-motion";
+import { useMemo, useState } from "react";
+import { useStore } from "../../state/store";
+import type { Account, Txn } from "../../state/schema";
+import { RTA_CATEGORY_ID, newId } from "../../state/schema";
+import { isOnBudget, isoDay } from "../../budget/ledger";
+import { GlassCard } from "../glass/GlassCard";
+import { GlassButton } from "../glass/GlassButton";
+import { GlassInput, GlassSelect } from "../glass/GlassInput";
+import { NumberField } from "../glass/NumberField";
+import { KebabMenu } from "../glass/KebabMenu";
+import { Field, SectionTitle, dollars } from "./bits";
+
+type Mode = "expense" | "income" | "transfer";
+
+const MODE_LABEL: Record<Mode, string> = {
+  expense: "Expense",
+  income: "Income",
+  transfer: "Transfer",
+};
+
+function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => void }) {
+  return (
+    <div className="flex gap-1.5">
+      {(Object.keys(MODE_LABEL) as Mode[]).map((m) => {
+        const active = m === mode;
+        return (
+          <button
+            key={m}
+            type="button"
+            onClick={() => onChange(m)}
+            className="rounded-full px-3 py-1.5 text-[11px] font-medium"
+            style={{
+              background: active ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.05)",
+              border: `1px solid rgba(255,255,255,${active ? 0.22 : 0.1})`,
+              color: `rgba(255,255,255,${active ? 0.95 : 0.65})`,
+            }}
+          >
+            {MODE_LABEL[m]}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function AccountSelect({
+  value,
+  onChange,
+  accounts,
+  placeholder,
+}: {
+  value: string;
+  onChange: (id: string) => void;
+  accounts: Account[];
+  placeholder: string;
+}) {
+  return (
+    <GlassSelect value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">— {placeholder} —</option>
+      {accounts.map((a) => (
+        <option key={a.id} value={a.id}>
+          {a.name}
+        </option>
+      ))}
+    </GlassSelect>
+  );
+}
+
+function CategorySelect({ value, onChange }: { value: string; onChange: (id: string) => void }) {
+  const budget = useStore((s) => s.budget);
+  const groups = [...budget.groups].sort((a, b) => a.order - b.order);
+  return (
+    <GlassSelect value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">— No category —</option>
+      {groups.map((g) => (
+        <optgroup key={g.id} label={g.name}>
+          {budget.categories
+            .filter((c) => c.groupId === g.id && !c.hidden)
+            .sort((a, b) => a.order - b.order)
+            .map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+        </optgroup>
+      ))}
+    </GlassSelect>
+  );
+}
+
+function AddTxnForm({ accounts }: { accounts: Account[] }) {
+  const [mode, setMode] = useState<Mode>("expense");
+  const [accountId, setAccountId] = useState(() => accounts[0]?.id ?? "");
+  const [fromId, setFromId] = useState(() => accounts[0]?.id ?? "");
+  const [toId, setToId] = useState("");
+  const [date, setDate] = useState(isoDay());
+  const [payee, setPayee] = useState("");
+  const [amount, setAmount] = useState(0);
+  const [categoryId, setCategoryId] = useState("");
+
+  const kindOf = (id: string) => accounts.find((a) => a.id === id)?.kind;
+  const fromKind = kindOf(fromId);
+  const toKind = kindOf(toId);
+  // A category only matters where money crosses the budget boundary.
+  const transferNeedsCategory =
+    fromKind !== undefined &&
+    toKind !== undefined &&
+    fromId !== toId &&
+    isOnBudget(fromKind) !== isOnBudget(toKind);
+
+  const magnitude = Math.abs(amount);
+  const canSubmit =
+    Math.round(magnitude * 100) > 0 &&
+    date.length > 0 &&
+    (mode === "transfer" ? Boolean(fromId && toId && fromId !== toId) : Boolean(accountId));
+
+  const submit = () => {
+    if (!canSubmit) return;
+    if (mode === "transfer") {
+      useStore.getState().addTransfer({
+        from: fromId,
+        to: toId,
+        amount: magnitude,
+        date,
+        categoryId: transferNeedsCategory ? categoryId || undefined : undefined,
+      });
+    } else {
+      useStore.getState().addTxn({
+        id: newId(),
+        accountId,
+        date,
+        payee: payee.trim() || undefined,
+        amount: mode === "expense" ? -magnitude : magnitude,
+        categoryId: mode === "income" ? RTA_CATEGORY_ID : categoryId || undefined,
+        source: "manual",
+      });
+    }
+    setPayee("");
+    setAmount(0);
+  };
+
+  return (
+    <div className="space-y-3">
+      <ModeToggle mode={mode} onChange={setMode} />
+
+      {mode === "transfer" ? (
+        <>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="From">
+              <AccountSelect
+                value={fromId}
+                onChange={(id) => {
+                  setFromId(id);
+                  if (id && id === toId) setToId("");
+                }}
+                accounts={accounts}
+                placeholder="Pick account"
+              />
+            </Field>
+            <Field label="To">
+              <AccountSelect
+                value={toId}
+                onChange={setToId}
+                accounts={accounts.filter((a) => a.id !== fromId)}
+                placeholder="Pick account"
+              />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Amount $">
+              <NumberField value={amount} onChange={setAmount} min={0} />
+            </Field>
+            <Field label="Date">
+              <GlassInput
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                style={{ colorScheme: "dark" }}
+              />
+            </Field>
+          </div>
+          {transferNeedsCategory && (
+            <Field label="Category (budget side)">
+              <CategorySelect value={categoryId} onChange={setCategoryId} />
+            </Field>
+          )}
+        </>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Account">
+              <AccountSelect
+                value={accountId}
+                onChange={setAccountId}
+                accounts={accounts}
+                placeholder="Pick account"
+              />
+            </Field>
+            <Field label="Date">
+              <GlassInput
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                style={{ colorScheme: "dark" }}
+              />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Payee">
+              <GlassInput
+                placeholder={mode === "expense" ? "e.g. Grocery store" : "e.g. Paycheck"}
+                value={payee}
+                onChange={(e) => setPayee(e.target.value)}
+              />
+            </Field>
+            <Field label="Amount $">
+              <NumberField value={amount} onChange={setAmount} min={0} />
+            </Field>
+          </div>
+          <Field label="Category">
+            {mode === "income" ? (
+              <GlassSelect value={RTA_CATEGORY_ID} disabled className="opacity-60">
+                <option value={RTA_CATEGORY_ID}>Ready to Assign</option>
+              </GlassSelect>
+            ) : (
+              <CategorySelect value={categoryId} onChange={setCategoryId} />
+            )}
+          </Field>
+        </>
+      )}
+
+      <div className="flex justify-end pt-1">
+        <GlassButton
+          size="sm"
+          variant="primary"
+          disabled={!canSubmit}
+          onClick={submit}
+          className="disabled:opacity-40"
+        >
+          Add {MODE_LABEL[mode].toLowerCase()}
+        </GlassButton>
+      </div>
+    </div>
+  );
+}
+
+function TxnRow({
+  txn,
+  accountNames,
+  categoryNames,
+}: {
+  txn: Txn;
+  accountNames: Map<string, string>;
+  categoryNames: Map<string, string>;
+}) {
+  const isTransfer = Boolean(txn.transferAccountId);
+  const cents = Math.round(txn.amount * 100);
+  const title = isTransfer
+    ? `Transfer ${cents < 0 ? "→" : "←"} ${
+        accountNames.get(txn.transferAccountId ?? "") ?? "Unknown account"
+      }`
+    : txn.payee?.trim() || "No payee";
+  const sub = [
+    txn.date,
+    accountNames.get(txn.accountId) ?? "Unknown account",
+    txn.categoryId ? categoryNames.get(txn.categoryId) ?? "Uncategorized" : undefined,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <motion.div layout className="flex items-center gap-2 py-2">
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium text-white/90">{title}</div>
+        <div className="truncate text-[11px] tabular-nums text-white/45">{sub}</div>
+      </div>
+      <span
+        className={`text-sm font-semibold tabular-nums ${
+          cents < 0 ? "text-red-300/90" : cents > 0 ? "text-emerald-300/90" : "text-white/60"
+        }`}
+      >
+        {dollars(txn.amount)}
+      </span>
+      {/* The add form above leaves headroom, so row menus unfold upward and
+          never clip against the card's bottom edge. */}
+      <KebabMenu ariaLabel="Transaction actions" drop="up">
+        <div className="space-y-2">
+          {isTransfer && (
+            <p className="text-[11px] text-white/45">
+              Both sides of the transfer go together.
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={() => useStore.getState().deleteTxn(txn.id)}
+            className="w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-red-300 hover:bg-red-500/10"
+          >
+            Delete {isTransfer ? "transfer" : "transaction"}
+          </button>
+        </div>
+      </KebabMenu>
+    </motion.div>
+  );
+}
+
+export function TransactionsSection() {
+  const budget = useStore((s) => s.budget);
+  const accounts = budget.accounts.filter((a) => !a.closed);
+
+  // Most recent date first; the stable sort keeps insertion order within a day.
+  const txns = useMemo(
+    () => [...budget.transactions].sort((a, b) => b.date.localeCompare(a.date)),
+    [budget.transactions],
+  );
+  const accountNames = useMemo(
+    () => new Map(budget.accounts.map((a) => [a.id, a.name])),
+    [budget.accounts],
+  );
+  const categoryNames = useMemo(
+    () =>
+      new Map([
+        [RTA_CATEGORY_ID, "Ready to Assign"],
+        ...budget.categories.map((c) => [c.id, c.name] as [string, string]),
+      ]),
+    [budget.categories],
+  );
+
+  return (
+    <GlassCard className="px-5 py-4">
+      <div className="space-y-3">
+        <SectionTitle>Transactions</SectionTitle>
+
+        {accounts.length === 0 ? (
+          <p className="text-sm text-white/65">
+            Add an account first — transactions need a home.
+          </p>
+        ) : (
+          <>
+            {/* Remounts when the first account arrives, so defaults pick it up. */}
+            <AddTxnForm key={accounts[0].id} accounts={accounts} />
+            <div className="h-px bg-gradient-to-r from-transparent via-white/12 to-transparent" />
+            <div className="divide-y divide-white/5">
+              {txns.map((t) => (
+                <TxnRow
+                  key={t.id}
+                  txn={t}
+                  accountNames={accountNames}
+                  categoryNames={categoryNames}
+                />
+              ))}
+              {txns.length === 0 && (
+                <p className="py-1 text-xs text-white/40">
+                  No transactions yet — income lands in Ready to Assign.
+                </p>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </GlassCard>
+  );
+}
