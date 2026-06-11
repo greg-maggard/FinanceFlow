@@ -25,17 +25,19 @@ private extension Decimal {
     var asDouble: Double { NSDecimalNumber(decimal: self).doubleValue }
 }
 
-/// Compute progress for a node. Direct port of `progressOf`.
-public func progressOf(_ state: AppState, _ id: NodeId) -> ProgressInfo {
+/// Compute progress for a node. Direct port of `progressOf`. Money-bearing
+/// nodes read the envelope ledger (the same book the Budget screen shows —
+/// see `Domain/NodeLedger.swift`); the rest still read their node payloads.
+public func progressOf(_ state: AppState, _ id: NodeId, month: String = Recurring.ymKey()) -> ProgressInfo {
     let node = Flowchart.node(id)
     if node.kind == .decision { return .none(ready: false) }
 
+    let snap = Ledger.snapshot(state.budget, month: month)
+
     if recurringNodes.contains(id) {
-        let data = state.node(id).data?.recurring ?? RecurringData()
-        let target = data.effectiveTarget
-        let funded = data.effectiveFunded
-        if target > 0 {
-            return .goal(value: funded.asDouble, max: target.asDouble, ready: funded >= target)
+        let totals = NodeLedger.recurringTotals(state.budget, snap, id)
+        if totals.target > 0 {
+            return .goal(value: totals.funded.asDouble, max: totals.target.asDouble, ready: totals.funded >= totals.target)
         }
         return .none(ready: true)
     }
@@ -46,16 +48,15 @@ public func progressOf(_ state: AppState, _ id: NodeId) -> ProgressInfo {
     case .Start:
         return .none(ready: true)
     case .SmallEF:
-        let ef = data?.smallEF ?? SmallEFData()
         let computed = emergencyFundTarget(monthlyExpenses: state.settings.monthlyExpenses)
-        let balance = ef.effectiveBalance
-        let target = ef.effectiveTarget(computed: computed)
+        let balance = NodeLedger.efBalance(state.budget, snap)
+        let target = NodeLedger.efTarget(state.budget, .SmallEF, computed: computed)
         return .goal(value: balance.asDouble, max: target.asDouble, ready: balance >= target)
     case .BigEF:
-        let ef = data?.bigEF ?? BigEFData()
-        let computed = bigEmergencyFundTarget(months: ef.targetMonths, monthlyExpenses: state.settings.monthlyExpenses)
-        let balance = ef.effectiveBalance
-        let target = ef.effectiveTarget(computed: computed)
+        let months = data?.bigEF?.targetMonths ?? 3
+        let computed = bigEmergencyFundTarget(months: months, monthlyExpenses: state.settings.monthlyExpenses)
+        let balance = NodeLedger.efBalance(state.budget, snap)
+        let target = NodeLedger.efTarget(state.budget, .BigEF, computed: computed)
         return .goal(value: balance.asDouble, max: (target > 0 ? target : 1).asDouble, ready: target > 0 && balance >= target)
     case .Match:
         let matchPct = data?.match?.matchPct ?? 0
@@ -74,17 +75,14 @@ public func progressOf(_ state: AppState, _ id: NodeId) -> ProgressInfo {
         let target = data?.increase401k?.targetPct ?? 15
         return .goal(value: cur.asDouble, max: target.asDouble, ready: cur >= target)
     case .SavePurchase:
-        let purchase = data?.savePurchase ?? SavePurchaseData()
-        let saved = purchase.effectiveSaved
-        let target = purchase.effectiveTarget
+        let totals = NodeLedger.purchaseTotals(state.budget, snap, .SavePurchase)
+        let saved = totals.saved
+        let target = totals.target
         return .goal(value: saved.asDouble, max: (target > 0 ? target : 1).asDouble, ready: target > 0 && saved >= target)
     case .HighDebt, .ModDebt:
-        let debts = data?.debts ?? []
-        if debts.isEmpty { return .none(ready: false) }
-        let total = debts.reduce(0) { $0 + $1.balance }
-        let paidAmt = debts.filter(\.paid).reduce(0) { $0 + $1.balance }
-        let allPaid = debts.allSatisfy(\.paid)
-        return .goal(value: paidAmt.asDouble, max: (total > 0 ? total : 1).asDouble, ready: allPaid)
+        let totals = NodeLedger.debtTotals(state.budget, id)
+        if !totals.hasAny { return .none(ready: false) }
+        return .goal(value: totals.paid.asDouble, max: (totals.total > 0 ? totals.total : 1).asDouble, ready: totals.allPaid)
     default:
         return .none(ready: true)
     }
