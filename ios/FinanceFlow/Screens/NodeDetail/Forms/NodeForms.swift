@@ -37,6 +37,7 @@ struct NodeForm: View {
 private struct RecurringForm: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var theme
+    @Environment(NavigationCenter.self) private var nav
     let nodeId: NodeId
 
     @State private var pendingDelete: BudgetCategory?
@@ -100,6 +101,7 @@ private struct RecurringForm: View {
                     value: row.assigned,
                     target: row.category.monthlyTarget ?? 0,
                     color: phaseColor,
+                    onOpenBudget: { nav.openBudget(categoryId: row.category.id) },
                     onDelete: { pendingDelete = row.category }
                 ) {
                     HStack(spacing: theme.spacing.sm) {
@@ -268,6 +270,7 @@ private struct EFFirstBalanceField: View {
 private struct EFBucketEditor: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var theme
+    @Environment(NavigationCenter.self) private var nav
     /// Host milestone — new buckets get this node's id.
     let nodeId: NodeId
     let rows: [NodeLedger.NodeRow]
@@ -287,6 +290,7 @@ private struct EFBucketEditor: View {
                     value: row.available,
                     target: row.category.balanceTarget ?? 0,
                     color: color,
+                    onOpenBudget: { nav.openBudget(categoryId: row.category.id) },
                     onDelete: { pendingDelete = row.category }
                 ) {
                     HStack(spacing: theme.spacing.sm) {
@@ -478,10 +482,16 @@ private struct SavePurchaseForm: View {
 private struct CollegeForm: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var theme
+    @Environment(NavigationCenter.self) private var nav
 
     var body: some View {
         let d = store.state.node(.College).data?.college ?? CollegeData()
         let balance = NodeLedger.collegeBalance(store.state.budget)
+        // The 529 account materializes on the first balance edit; the jump
+        // only shows once there's an account row on the Budget board.
+        let hasCollegeAccount = store.state.budget.accounts.contains {
+            $0.id == NodeLedger.collegeAccountID && $0.closed != true
+        }
         HStack(spacing: theme.spacing.md) {
             LabeledField(label: "Monthly") {
                 NumberField(value: d.monthlyContribution) { v in
@@ -493,12 +503,27 @@ private struct CollegeForm: View {
                 }
             }
             LabeledField(label: "Balance") {
-                NumberField(value: balance) { v in
-                    store.apply(NodeLedger.planCollegeBalanceEdit(
-                        store.state.budget,
-                        newBalance: v,
-                        today: Ledger.isoDay()
-                    ))
+                HStack(spacing: theme.spacing.sm) {
+                    NumberField(value: balance) { v in
+                        store.apply(NodeLedger.planCollegeBalanceEdit(
+                            store.state.budget,
+                            newBalance: v,
+                            today: Ledger.isoDay()
+                        ))
+                    }
+                    if hasCollegeAccount {
+                        // No dismiss() here — RootView's pendingBudgetFocus
+                        // onChange closes the node sheet for us.
+                        Button {
+                            nav.openBudget(accountId: NodeLedger.collegeAccountID)
+                        } label: {
+                            Image(systemName: "arrow.up.forward.square")
+                                .font(theme.typography.caption)
+                                .foregroundStyle(theme.colors.textSecondary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Open in Budget")
+                    }
                 }
             }
         }

@@ -25,6 +25,8 @@ struct SubGoalCard<Fields: View>: View {
     let value: Decimal
     let target: Decimal
     var color: Color
+    /// Cross-navigation: jump to this row's envelope on the Budget screen.
+    var onOpenBudget: (() -> Void)? = nil
     let onDelete: () -> Void
     @ViewBuilder var fields: Fields
 
@@ -33,6 +35,17 @@ struct SubGoalCard<Fields: View>: View {
             VStack(alignment: .leading, spacing: theme.spacing.sm) {
                 HStack {
                     PlainTextField(placeholder: namePlaceholder, text: $name)
+                    if let onOpenBudget {
+                        // No dismiss() here — RootView's pendingBudgetFocus
+                        // onChange closes the node sheet for us.
+                        Button(action: onOpenBudget) {
+                            Image(systemName: "arrow.up.forward.square")
+                                .font(theme.typography.caption)
+                                .foregroundStyle(theme.colors.textSecondary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Open in Budget")
+                    }
                     Button(role: .destructive, action: onDelete) {
                         Image(systemName: "trash").foregroundStyle(theme.colors.danger)
                     }
@@ -55,6 +68,7 @@ struct SubGoalCard<Fields: View>: View {
 struct DebtListEditor: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var theme
+    @Environment(NavigationCenter.self) private var nav
     let nodeId: NodeId
     let aprThreshold: Int
 
@@ -103,6 +117,17 @@ struct DebtListEditor: View {
             VStack(alignment: .leading, spacing: theme.spacing.sm) {
                 HStack {
                     PlainTextField(placeholder: "Name", text: nameBinding(row.account))
+                    // No dismiss() here — RootView's pendingBudgetFocus
+                    // onChange closes the node sheet for us.
+                    Button {
+                        nav.openBudget(accountId: row.account.id)
+                    } label: {
+                        Image(systemName: "arrow.up.forward.square")
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.textSecondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Open in Budget")
                     Button(role: .destructive) { pendingRemove = row.account } label: {
                         Image(systemName: "trash").foregroundStyle(theme.colors.danger)
                     }
@@ -185,6 +210,7 @@ struct GoalListEditor: View {
 struct GoalCategoryEditor: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var theme
+    @Environment(NavigationCenter.self) private var nav
     let nodeId: NodeId
 
     @State private var pendingDelete: BudgetCategory?
@@ -206,6 +232,7 @@ struct GoalCategoryEditor: View {
                     value: row.available,
                     target: row.category.balanceTarget ?? 0,
                     color: color,
+                    onOpenBudget: { nav.openBudget(categoryId: row.category.id) },
                     onDelete: { pendingDelete = row.category }
                 ) {
                     VStack(spacing: theme.spacing.sm) {

@@ -9,6 +9,7 @@ import { useState } from "react";
 import { ymKey } from "../../state/recurring";
 import { isoDay, snapshot } from "../../budget/ledger";
 import {
+  COLLEGE_ACCOUNT_ID,
   collegeBalance,
   debtRows,
   efCategories,
@@ -22,6 +23,7 @@ import {
   planDebtBalanceEdit,
   planMarkDebtPaid,
 } from "../../budget/nodeLedger";
+import { useUI, type BudgetFocus } from "../../state/uiStore";
 import { ConfirmDelete } from "../budget/CategoryGroups";
 import { InlineAdd } from "../budget/bits";
 
@@ -83,12 +85,36 @@ function markDebtPaid(accountId: string) {
 // ---------------------------------------------------------------------------
 // Shared row chrome
 
+/**
+ * Cross-navigation chip: jumps to this row's envelope/account on the Budget
+ * screen, which scrolls to it and pulses. Plain button — no transient chrome,
+ * so no TapAway token.
+ */
+function OpenInBudget({ target }: { target: BudgetFocus }) {
+  return (
+    <button
+      type="button"
+      title="Open in Budget"
+      aria-label="Open in Budget"
+      onClick={() => useUI.getState().openInBudget(target)}
+      className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium text-white/55 transition hover:text-white/85"
+      style={{
+        background: "rgba(255,255,255,0.05)",
+        border: "1px solid rgba(255,255,255,0.12)",
+      }}
+    >
+      Budget ↗
+    </button>
+  );
+}
+
 /** One editable envelope/account row: name up top, fields below, kebab for the rest. */
 function RowCard({
   name,
   placeholder,
   onRename,
   aside,
+  budgetTarget,
   menu,
   drop,
   children,
@@ -97,6 +123,8 @@ function RowCard({
   placeholder: string;
   onRename: (name: string) => void;
   aside?: React.ReactNode;
+  /** Where this row lives on the Budget screen, for the Open-in-Budget chip. */
+  budgetTarget?: BudgetFocus;
   menu: React.ReactNode;
   drop: "down" | "up";
   children: React.ReactNode;
@@ -113,6 +141,7 @@ function RowCard({
       <div className="flex items-center gap-2">
         <GlassInput placeholder={placeholder} value={name} onChange={(e) => onRename(e.target.value)} />
         {aside}
+        {budgetTarget && <OpenInBudget target={budgetTarget} />}
         <div className="shrink-0">
           <KebabMenu ariaLabel={`${name || placeholder} actions`} drop={drop}>
             {menu}
@@ -191,21 +220,24 @@ export function RecurringEditor({ nodeId }: { nodeId: RecurringNodeId }) {
   return (
     <div className="space-y-4">
       {simple ? (
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Monthly target ($)">
-            <NumberField
-              value={rows[0]?.category.monthlyTarget ?? 0}
-              onChange={(v) =>
-                patchCategory(ensureCategory(), { monthlyTarget: v > 0 ? v : undefined })
-              }
-            />
-          </Field>
-          <Field label="Saved this month ($)">
-            <NumberField
-              value={rows[0]?.assigned ?? 0}
-              onChange={(v) => assignThisMonth(ensureCategory(), v)}
-            />
-          </Field>
+        <div className="space-y-2">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Monthly target ($)">
+              <NumberField
+                value={rows[0]?.category.monthlyTarget ?? 0}
+                onChange={(v) =>
+                  patchCategory(ensureCategory(), { monthlyTarget: v > 0 ? v : undefined })
+                }
+              />
+            </Field>
+            <Field label="Saved this month ($)">
+              <NumberField
+                value={rows[0]?.assigned ?? 0}
+                onChange={(v) => assignThisMonth(ensureCategory(), v)}
+              />
+            </Field>
+          </div>
+          {rows[0] && <OpenInBudget target={{ categoryId: rows[0].category.id }} />}
         </div>
       ) : (
         <div className="space-y-2">
@@ -218,6 +250,7 @@ export function RecurringEditor({ nodeId }: { nodeId: RecurringNodeId }) {
               name={row.category.name}
               placeholder="Item name (e.g., Power)"
               onRename={(name) => patchCategory(row.category.id, { name })}
+              budgetTarget={{ categoryId: row.category.id }}
               drop={i === 0 ? "down" : "up"}
               menu={
                 <ConfirmDelete
@@ -357,6 +390,7 @@ export function EFEditor({ nodeId }: { nodeId: "SmallEF" | "BigEF" }) {
           </>
         )}
         {nodeId === "BigEF" && hint}
+        {rows[0] && <OpenInBudget target={{ categoryId: rows[0].category.id }} />}
         <div className="space-y-2">
           <div className="text-[11px] uppercase tracking-[0.2em] text-white/55">
             Or split into buckets
@@ -382,6 +416,7 @@ export function EFEditor({ nodeId }: { nodeId: "SmallEF" | "BigEF" }) {
             name={row.category.name}
             placeholder="Bucket name (e.g., Car repairs)"
             onRename={(name) => patchCategory(row.category.id, { name })}
+            budgetTarget={{ categoryId: row.category.id }}
             drop={i === 0 ? "down" : "up"}
             menu={
               <ConfirmDelete
@@ -605,6 +640,7 @@ export function GoalEditor({ nodeId }: { nodeId: "SavePurchase" | "Goals" }) {
           name={row.category.name}
           placeholder="Goal"
           onRename={(name) => patchCategory(row.category.id, { name })}
+          budgetTarget={{ categoryId: row.category.id }}
           drop={i === 0 ? "down" : "up"}
           menu={
             <ConfirmDelete
@@ -654,6 +690,11 @@ export function CollegeFields() {
   const data = (state.nodes.College.data as
     | { monthlyContribution: number; targetAge?: number }
     | undefined) ?? { monthlyContribution: 0 };
+  // The 529 account materializes on the first balance edit; the chip only
+  // shows once there's an account row on the Budget screen to jump to.
+  const hasCollegeAccount = state.budget.accounts.some(
+    (a) => a.id === COLLEGE_ACCOUNT_ID && !a.closed,
+  );
   return (
     <div className="grid grid-cols-2 gap-3">
       <Field label="Monthly $">
@@ -664,15 +705,18 @@ export function CollegeFields() {
           }
         />
       </Field>
-      <Field label="Balance $">
-        <NumberField
-          value={collegeBalance(state.budget)}
-          onChange={(v) => {
-            const s = useStore.getState();
-            s.applyBookOps(planCollegeBalanceEdit(s.budget, v, isoDay()));
-          }}
-        />
-      </Field>
+      <div className="space-y-1.5">
+        <Field label="Balance $">
+          <NumberField
+            value={collegeBalance(state.budget)}
+            onChange={(v) => {
+              const s = useStore.getState();
+              s.applyBookOps(planCollegeBalanceEdit(s.budget, v, isoDay()));
+            }}
+          />
+        </Field>
+        {hasCollegeAccount && <OpenInBudget target={{ accountId: COLLEGE_ACCOUNT_ID }} />}
+      </div>
     </div>
   );
 }
@@ -717,6 +761,7 @@ export function DebtEditor({
           name={row.account.name}
           placeholder="Name"
           onRename={(name) => patchAccount(row.account.id, { name })}
+          budgetTarget={{ accountId: row.account.id }}
           drop={i === 0 ? "down" : "up"}
           aside={
             row.paid ? (
