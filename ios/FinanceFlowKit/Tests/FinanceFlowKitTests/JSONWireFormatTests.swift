@@ -6,29 +6,38 @@ import Foundation
 /// After migrating the Swift side from `Double` to `Decimal`, these prove the
 /// on-device JSON and export/import wire shape is *unchanged*: money still
 /// serializes as a bare number with the exact value, and numbers written by the
-/// web decode back without binary-floating-point drift. If any of these fail, the
-/// two platforms have diverged on the wire.
+/// web decode back without binary-floating-point drift. v1/v2 documents decode
+/// THROUGH the migration chain, so web-authored fixtures are asserted on the
+/// resulting v3 ledger. If any of these fail, the two platforms have diverged
+/// on the wire.
 @Suite("JSON wire format (money stays a number)")
 struct JSONWireFormatTests {
 
-    /// A state that touches a money field of every kind, with deliberately
+    /// A v3 state that touches a money field of every kind, with deliberately
     /// fractional values (the cases a `Double` sum would have drifted on).
     private func richMoneyState() -> AppState {
         var s = AppState.makeInitial()
         s.settings.monthlyExpenses = Decimal(string: "3200.50")!
         s.settings.preTaxIncome = 90000
-        s.nodes[.Rent]?.data = .recurring(RecurringData(
-            target: .manual(Decimal(string: "1800.99")!),
-            funded: .manual(Decimal(string: "1234.56")!)
-        ))
-        s.nodes[.SmallEF]?.data = .smallEF(SmallEFData(balance: .manual(1000)))
         s.nodes[.Match]?.data = .match(matchPct: Decimal(string: "4.5")!, currentContribPct: 3)
-        s.nodes[.HighDebt]?.data = .debts([
-            Debt(name: "Card", balance: Decimal(string: "4200.25")!, apr: Decimal(string: "22.9")!, minPayment: 120, paid: false),
-        ])
-        s.nodes[.SavePurchase]?.data = .savePurchase(
-            SavePurchaseData(goalName: "Car", target: 12000, saved: .manual(Decimal(string: "0.1")!))
-        )
+        s.nodes[.IRA]?.data = .ira(IRAData(
+            type: .roth,
+            ytdContribution: .manual(Decimal(string: "1234.56")!),
+            annualLimit: 7000
+        ))
+        s.budget.accounts = [
+            Account(id: "debt:d1", name: "Card", kind: .loan, apr: Decimal(string: "22.9")!, minPayment: 120, nodeId: .HighDebt),
+            Account(id: "acct:cash", name: "Cash", kind: .cash),
+        ]
+        s.budget.transactions = [
+            Txn(id: "t1", accountId: "debt:d1", date: "2026-06-01", payee: "Starting balance", amount: Decimal(string: "-4200.25")!),
+            Txn(id: "t2", accountId: "acct:cash", date: "2026-06-01", amount: Decimal(string: "1800.99")!, categoryId: Ledger.rtaCategoryID),
+        ]
+        s.budget.groups = [CategoryGroup(id: "g:goals", name: "Savings Goals", order: 0)]
+        s.budget.categories = [
+            BudgetCategory(id: "SavePurchase:g1", groupId: "g:goals", name: "Car", order: 0, balanceTarget: 12000, nodeId: .SavePurchase),
+        ]
+        s.budget.assignments = ["2026-06": ["SavePurchase:g1": Decimal(string: "0.1")!]]
         return s
     }
 
@@ -43,20 +52,29 @@ struct JSONWireFormatTests {
         #expect(!(settings["monthlyExpenses"] is NSString))
         #expect((settings["monthlyExpenses"] as? NSNumber)?.doubleValue == 3200.50)
 
+        // Ledger: bare-struct money fields (account apr, txn amount, assignment).
+        let budget = try #require(obj["budget"] as? [String: Any])
+        let accounts = try #require(budget["accounts"] as? [[String: Any]])
+        let debt = try #require(accounts.first { $0["id"] as? String == "debt:d1" })
+        #expect(debt["apr"] is NSNumber)
+        #expect((debt["apr"] as? NSNumber)?.doubleValue == 22.9)
+        let txns = try #require(budget["transactions"] as? [[String: Any]])
+        let start = try #require(txns.first { $0["id"] as? String == "t1" })
+        #expect(start["amount"] is NSNumber)
+        #expect((start["amount"] as? NSNumber)?.doubleValue == -4200.25)
+        let assignments = try #require(budget["assignments"] as? [String: Any])
+        let june = try #require(assignments["2026-06"] as? [String: Any])
+        #expect(june["SavePurchase:g1"] is NSNumber)
+        #expect(!(june["SavePurchase:g1"] is NSString))
+
         let nodes = try #require(obj["nodes"] as? [String: Any])
 
-        // Debt: a bare-struct money field (balance/apr/minPayment).
-        let debtData = try #require((nodes["HighDebt"] as? [String: Any])?["data"] as? [String: Any])
-        let debts = try #require(debtData["debts"] as? [[String: Any]])
-        #expect(debts[0]["apr"] is NSNumber)
-        #expect((debts[0]["apr"] as? NSNumber)?.doubleValue == 22.9)
-        #expect((debts[0]["balance"] as? NSNumber)?.doubleValue == 4200.25)
-
         // SourcedNumber: `value` is a number nested beside its string `source`.
-        let rentData = try #require((nodes["Rent"] as? [String: Any])?["data"] as? [String: Any])
-        let target = try #require(rentData["target"] as? [String: Any])
-        #expect(target["value"] is NSNumber)
-        #expect(target["source"] as? String == "manual")
+        let iraData = try #require((nodes["IRA"] as? [String: Any])?["data"] as? [String: Any])
+        let ytd = try #require(iraData["ytdContribution"] as? [String: Any])
+        #expect(ytd["value"] is NSNumber)
+        #expect((ytd["value"] as? NSNumber)?.doubleValue == 1234.56)
+        #expect(ytd["source"] as? String == "manual")
 
         // Percentages migrated alongside money are numbers too.
         let matchData = try #require((nodes["Match"] as? [String: Any])?["data"] as? [String: Any])
@@ -68,6 +86,7 @@ struct JSONWireFormatTests {
     func decodesWebNumbersExactly() throws {
         // Authored exactly as the web's `JSON.stringify` would emit it: money as
         // bare numbers, including values a binary `Double` cannot hold exactly.
+        // Importing runs the v1 -> v3 chain, so the numbers land in the ledger.
         let webJSON = """
         {
           "version": 1,
@@ -84,12 +103,21 @@ struct JSONWireFormatTests {
         }
         """
         let decoded = try IO.importString(webJSON)
-
+        #expect(decoded.version == 3)
         #expect(decoded.settings.monthlyExpenses == Decimal(string: "3200.5")!)
-        let debt = try #require(decoded.node(.HighDebt).data?.debts?.first)
+
+        // The debt payload became a loan account with the exact APR and balance.
+        let debt = try #require(decoded.budget.accounts.first { $0.id == "debt:d1" })
         #expect(debt.apr == Decimal(string: "22.9")!)        // exact — not 22.8999…986
-        #expect(debt.balance == Decimal(string: "4200.25")!)
-        #expect(decoded.node(.SavePurchase).data?.savePurchase?.saved.value == Decimal(string: "0.1")!)
+        #expect(debt.nodeId == .HighDebt)
+        #expect(Ledger.accountBalance(decoded.budget, "debt:d1") == Decimal(string: "-4200.25")!)
+
+        // The single purchase goal became its envelope; saved -> available.
+        let cat = try #require(decoded.budget.categories.first { $0.id == "SavePurchase" })
+        #expect(cat.name == "Car")
+        #expect(cat.balanceTarget == 12000)
+        let snap = Ledger.snapshot(decoded.budget, month: Recurring.ymKey())
+        #expect(snap.categories["SavePurchase"]?.available == Decimal(string: "0.1")!)
     }
 
     @Test("round-trip is byte-stable: re-encoding decoded state reproduces the bytes")
@@ -99,29 +127,7 @@ struct JSONWireFormatTests {
         #expect(once == twice)
     }
 
-    @Test("states that never touch sub-goal lists encode without items keys")
-    func absentSubGoalListsStayAbsent() throws {
-        // The sub-goal lists are additive optional fields on version-1 payloads.
-        // A document that never used them must keep exactly its old keys, or
-        // we've silently changed the bytes of every existing save file.
-        var s = AppState.makeInitial()
-        s.nodes[.SmallEF]?.data = .smallEF(SmallEFData(balance: .manual(500)))
-        s.nodes[.BigEF]?.data = .bigEF(BigEFData(targetMonths: 4, balance: .manual(2000)))
-        s.nodes[.SavePurchase]?.data = .savePurchase(SavePurchaseData(goalName: "Car", target: 12000, saved: .manual(4000)))
-
-        let data = try JSONCoder.encode(s)
-        let obj = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
-        let nodes = try #require(obj["nodes"] as? [String: Any])
-
-        let smallEF = try #require((nodes["SmallEF"] as? [String: Any])?["data"] as? [String: Any])
-        #expect(smallEF.keys.sorted() == ["balance"])
-        let bigEF = try #require((nodes["BigEF"] as? [String: Any])?["data"] as? [String: Any])
-        #expect(bigEF.keys.sorted() == ["balance", "targetMonths"])
-        let purchase = try #require((nodes["SavePurchase"] as? [String: Any])?["data"] as? [String: Any])
-        #expect(purchase.keys.sorted() == ["goalName", "saved", "target"])
-    }
-
-    @Test("web-authored purchase goals decode; legacy single-goal documents decode with nil items")
+    @Test("web-authored purchase goals migrate into envelopes with exact Decimals")
     func decodesPurchaseGoals() throws {
         let webJSON = """
         {
@@ -140,14 +146,22 @@ struct JSONWireFormatTests {
         }
         """
         let decoded = try IO.importString(webJSON)
-        let goals = try #require(decoded.node(.SavePurchase).data?.savePurchase?.items)
-        #expect(goals.count == 2)
-        #expect(goals[0].byDate == "2028-06")
-        #expect(goals[1].saved.value == Decimal(string: "0.1")!)
-        #expect(goals[1].byDate == nil)
+        #expect(decoded.node(.SavePurchase).data == nil)     // payload stripped at v3
+
+        let byId = Dictionary(uniqueKeysWithValues: decoded.budget.categories.map { ($0.id, $0) })
+        #expect(byId["SavePurchase:g1"]?.balanceTarget == 40000)
+        #expect(byId["SavePurchase:g1"]?.targetDate == "2028-06")
+        #expect(byId["SavePurchase:g2"]?.balanceTarget == 12000)
+        #expect(byId["SavePurchase:g2"]?.targetDate == nil)
+
+        // Each goal's saved amount became its envelope's available, exactly.
+        let snap = Ledger.snapshot(decoded.budget, month: Recurring.ymKey())
+        #expect(snap.categories["SavePurchase:g1"]?.available == 15000)
+        #expect(snap.categories["SavePurchase:g2"]?.available == Decimal(string: "0.1")!)
+        #expect(snap.readyToAssign == 0)
     }
 
-    @Test("web-authored EF buckets decode to exact Decimals; absent buckets decode as nil")
+    @Test("web-authored EF buckets migrate to exact-Decimal envelopes; the scalar mirror never materializes")
     func decodesEFBuckets() throws {
         let webJSON = """
         {
@@ -170,23 +184,30 @@ struct JSONWireFormatTests {
         """
         let decoded = try IO.importString(webJSON)
 
-        #expect(decoded.node(.SmallEF).data?.smallEF?.items == nil)
-        let buckets = try #require(decoded.node(.BigEF).data?.bigEF?.items)
-        #expect(buckets.count == 1)
-        #expect(buckets[0].target == Decimal(string: "4000.25")!)
-        #expect(buckets[0].balance.value == Decimal(string: "2500.5")!)
+        // BigEF holds data, so it supersedes SmallEF; its buckets win over the scalar.
+        #expect(decoded.budget.categories.map(\.id) == ["BigEF:b1"])
+        let bucket = try #require(decoded.budget.categories.first)
+        #expect(bucket.balanceTarget == Decimal(string: "4000.25")!)
+        #expect(bucket.nodeId == .BigEF)
+        let snap = Ledger.snapshot(decoded.budget, month: Recurring.ymKey())
+        #expect(snap.categories["BigEF:b1"]?.available == Decimal(string: "2500.5")!)
+
+        // Payloads stripped to node-only fields.
+        #expect(decoded.node(.SmallEF).data == nil)
+        #expect(decoded.node(.BigEF).data == .bigEF(BigEFData(targetMonths: 6)))
     }
 
     @Test("a sum that drifts as Double stays exact as Decimal end-to-end")
     func exactSumSurvivesTheWire() throws {
         // 0.1 + 0.2 is the canonical Double drift (== 0.30000000000000004). Stored
-        // as separate SourcedNumbers and summed in Decimal, the parts stay exact
+        // as separate ledger amounts and summed in Decimal, the parts stay exact
         // and serialize cleanly — no float artifacts in the bytes.
         var s = AppState.makeInitial()
-        s.nodes[.Rent]?.data = .recurring(RecurringData(items: [
-            RecurringItem(target: .manual(Decimal(string: "0.1")!), funded: .manual(Decimal(string: "0.1")!)),
-            RecurringItem(target: .manual(Decimal(string: "0.2")!), funded: .manual(Decimal(string: "0.2")!)),
-        ]))
+        s.budget.accounts = [Account(id: "a1", name: "Cash", kind: .cash)]
+        s.budget.transactions = [
+            Txn(id: "t1", accountId: "a1", date: "2026-06-01", amount: Decimal(string: "0.1")!),
+            Txn(id: "t2", accountId: "a1", date: "2026-06-02", amount: Decimal(string: "0.2")!),
+        ]
         let data = try JSONCoder.encode(s)
         let json = String(decoding: data, as: UTF8.self)
         #expect(json.contains("0.1"))
@@ -195,8 +216,6 @@ struct JSONWireFormatTests {
         #expect(!json.contains("0.0999999"))
 
         let decoded = try JSONCoder.decode(data)
-        let items = try #require(decoded.node(.Rent).data?.recurring?.items)
-        let funded = items.reduce(Decimal(0)) { $0 + ($1.funded?.value ?? 0) }
-        #expect(funded == Decimal(string: "0.3")!)            // exact, unlike 0.1 + 0.2 as Double
+        #expect(Ledger.accountBalance(decoded.budget, "a1") == Decimal(string: "0.3")!)  // exact, unlike 0.1 + 0.2 as Double
     }
 }

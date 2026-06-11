@@ -1,9 +1,11 @@
 import SwiftUI
 import FinanceFlowKit
 
-/// Dispatches to the right editing form for a node's `NodeData` shape.
-/// Each form reads the current value (with sensible defaults) and writes back
-/// through `store.setNodeData`. Mirrors `FORM_BY_NODE` in the web's `forms.tsx`.
+/// Dispatches to the right editing form for a node. Money-bearing forms edit
+/// the envelope ledger directly — the same book the Budget screen shows (see
+/// `Domain/NodeLedger.swift`) — so node and Budget edits are bilateral by
+/// construction. Percent/YTD nodes still write their payloads through
+/// `store.setNodeData`. Mirrors `FORM_BY_NODE` in the web's `forms.tsx`.
 struct NodeForm: View {
     let nodeId: NodeId
 
@@ -29,107 +31,137 @@ struct NodeForm: View {
 
 // MARK: - Recurring
 
+/// Editor over the node's linked envelopes: Target edits the category's
+/// monthly goal, "Saved this month" edits the current month's assignment —
+/// the same numbers the Budget screen shows for those categories.
 private struct RecurringForm: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var theme
+    @Environment(NavigationCenter.self) private var nav
     let nodeId: NodeId
 
-    private var data: RecurringData { store.state.node(nodeId).data?.recurring ?? RecurringData() }
+    @State private var pendingDelete: BudgetCategory?
+
     private var phaseColor: Color { theme.phaseColor(Flowchart.node(nodeId).phase).base }
 
     var body: some View {
-        let items = data.items ?? []
+        let book = store.state.budget
+        let snap = Ledger.snapshot(book, month: Recurring.ymKey())
+        let rows = NodeLedger.nodeRows(book, snap, nodeId)
+        let totals = NodeLedger.recurringTotals(book, snap, nodeId)
+
         VStack(alignment: .leading, spacing: theme.spacing.md) {
-            if items.isEmpty {
-                HStack(spacing: theme.spacing.md) {
-                    LabeledField(label: "Monthly target") {
-                        NumberField(value: data.target.value) { v in write { $0.target = .manual(v) } }
-                    }
-                    LabeledField(label: "Saved this month") {
-                        NumberField(value: data.funded?.value ?? 0) { v in write { $0.funded = .manual(v) } }
-                    }
-                }
-                GlassButton(title: "Split into items", systemImage: "list.bullet") {
-                    // Seed item #1 from the single amounts so the node total carries over.
-                    writeItems([RecurringItem(target: data.target, funded: data.funded)])
-                }
+            if rows.isEmpty {
+                firstWritePair
             } else {
-                itemsEditor(items)
+                itemsEditor(rows, totals: totals)
             }
+        }
+        .confirmationDialog(
+            deleteTitle,
+            isPresented: deleteShown,
+            titleVisibility: .visible,
+            presenting: pendingDelete
+        ) { category in
+            Button("Delete", role: .destructive) { store.deleteCategory(category.id) }
+        } message: { _ in
+            Text("Its transactions stay, uncategorized, and assigned dollars return to Ready to Assign.")
         }
     }
 
-    private func itemsEditor(_ items: [RecurringItem]) -> some View {
+    /// No envelopes yet: a plain pair whose first keystroke creates the node's
+    /// single category (named after the node) and writes through it.
+    private var firstWritePair: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.sm) {
+            HStack(spacing: theme.spacing.md) {
+                LabeledField(label: "Monthly target") {
+                    NumberField(value: 0) { v in
+                        patchCategory(ensureFirstCategory()) { $0.monthlyTarget = v > 0 ? v : nil }
+                    }
+                }
+                LabeledField(label: "Saved this month") {
+                    NumberField(value: 0) { v in
+                        store.assign(month: Recurring.ymKey(), categoryID: ensureFirstCategory(), amount: v)
+                    }
+                }
+            }
+            Text("Add an item to set this month's goal.")
+                .font(theme.typography.caption)
+                .foregroundStyle(theme.colors.textSecondary)
+        }
+    }
+
+    private func itemsEditor(_ rows: [NodeLedger.NodeRow], totals: (target: Decimal, funded: Decimal)) -> some View {
         VStack(alignment: .leading, spacing: theme.spacing.sm) {
             FieldLabel(text: "Items")
-            ForEach(items) { item in
+            ForEach(rows, id: \.category.id) { row in
                 SubGoalCard(
                     namePlaceholder: "Item (e.g. Power)",
-                    name: itemBinding(item, \.name),
-                    value: item.funded?.value ?? 0,
-                    target: item.target.value,
+                    name: nameBinding(row.category),
+                    value: row.assigned,
+                    target: row.category.monthlyTarget ?? 0,
                     color: phaseColor,
-                    onDelete: { writeItems(items.filter { $0.id != item.id }) }
+                    onOpenBudget: { nav.openBudget(categoryId: row.category.id) },
+                    onDelete: { pendingDelete = row.category }
                 ) {
                     HStack(spacing: theme.spacing.sm) {
                         LabeledField(label: "Target") {
-                            NumberField(value: item.target.value) { v in patchItem(item.id) { $0.target = .manual(v) } }
+                            NumberField(value: row.category.monthlyTarget ?? 0) { v in
+                                patchCategory(row.category.id) { $0.monthlyTarget = v > 0 ? v : nil }
+                            }
                         }
-                        LabeledField(label: "Saved") {
-                            NumberField(value: item.funded?.value ?? 0) { v in patchItem(item.id) { $0.funded = .manual(v) } }
+                        LabeledField(label: "Saved this month") {
+                            NumberField(value: row.assigned) { v in
+                                store.assign(month: Recurring.ymKey(), categoryID: row.category.id, amount: v)
+                            }
                         }
                     }
                 }
             }
-            Text("Total \(CurrencyFormat.string(data.effectiveFunded)) of \(CurrencyFormat.string(data.effectiveTarget))")
+            Text("Total \(CurrencyFormat.string(totals.funded)) of \(CurrencyFormat.string(totals.target))")
                 .font(theme.typography.caption)
                 .foregroundStyle(theme.colors.textSecondary)
             GlassButton(title: "Add item", systemImage: "plus") {
-                writeItems(items + [RecurringItem()])
+                store.apply(NodeLedger.planCreateLinkedCategory(store.state.budget, nodeId: nodeId, name: "").ops)
             }
-            Button {
-                // Collapse back to a single pair, keeping the totals.
-                write {
-                    $0.target = .manual($0.effectiveTarget)
-                    $0.funded = .manual($0.effectiveFunded)
-                    $0.items = nil
-                }
-            } label: {
-                Text("Use single amount")
-                    .font(theme.typography.caption)
-                    .foregroundStyle(theme.colors.textSecondary)
-            }
-            .buttonStyle(.plain)
         }
     }
 
-    private func write(_ change: (inout RecurringData) -> Void) {
-        var d = data
-        change(&d)
-        store.setNodeData(nodeId, .recurring(d))
-    }
-
-    private func writeItems(_ items: [RecurringItem]) {
-        write { $0.items = items.isEmpty ? nil : items }
-    }
-
-    private func patchItem(_ id: String, _ change: (inout RecurringItem) -> Void) {
-        var items = data.items ?? []
-        guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
-        change(&items[idx])
-        writeItems(items)
-    }
-
-    private func itemBinding(_ item: RecurringItem, _ kp: WritableKeyPath<RecurringItem, String>) -> Binding<String> {
-        Binding(
-            get: { (data.items?.first { $0.id == item.id })?[keyPath: kp] ?? item[keyPath: kp] },
-            set: { newValue in
-                var items = data.items ?? []
-                guard let idx = items.firstIndex(where: { $0.id == item.id }) else { return }
-                items[idx][keyPath: kp] = newValue
-                writeItems(items)
-            }
+    /// The node's single envelope for first writes — reused if it already
+    /// exists, created (named after the node) if not.
+    private func ensureFirstCategory() -> String {
+        if let existing = NodeLedger.linkedCategories(store.state.budget, nodeId).first {
+            return existing.id
+        }
+        let plan = NodeLedger.planCreateLinkedCategory(
+            store.state.budget,
+            nodeId: nodeId,
+            name: Flowchart.node(nodeId).label
         )
+        store.apply(plan.ops)
+        return plan.categoryID
+    }
+
+    private func patchCategory(_ id: String, _ change: (inout BudgetCategory) -> Void) {
+        guard var category = store.state.budget.categories.first(where: { $0.id == id }) else { return }
+        change(&category)
+        store.updateCategory(category)
+    }
+
+    private func nameBinding(_ category: BudgetCategory) -> Binding<String> {
+        Binding(
+            get: { store.state.budget.categories.first { $0.id == category.id }?.name ?? category.name },
+            set: { v in patchCategory(category.id) { $0.name = v } }
+        )
+    }
+
+    private var deleteShown: Binding<Bool> {
+        Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } })
+    }
+
+    private var deleteTitle: String {
+        guard let name = pendingDelete?.name, !name.isEmpty else { return "Delete this item?" }
+        return "Delete \(name)?"
     }
 }
 
@@ -140,31 +172,23 @@ private struct SmallEFForm: View {
     @Environment(\.theme) private var theme
 
     var body: some View {
-        let data = store.state.node(.SmallEF).data?.smallEF ?? SmallEFData()
+        let book = store.state.budget
+        let snap = Ledger.snapshot(book, month: Recurring.ymKey())
+        let rows = NodeLedger.nodeRows(book, snap, .SmallEF)
         let computed = emergencyFundTarget(monthlyExpenses: store.state.settings.monthlyExpenses)
-        let buckets = data.items ?? []
+        let target = NodeLedger.efTarget(book, .SmallEF, computed: computed)
 
         VStack(alignment: .leading, spacing: theme.spacing.md) {
-            Text("Target: \(CurrencyFormat.string(data.effectiveTarget(computed: computed)))")
+            Text("Target: \(CurrencyFormat.string(target))")
                 .font(theme.typography.caption)
                 .foregroundStyle(theme.colors.textSecondary)
-            if buckets.isEmpty {
-                LabeledField(label: "Current balance") {
-                    NumberField(value: data.balance.value) { write(SmallEFData(balance: .manual($0))) }
-                }
-                GlassButton(title: "Split into buckets", systemImage: "list.bullet") {
-                    // Seed bucket #1 with the current balance so the node total carries over.
-                    write(SmallEFData(balance: data.balance, items: [EFBucket(balance: data.balance)]))
-                }
+            if rows.isEmpty {
+                EFFirstBalanceField(nodeId: .SmallEF, computedTarget: computed)
             } else {
-                EFBucketEditor(buckets: buckets, computedTarget: computed, nodeId: .SmallEF) { items in
-                    write(SmallEFData(balance: data.balance, items: items))
-                }
+                EFBucketEditor(nodeId: .SmallEF, rows: rows, computedTarget: computed)
             }
         }
     }
-
-    private func write(_ d: SmallEFData) { store.setNodeData(.SmallEF, .smallEF(d)) }
 }
 
 private struct BigEFForm: View {
@@ -172,73 +196,119 @@ private struct BigEFForm: View {
     @Environment(\.theme) private var theme
 
     var body: some View {
-        let data = store.state.node(.BigEF).data?.bigEF ?? BigEFData()
-        let computed = bigEmergencyFundTarget(months: data.targetMonths, monthlyExpenses: store.state.settings.monthlyExpenses)
-        let buckets = data.items ?? []
-        let target = data.effectiveTarget(computed: computed)
+        let book = store.state.budget
+        let snap = Ledger.snapshot(book, month: Recurring.ymKey())
+        let rows = NodeLedger.nodeRows(book, snap, .BigEF)
+        let months = store.state.node(.BigEF).data?.bigEF?.targetMonths ?? 3
+        let computed = bigEmergencyFundTarget(months: months, monthlyExpenses: store.state.settings.monthlyExpenses)
+        let target = NodeLedger.efTarget(book, .BigEF, computed: computed)
 
         VStack(alignment: .leading, spacing: theme.spacing.md) {
             LabeledField(label: "Target months") {
                 Picker("", selection: Binding(
-                    get: { data.targetMonths },
-                    set: { write(BigEFData(targetMonths: $0, balance: data.balance, items: data.items)) }
+                    get: { months },
+                    set: { store.setNodeData(.BigEF, .bigEF(BigEFData(targetMonths: $0))) }
                 )) {
                     ForEach([3, 4, 5, 6], id: \.self) { Text("\($0) mo").tag($0) }
                 }
                 .pickerStyle(.segmented)
             }
-            if buckets.isEmpty {
-                LabeledField(label: "Balance") {
-                    NumberField(value: data.balance.value) { write(BigEFData(targetMonths: data.targetMonths, balance: .manual($0))) }
-                }
-                GlassButton(title: "Split into buckets", systemImage: "list.bullet") {
-                    // Seed bucket #1 with the current balance so the node total carries over.
-                    write(BigEFData(targetMonths: data.targetMonths, balance: data.balance, items: [EFBucket(balance: data.balance)]))
-                }
+            if rows.isEmpty {
+                EFFirstBalanceField(nodeId: .BigEF, computedTarget: computed)
             } else {
-                EFBucketEditor(buckets: buckets, computedTarget: computed, nodeId: .BigEF) { items in
-                    write(BigEFData(targetMonths: data.targetMonths, balance: data.balance, items: items))
-                }
+                EFBucketEditor(nodeId: .BigEF, rows: rows, computedTarget: computed)
             }
             Text(target > 0 ? "Target: \(CurrencyFormat.string(target))" : "Set monthly expenses in Settings to compute target.")
                 .font(theme.typography.caption)
                 .foregroundStyle(theme.colors.textSecondary)
         }
     }
-
-    private func write(_ d: BigEFData) { store.setNodeData(.BigEF, .bigEF(d)) }
 }
 
-/// Bucket list editor shared by the two emergency-fund forms: per-bucket cards
-/// with their own goal bars, the unallocated hint, and add/collapse actions.
-private struct EFBucketEditor: View {
-    @Environment(\.theme) private var theme
-    let buckets: [EFBucket]
-    let computedTarget: Decimal
+/// Empty fund: one "Current balance" field whose first keystroke creates the
+/// single "Emergency Fund" envelope (target = the computed milestone, when it
+/// has one) and then plans the balance edit against it.
+private struct EFFirstBalanceField: View {
+    @Environment(AppStore.self) private var store
+    /// Host milestone — the created envelope reports into this node.
     let nodeId: NodeId
-    /// Receives the next bucket list; nil collapses back to the single balance.
-    let write: ([EFBucket]?) -> Void
+    let computedTarget: Decimal
 
     var body: some View {
-        let bucketTargets = buckets.reduce(Decimal(0)) { $0 + $1.target }
+        LabeledField(label: "Current balance") {
+            NumberField(value: 0) { v in writeFirstBalance(v) }
+        }
+    }
+
+    private func writeFirstBalance(_ v: Decimal) {
+        let categoryID: String
+        if let existing = NodeLedger.efCategories(store.state.budget).first {
+            categoryID = existing.id
+        } else {
+            let plan = NodeLedger.planCreateLinkedCategory(
+                store.state.budget,
+                nodeId: nodeId,
+                name: "Emergency Fund",
+                balanceTarget: computedTarget > 0 ? computedTarget : nil
+            )
+            store.apply(plan.ops)
+            categoryID = plan.categoryID
+        }
+        store.apply(NodeLedger.planBalanceEdit(
+            store.state.budget,
+            month: Recurring.ymKey(),
+            categoryID: categoryID,
+            newAvailable: v,
+            today: Ledger.isoDay()
+        ))
+    }
+}
+
+/// Bucket editor shared by the two emergency-fund forms, over the SmallEF ∪
+/// BigEF envelope union: name/target edit the category, balance plans honest
+/// ledger operations, and new buckets report into the host milestone.
+private struct EFBucketEditor: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var theme
+    @Environment(NavigationCenter.self) private var nav
+    /// Host milestone — new buckets get this node's id.
+    let nodeId: NodeId
+    let rows: [NodeLedger.NodeRow]
+    let computedTarget: Decimal
+
+    @State private var pendingDelete: BudgetCategory?
+
+    var body: some View {
+        let bucketTargets = rows.reduce(Decimal(0)) { $0 + ($1.category.balanceTarget ?? 0) }
         let color = theme.phaseColor(Flowchart.node(nodeId).phase).base
         VStack(alignment: .leading, spacing: theme.spacing.sm) {
             FieldLabel(text: "Buckets")
-            ForEach(buckets) { bucket in
+            ForEach(rows, id: \.category.id) { row in
                 SubGoalCard(
                     namePlaceholder: "Bucket (e.g. Medical)",
-                    name: nameBinding(bucket),
-                    value: bucket.balance.value,
-                    target: bucket.target,
+                    name: nameBinding(row.category),
+                    value: row.available,
+                    target: row.category.balanceTarget ?? 0,
                     color: color,
-                    onDelete: { write(buckets.filter { $0.id != bucket.id }) }
+                    onOpenBudget: { nav.openBudget(categoryId: row.category.id) },
+                    onDelete: { pendingDelete = row.category }
                 ) {
                     HStack(spacing: theme.spacing.sm) {
                         LabeledField(label: "Target") {
-                            NumberField(value: bucket.target) { v in patch(bucket.id) { $0.target = v } }
+                            NumberField(value: row.category.balanceTarget ?? 0) { v in
+                                patchCategory(row.category.id) { $0.balanceTarget = v > 0 ? v : nil }
+                            }
                         }
                         LabeledField(label: "Balance") {
-                            NumberField(value: bucket.balance.value) { v in patch(bucket.id) { $0.balance = .manual(v) } }
+                            NumberField(value: row.available) { v in
+                                store.apply(NodeLedger.planBalanceEdit(
+                                    store.state.budget,
+                                    month: Recurring.ymKey(),
+                                    categoryID: row.category.id,
+                                    newAvailable: v,
+                                    today: Ledger.isoDay()
+                                ))
+                            }
                         }
                     }
                 }
@@ -249,32 +319,41 @@ private struct EFBucketEditor: View {
                     .foregroundStyle(theme.colors.textSecondary)
             }
             GlassButton(title: "Add bucket", systemImage: "plus") {
-                write(buckets + [EFBucket()])
+                store.apply(NodeLedger.planCreateLinkedCategory(store.state.budget, nodeId: nodeId, name: "").ops)
             }
-            Button {
-                // Collapse to the single balance; the mirrored total carries over.
-                write(nil)
-            } label: {
-                Text("Use single balance")
-                    .font(theme.typography.caption)
-                    .foregroundStyle(theme.colors.textSecondary)
-            }
-            .buttonStyle(.plain)
+        }
+        .confirmationDialog(
+            deleteTitle,
+            isPresented: deleteShown,
+            titleVisibility: .visible,
+            presenting: pendingDelete
+        ) { category in
+            Button("Delete", role: .destructive) { store.deleteCategory(category.id) }
+        } message: { _ in
+            Text("Its transactions stay, uncategorized, and assigned dollars return to Ready to Assign.")
         }
     }
 
-    private func patch(_ id: String, _ change: (inout EFBucket) -> Void) {
-        var next = buckets
-        guard let idx = next.firstIndex(where: { $0.id == id }) else { return }
-        change(&next[idx])
-        write(next)
+    private func patchCategory(_ id: String, _ change: (inout BudgetCategory) -> Void) {
+        guard var category = store.state.budget.categories.first(where: { $0.id == id }) else { return }
+        change(&category)
+        store.updateCategory(category)
     }
 
-    private func nameBinding(_ bucket: EFBucket) -> Binding<String> {
+    private func nameBinding(_ category: BudgetCategory) -> Binding<String> {
         Binding(
-            get: { (buckets.first { $0.id == bucket.id })?.name ?? bucket.name },
-            set: { newValue in patch(bucket.id) { $0.name = newValue } }
+            get: { store.state.budget.categories.first { $0.id == category.id }?.name ?? category.name },
+            set: { v in patchCategory(category.id) { $0.name = v } }
         )
+    }
+
+    private var deleteShown: Binding<Bool> {
+        Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } })
+    }
+
+    private var deleteTitle: String {
+        guard let name = pendingDelete?.name, !name.isEmpty else { return "Delete this bucket?" }
+        return "Delete \(name)?"
     }
 }
 
@@ -395,108 +474,58 @@ private struct HSAForm: View {
 // MARK: - SavePurchase / College
 
 private struct SavePurchaseForm: View {
-    @Environment(AppStore.self) private var store
-    @Environment(\.theme) private var theme
-
-    private var data: SavePurchaseData { store.state.node(.SavePurchase).data?.savePurchase ?? SavePurchaseData() }
-
-    /// The goals shown: the stored list, else the legacy single-goal fields
-    /// surfaced as goal #1 (written back as a list on first edit). The fixed id
-    /// keeps the card stable across renders while the legacy fields are live.
-    private var goals: [PurchaseGoal] {
-        if let items = data.items, !items.isEmpty { return items }
-        return [PurchaseGoal(id: "legacy", name: data.goalName, target: data.target, saved: data.saved, byDate: data.byDate)]
-    }
-
     var body: some View {
-        let goals = self.goals
-        let color = theme.phaseColor(Flowchart.node(.SavePurchase).phase).base
-        VStack(alignment: .leading, spacing: theme.spacing.md) {
-            FieldLabel(text: goals.count > 1 ? "Goals" : "Goal")
-            ForEach(goals) { goal in
-                SubGoalCard(
-                    namePlaceholder: "Goal (e.g. New car)",
-                    name: nameBinding(goal),
-                    value: goal.saved.value,
-                    target: goal.target,
-                    color: color,
-                    onDelete: { remove(goal.id) }
-                ) {
-                    VStack(spacing: theme.spacing.sm) {
-                        HStack(spacing: theme.spacing.sm) {
-                            LabeledField(label: "Target") {
-                                NumberField(value: goal.target) { v in patch(goal.id) { $0.target = v } }
-                            }
-                            LabeledField(label: "Saved") {
-                                NumberField(value: goal.saved.value) { v in patch(goal.id) { $0.saved = .manual(v) } }
-                            }
-                        }
-                        MonthYearField(label: "By date", value: goal.byDate) { v in patch(goal.id) { $0.byDate = v } }
-                    }
-                }
-            }
-            if goals.count > 1 {
-                Text("Total \(CurrencyFormat.string(data.effectiveSaved)) of \(CurrencyFormat.string(data.effectiveTarget))")
-                    .font(theme.typography.caption)
-                    .foregroundStyle(theme.colors.textSecondary)
-            }
-            GlassButton(title: "Add goal", systemImage: "plus") {
-                writeGoals(goals + [PurchaseGoal()])
-            }
-        }
-    }
-
-    private func writeGoals(_ goals: [PurchaseGoal]) {
-        var d = data
-        d.items = goals
-        store.setNodeData(.SavePurchase, .savePurchase(d))   // normalization mirrors the legacy scalars
-    }
-
-    private func remove(_ id: String) {
-        let remaining = goals.filter { $0.id != id }
-        if remaining.isEmpty {
-            store.setNodeData(.SavePurchase, .savePurchase(SavePurchaseData()))
-        } else {
-            writeGoals(remaining)
-        }
-    }
-
-    private func patch(_ id: String, _ change: (inout PurchaseGoal) -> Void) {
-        var next = goals
-        guard let idx = next.firstIndex(where: { $0.id == id }) else { return }
-        change(&next[idx])
-        writeGoals(next)
-    }
-
-    private func nameBinding(_ goal: PurchaseGoal) -> Binding<String> {
-        Binding(
-            get: { (goals.first { $0.id == goal.id })?.name ?? goal.name },
-            set: { v in patch(goal.id) { $0.name = v } }
-        )
+        GoalCategoryEditor(nodeId: .SavePurchase)
     }
 }
 
 private struct CollegeForm: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var theme
+    @Environment(NavigationCenter.self) private var nav
 
     var body: some View {
         let d = store.state.node(.College).data?.college ?? CollegeData()
+        let balance = NodeLedger.collegeBalance(store.state.budget)
+        // The 529 account materializes on the first balance edit; the jump
+        // only shows once there's an account row on the Budget board.
+        let hasCollegeAccount = store.state.budget.accounts.contains {
+            $0.id == NodeLedger.collegeAccountID && $0.closed != true
+        }
         HStack(spacing: theme.spacing.md) {
             LabeledField(label: "Monthly") {
-                NumberField(value: d.monthlyContribution) { write(d, monthly: $0) }
+                NumberField(value: d.monthlyContribution) { v in
+                    store.setNodeData(.College, .college(CollegeData(
+                        monthlyContribution: v,
+                        balance: d.balance,
+                        targetAge: d.targetAge
+                    )))
+                }
             }
             LabeledField(label: "Balance") {
-                NumberField(value: d.balance.value) { write(d, balance: $0) }
+                HStack(spacing: theme.spacing.sm) {
+                    NumberField(value: balance) { v in
+                        store.apply(NodeLedger.planCollegeBalanceEdit(
+                            store.state.budget,
+                            newBalance: v,
+                            today: Ledger.isoDay()
+                        ))
+                    }
+                    if hasCollegeAccount {
+                        // No dismiss() here — RootView's pendingBudgetFocus
+                        // onChange closes the node sheet for us.
+                        Button {
+                            nav.openBudget(accountId: NodeLedger.collegeAccountID)
+                        } label: {
+                            Image(systemName: "arrow.up.forward.square")
+                                .font(theme.typography.caption)
+                                .foregroundStyle(theme.colors.textSecondary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Open in Budget")
+                    }
+                }
             }
         }
-    }
-
-    private func write(_ d: CollegeData, monthly: Decimal? = nil, balance: Decimal? = nil) {
-        store.setNodeData(.College, .college(CollegeData(
-            monthlyContribution: monthly ?? d.monthlyContribution,
-            balance: .manual(balance ?? d.balance.value),
-            targetAge: d.targetAge
-        )))
     }
 }

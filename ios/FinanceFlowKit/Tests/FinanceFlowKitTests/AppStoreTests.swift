@@ -35,6 +35,14 @@ struct AppStoreTests {
         #expect(store.status(of: .Rent) == .current)
     }
 
+    @Test("setNodeData stores the payload verbatim")
+    func setNodeDataVerbatim() {
+        let store = AppStore(storage: MemoryStorageAdapter())
+        let data = NodeData.bigEF(BigEFData(targetMonths: 6))
+        store.setNodeData(.BigEF, data)
+        #expect(store.state.node(.BigEF).data == data)
+    }
+
     @Test("monthly check toggles on and off")
     func monthlyCheck() {
         let store = AppStore(storage: MemoryStorageAdapter())
@@ -124,6 +132,30 @@ struct AppStoreTests {
         #expect(store.state.budget.assignments.isEmpty)
         // The deleted envelope's dollars are back in the pool — nothing vanished.
         #expect(Ledger.snapshot(store.state.budget, month: "2026-06").readyToAssign == 1000)
+    }
+
+    @Test("apply(_:) lands a balance-edit plan atomically through the store")
+    func applyBookOps() {
+        let store = AppStore(storage: MemoryStorageAdapter())
+        let month = Recurring.ymKey()
+        store.addGroup(name: "Emergency Fund")
+        let groupID = store.state.budget.groups[0].id
+        store.addCategory(groupID: groupID, name: "Medical")
+        let catID = store.state.budget.categories[0].id
+        store.assign(month: month, categoryID: catID, amount: 100)
+
+        // Lower past the assignment: un-assign + one coalesced adjustment txn.
+        let plan = NodeLedger.planBalanceEdit(
+            store.state.budget, month: month, categoryID: catID, newAvailable: -25, today: "2026-06-10"
+        )
+        store.apply(plan)
+
+        #expect(store.state.budget.assignments[month]?[catID] == nil)
+        let adjustments = store.state.budget.transactions.filter { $0.accountId == NodeLedger.adjustAccountID }
+        #expect(adjustments.count == 1)
+        #expect(adjustments.first?.amount == -25)
+        #expect(store.state.budget.accounts.contains { $0.id == NodeLedger.adjustAccountID })
+        #expect(Ledger.snapshot(store.state.budget, month: month).categories[catID]?.available == -25)
     }
 
     @Test("addGroup and addCategory assign sequential orders")

@@ -3,7 +3,6 @@ import { useStore } from "../state/store";
 import { GlassCard } from "./glass/GlassCard";
 import { FieldLabel } from "./glass/GlassInput";
 import { NumberField } from "./glass/NumberField";
-import { YnabPanel } from "./settings/YnabPanel";
 
 export function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const settings = useStore((s) => s.settings);
@@ -98,7 +97,6 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                     </label>
                   </div>
                 </div>
-                <YnabPanel />
               </div>
             </GlassCard>
           </motion.div>

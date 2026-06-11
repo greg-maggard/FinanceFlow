@@ -5,6 +5,7 @@ import { newId } from "../../state/schema";
 import { accountBalance, isOnBudget } from "../../budget/ledger";
 import { GlassCard } from "../glass/GlassCard";
 import { GlassInput, GlassSelect } from "../glass/GlassInput";
+import { NodeChip } from "./CategoryGroups";
 import { Field, SectionTitle, dollars } from "./bits";
 
 const KIND_LABEL: Record<AccountKind, string> = {
@@ -19,9 +20,12 @@ const KIND_LABEL: Record<AccountKind, string> = {
 function AccountRow({ account, balance }: { account: Account; balance: number }) {
   const negative = Math.round(balance * 100) < 0;
   return (
-    <div className="flex items-center gap-3 py-2.5">
+    <div id={`acct-${account.id}`} className="flex items-center gap-3 py-2.5">
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium text-white/90">{account.name}</div>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate text-sm font-medium text-white/90">{account.name}</span>
+          {account.nodeId && <NodeChip nodeId={account.nodeId} />}
+        </div>
         <div className="text-[11px] text-white/45">{KIND_LABEL[account.kind]}</div>
       </div>
       <span

@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { useStore } from "../../state/store";
-import type { Category, CategoryGroup, MonthKey } from "../../state/schema";
+import { useUI } from "../../state/uiStore";
+import type { Category, CategoryGroup, MonthKey, NodeId } from "../../state/schema";
 import type { MonthSnapshot } from "../../budget/ledger";
+import { IDENTITY } from "../../theme/identity";
 import { GlassCard } from "../glass/GlassCard";
 import { GlassInput } from "../glass/GlassInput";
 import { NumberField } from "../glass/NumberField";
@@ -12,7 +14,9 @@ import { Field, InlineAdd, SectionTitle, dollars } from "./bits";
 
 // Funding green — envelopes glow when money lands in them, not when it leaves.
 const FUND_TINT = "#34d399";
-const FUND_GLOW = "rgba(52, 211, 153, 0.55)";
+// Exported for BudgetScreen's cross-navigation pulse, so arrival glows the
+// same green as funding does.
+export const FUND_GLOW = "rgba(52, 211, 153, 0.55)";
 
 const GRID = "grid grid-cols-[minmax(0,1fr)_5.5rem_4.5rem_auto_1.25rem] items-center gap-2";
 
@@ -45,6 +49,25 @@ function availableChipStyle(amount: number): React.CSSProperties {
     color: "rgba(255,255,255,0.60)",
     border: "1px solid rgba(255,255,255,0.12)",
   };
+}
+
+/**
+ * Subtle chip a budget row wears when a flowchart node reads it — tapping
+ * jumps to that node's focus card (the other half of cross-navigation).
+ * Shared with AccountsSection so linked accounts get the identical chip.
+ */
+export function NodeChip({ nodeId }: { nodeId: NodeId }) {
+  return (
+    <button
+      type="button"
+      title="Open on the path"
+      onClick={() => useUI.getState().setFocus(nodeId)}
+      className="max-w-[10rem] shrink-0 truncate rounded-full px-2 py-0.5 text-left text-[10px] font-medium transition hover:brightness-125"
+      style={availableChipStyle(0)}
+    >
+      {IDENTITY[nodeId] ?? nodeId}
+    </button>
+  );
 }
 
 function CategoryRow({
@@ -85,7 +108,7 @@ function CategoryRow({
 
   if (editing) {
     return (
-      <motion.div layout className="space-y-3 py-2.5">
+      <motion.div layout id={`cat-${cat.id}`} className="space-y-3 py-2.5">
         <Field label={`Edit ${cat.name}`}>
           <GlassInput
             autoFocus
@@ -148,9 +171,12 @@ function CategoryRow({
   }
 
   return (
-    <motion.div layout className="space-y-2 py-2.5">
+    <motion.div layout id={`cat-${cat.id}`} className="space-y-2 py-2.5">
       <div className={GRID}>
-        <div className="truncate text-sm font-medium text-white/90">{cat.name}</div>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate text-sm font-medium text-white/90">{cat.name}</span>
+          {cat.nodeId && <NodeChip nodeId={cat.nodeId} />}
+        </div>
         <NumberField
           aria-label={`Assigned to ${cat.name}`}
           value={m.assigned}
@@ -192,7 +218,7 @@ function CategoryRow({
 }
 
 /** Two-tap delete: arming explains where the money goes before committing. */
-function ConfirmDelete({ name, onDelete }: { name: string; onDelete: () => void }) {
+export function ConfirmDelete({ name, onDelete }: { name: string; onDelete: () => void }) {
   const [armed, setArmed] = useState(false);
   return (
     <div className="space-y-1.5">
