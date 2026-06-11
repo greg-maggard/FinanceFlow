@@ -2,31 +2,29 @@ import Foundation
 
 /// The whole persisted document. Mirrors `AppState` in `src/state/schema.ts`.
 ///
-/// `decisions`, `nodes`, and `categoryMap` are encoded/decoded through keyed
-/// containers (rather than Swift's default `[Enum: V]` array form) so the JSON
-/// is the same object shape the web reads and writes.
+/// `decisions` and `nodes` are encoded/decoded through keyed containers
+/// (rather than Swift's default `[Enum: V]` array form) so the JSON is the
+/// same object shape the web reads and writes.
 public struct AppState: Equatable, Sendable {
     public var version: Int
     public var settings: Settings
     /// Absence of a key == unanswered (web stores explicit `null`; we omit).
     public var decisions: [DecisionId: Decision]
     public var nodes: [NodeId: NodeState]
-    /// The zero-based envelope core (v2). Empty on documents migrated from v1
+    /// The zero-based envelope core. Empty on documents migrated from v1
     /// builds until `IO.migrate` seeds it.
     public var budget: BudgetBook
     public var shownCelebrations: [NodeId]
     public var earnedMedals: [Int]
-    public var categoryMap: [NodeId: String]
 
     public init(
-        version: Int = 2,
+        version: Int = 3,
         settings: Settings,
         decisions: [DecisionId: Decision],
         nodes: [NodeId: NodeState],
         budget: BudgetBook = BudgetBook(),
         shownCelebrations: [NodeId] = [],
-        earnedMedals: [Int] = [],
-        categoryMap: [NodeId: String] = [:]
+        earnedMedals: [Int] = []
     ) {
         self.version = version
         self.settings = settings
@@ -35,7 +33,6 @@ public struct AppState: Equatable, Sendable {
         self.budget = budget
         self.shownCelebrations = shownCelebrations
         self.earnedMedals = earnedMedals
-        self.categoryMap = categoryMap
     }
 
     /// Fresh state: every node present and empty, every decision unanswered.
@@ -44,14 +41,13 @@ public struct AppState: Equatable, Sendable {
         var nodes: [NodeId: NodeState] = [:]
         for id in NodeId.allCases { nodes[id] = NodeState() }
         return AppState(
-            version: 2,
+            version: 3,
             settings: .default,
             decisions: [:],
             nodes: nodes,
             budget: BudgetBook(),
             shownCelebrations: [],
-            earnedMedals: [],
-            categoryMap: [:]
+            earnedMedals: []
         )
     }
 
@@ -64,7 +60,7 @@ public struct AppState: Equatable, Sendable {
 
 extension AppState: Codable {
     enum CodingKeys: String, CodingKey {
-        case version, settings, decisions, nodes, budget, shownCelebrations, earnedMedals, categoryMap
+        case version, settings, decisions, nodes, budget, shownCelebrations, earnedMedals
     }
 
     public init(from decoder: Decoder) throws {
@@ -110,18 +106,8 @@ extension AppState: Codable {
 
         shownCelebrations = try c.decodeIfPresent([NodeId].self, forKey: .shownCelebrations) ?? []
         earnedMedals = try c.decodeIfPresent([Int].self, forKey: .earnedMedals) ?? []
-
-        var categoryMap: [NodeId: String] = [:]
-        if c.contains(.categoryMap) {
-            let cm = try c.nestedContainer(keyedBy: NodeId.self, forKey: .categoryMap)
-            for id in NodeId.allCases where cm.contains(id) {
-                if (try? cm.decodeNil(forKey: id)) == false,
-                   let category = try? cm.decode(String.self, forKey: id) {
-                    categoryMap[id] = category
-                }
-            }
-        }
-        self.categoryMap = categoryMap
+        // v2 documents may still carry a `categoryMap` (retired with YNAB);
+        // unknown keys are ignored on decode, so it simply drops here.
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -148,12 +134,5 @@ extension AppState: Codable {
 
         try c.encode(shownCelebrations, forKey: .shownCelebrations)
         try c.encode(earnedMedals, forKey: .earnedMedals)
-
-        if !categoryMap.isEmpty {
-            var cm = c.nestedContainer(keyedBy: NodeId.self, forKey: .categoryMap)
-            for (id, value) in categoryMap {
-                try cm.encode(value, forKey: id)
-            }
-        }
     }
 }

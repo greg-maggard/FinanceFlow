@@ -72,8 +72,8 @@ nothing bypasses the system.
 
 The on-device document and JSON export use the **same shape as the web app**
 (`schema.ts`), so backups are portable. `FinanceFlowKit/Models/AppState.swift`
-implements a custom `Codable` to keep `decisions` / `nodes` / `categoryMap` as
-keyed JSON objects and to decode each node's payload by its id.
+implements a custom `Codable` to keep `decisions` / `nodes` as keyed JSON
+objects and to decode each node's payload by its id.
 
 ### The graph board zoom is UIKit-backed
 
