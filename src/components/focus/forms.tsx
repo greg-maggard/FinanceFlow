@@ -1,13 +1,36 @@
 import { FieldLabel, GlassInput, GlassSelect } from "../glass/GlassInput";
 import { NumberField } from "../glass/NumberField";
+import { KebabMenu } from "../glass/KebabMenu";
 import { useStore } from "../../state/store";
-import type { Debt, NodeId } from "../../state/schema";
+import type { Account, Category, NodeId } from "../../state/schema";
 import { emergencyFundTarget, bigEmergencyFundTarget } from "../../state/schema";
 import { motion } from "framer-motion";
-import { useEffect, useState } from "react";
-import { useYnab } from "../../state/ynabStore";
-import { YnabClient, milliToDollar, type YnabCategoryGroup } from "../../integrations/ynab";
-import type { RecurringItem } from "../../state/schema";
+import { useState } from "react";
+import { ymKey } from "../../state/recurring";
+import { isoDay, snapshot } from "../../budget/ledger";
+import {
+  collegeBalance,
+  debtRows,
+  efCategories,
+  efTarget,
+  linkedCategories,
+  nodeRows,
+  planBalanceEdit,
+  planCollegeBalanceEdit,
+  planCreateDebtAccount,
+  planCreateLinkedCategory,
+  planDebtBalanceEdit,
+  planMarkDebtPaid,
+} from "../../budget/nodeLedger";
+import { ConfirmDelete } from "../budget/CategoryGroups";
+import { InlineAdd } from "../budget/bits";
+
+/**
+ * Node forms edit the envelope ledger directly — every dollar field here is
+ * the same envelope or account the Budget screen shows, so the two views can
+ * never disagree. Money edits always target the current month (`ymKey()`);
+ * percent/limit fields that have no ledger meaning stay node payloads.
+ */
 
 const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
   <label className="block space-y-1.5">
@@ -16,75 +39,387 @@ const Field = ({ label, children }: { label: string; children: React.ReactNode }
   </label>
 );
 
-export function SmallEFFields() {
-  const state = useStore();
-  const data =
-    (state.nodes.SmallEF.data as { balance: { value: number; source: "manual" } } | undefined) ?? {
-      balance: { value: 0, source: "manual" as const },
-    };
-  const target = emergencyFundTarget(state.settings.monthlyExpenses);
+// ---------------------------------------------------------------------------
+// Ledger writes. Handlers re-read the live store so per-keystroke planners
+// always see the latest book — a render-time copy would compound edits.
+
+function patchCategory(id: string, patch: Partial<Category>) {
+  const s = useStore.getState();
+  const cat = s.budget.categories.find((c) => c.id === id);
+  if (cat) s.updateCategory({ ...cat, ...patch });
+}
+
+function assignThisMonth(categoryId: string, v: number) {
+  useStore.getState().assign(ymKey(), categoryId, v);
+}
+
+/** Drive an envelope's available to the typed value (absolute-target planner). */
+function setAvailable(categoryId: string, v: number) {
+  const s = useStore.getState();
+  s.applyBookOps(planBalanceEdit(s.budget, ymKey(), categoryId, v, isoDay()));
+}
+
+function addCategoryFor(nodeId: NodeId, name: string) {
+  const s = useStore.getState();
+  s.applyBookOps(planCreateLinkedCategory(s.budget, nodeId, name).ops);
+}
+
+function patchAccount(id: string, patch: Partial<Account>) {
+  const s = useStore.getState();
+  const account = s.budget.accounts.find((a) => a.id === id);
+  if (account) s.updateAccount({ ...account, ...patch });
+}
+
+function setOutstanding(accountId: string, v: number) {
+  const s = useStore.getState();
+  s.applyBookOps(planDebtBalanceEdit(s.budget, accountId, v, isoDay()));
+}
+
+function markDebtPaid(accountId: string) {
+  const s = useStore.getState();
+  s.applyBookOps(planMarkDebtPaid(s.budget, accountId, isoDay()));
+}
+
+// ---------------------------------------------------------------------------
+// Shared row chrome
+
+/** One editable envelope/account row: name up top, fields below, kebab for the rest. */
+function RowCard({
+  name,
+  placeholder,
+  onRename,
+  aside,
+  menu,
+  drop,
+  children,
+}: {
+  name: string;
+  placeholder: string;
+  onRename: (name: string) => void;
+  aside?: React.ReactNode;
+  menu: React.ReactNode;
+  drop: "down" | "up";
+  children: React.ReactNode;
+}) {
   return (
-    <div className="space-y-3">
-      <div className="text-xs text-white/55">
-        Target: <span className="font-semibold text-white/85">${target.toLocaleString()}</span>
+    <motion.div
+      layout
+      className="space-y-2 rounded-xl p-3"
+      style={{
+        background: "rgba(255,255,255,0.04)",
+        border: "1px solid rgba(255,255,255,0.08)",
+      }}
+    >
+      <div className="flex items-center gap-2">
+        <GlassInput placeholder={placeholder} value={name} onChange={(e) => onRename(e.target.value)} />
+        {aside}
+        <div className="shrink-0">
+          <KebabMenu ariaLabel={`${name || placeholder} actions`} drop={drop}>
+            {menu}
+          </KebabMenu>
+        </div>
       </div>
-      <Field label="Current balance">
-        <NumberField
-          value={data.balance.value}
-          onChange={(v) =>
-            useStore.getState().setNodeData("SmallEF", {
-              balance: { value: v, source: "manual" },
-            })
-          }
-        />
-      </Field>
+      {children}
+    </motion.div>
+  );
+}
+
+/** Two-tap close for debt accounts — closing hides the row, never the history. */
+function ConfirmClose({ name, onClose }: { name: string; onClose: () => void }) {
+  const [armed, setArmed] = useState(false);
+  return (
+    <div className="space-y-1.5">
+      {armed && (
+        <p className="text-[11px] text-white/45">
+          The account closes; its history stays in Accounts.
+        </p>
+      )}
+      <button
+        type="button"
+        onClick={() => (armed ? onClose() : setArmed(true))}
+        className="w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-red-300 hover:bg-red-500/10"
+      >
+        {armed ? "Tap again to confirm" : `Remove ${name}`}
+      </button>
     </div>
   );
 }
 
-export function BigEFFields() {
-  const state = useStore();
-  const data = (state.nodes.BigEF.data as
-    | { targetMonths: 3 | 4 | 5 | 6; balance: { value: number; source: "manual" } }
-    | undefined) ?? { targetMonths: 3, balance: { value: 0, source: "manual" as const } };
-  const target = bigEmergencyFundTarget(data.targetMonths, state.settings.monthlyExpenses);
+// ---------------------------------------------------------------------------
+// Recurring nodes — envelopes in the Bills group
+
+type RecurringNodeId =
+  | "Rent"
+  | "Food"
+  | "Essential"
+  | "Income"
+  | "Health"
+  | "MinDebt"
+  | "NonEssential";
+
+const RECURRING_LABEL: Record<RecurringNodeId, string> = {
+  Rent: "Rent / mortgage",
+  Food: "Groceries",
+  Essential: "Utilities & essentials",
+  Income: "Transportation, internet, phone",
+  Health: "Insurance & health care",
+  MinDebt: "Total minimum payments",
+  NonEssential: "Non-essential subscriptions",
+};
+
+export function RecurringEditor({ nodeId }: { nodeId: RecurringNodeId }) {
+  const budget = useStore((s) => s.budget);
+  const [draftId, setDraftId] = useState<string | null>(null);
+  const rows = nodeRows(budget, snapshot(budget, ymKey()), nodeId);
+  const label = RECURRING_LABEL[nodeId] ?? nodeId;
+
+  /** First edit on a bare node materializes its single envelope, named for the node. */
+  const ensureCategory = (): string => {
+    const s = useStore.getState();
+    const existing = linkedCategories(s.budget, nodeId);
+    if (existing.length > 0) return existing[0].id;
+    const plan = planCreateLinkedCategory(s.budget, nodeId, label);
+    s.applyBookOps(plan.ops);
+    setDraftId(plan.categoryId);
+    return plan.categoryId;
+  };
+
+  // The simple pair stays mounted through the edit that creates the envelope,
+  // so typing isn't interrupted by the switch to row mode.
+  const simple = rows.length === 0 || (rows.length === 1 && rows[0].category.id === draftId);
+
   return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Target months">
-          <GlassSelect
-            value={data.targetMonths}
-            onChange={(e) =>
-              useStore.getState().patchNodeData("BigEF", {
-                targetMonths: Number(e.target.value) as 3 | 4 | 5 | 6,
-              })
-            }
-          >
-            <option value={3}>3 months</option>
-            <option value={4}>4 months</option>
-            <option value={5}>5 months</option>
-            <option value={6}>6 months</option>
-          </GlassSelect>
-        </Field>
-        <Field label="Balance">
-          <NumberField
-            value={data.balance.value}
-            onChange={(v) =>
-              useStore.getState().patchNodeData("BigEF", {
-                balance: { value: v, source: "manual" },
-              })
-            }
-          />
-        </Field>
-      </div>
-      <div className="text-xs text-white/55">
-        {target > 0
-          ? `Target: $${target.toLocaleString()}`
-          : "Set monthly expenses in Settings to compute target."}
+    <div className="space-y-4">
+      {simple ? (
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Monthly target ($)">
+            <NumberField
+              value={rows[0]?.category.monthlyTarget ?? 0}
+              onChange={(v) =>
+                patchCategory(ensureCategory(), { monthlyTarget: v > 0 ? v : undefined })
+              }
+            />
+          </Field>
+          <Field label="Saved this month ($)">
+            <NumberField
+              value={rows[0]?.assigned ?? 0}
+              onChange={(v) => assignThisMonth(ensureCategory(), v)}
+            />
+          </Field>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <div className="text-[11px] uppercase tracking-[0.2em] text-white/55">
+            Items — bar totals their goals
+          </div>
+          {rows.map((row, i) => (
+            <RowCard
+              key={row.category.id}
+              name={row.category.name}
+              placeholder="Item name (e.g., Power)"
+              onRename={(name) => patchCategory(row.category.id, { name })}
+              drop={i === 0 ? "down" : "up"}
+              menu={
+                <ConfirmDelete
+                  name={row.category.name || "item"}
+                  onDelete={() => useStore.getState().deleteCategory(row.category.id)}
+                />
+              }
+            >
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Target $">
+                  <NumberField
+                    value={row.category.monthlyTarget ?? 0}
+                    onChange={(v) =>
+                      patchCategory(row.category.id, { monthlyTarget: v > 0 ? v : undefined })
+                    }
+                  />
+                </Field>
+                <Field label="Saved $">
+                  <NumberField
+                    value={row.assigned}
+                    onChange={(v) => assignThisMonth(row.category.id, v)}
+                  />
+                </Field>
+              </div>
+            </RowCard>
+          ))}
+        </div>
+      )}
+      <div className="space-y-2">
+        {simple && (
+          <div className="text-[11px] uppercase tracking-[0.2em] text-white/55">
+            Or split into items
+          </div>
+        )}
+        <InlineAdd
+          label="Add item"
+          placeholder="Item name (e.g., Power)"
+          onAdd={(name) => addCategoryFor(nodeId, name)}
+        />
       </div>
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Emergency fund — both milestones edit the same SmallEF/BigEF envelope union
+
+export function EFEditor({ nodeId }: { nodeId: "SmallEF" | "BigEF" }) {
+  const state = useStore();
+  const budget = state.budget;
+  const [draftId, setDraftId] = useState<string | null>(null);
+  const rows = nodeRows(budget, snapshot(budget, ymKey()), nodeId);
+
+  const targetMonths =
+    (state.nodes.BigEF.data as { targetMonths?: 3 | 4 | 5 | 6 } | undefined)?.targetMonths ?? 3;
+  const computed =
+    nodeId === "SmallEF"
+      ? emergencyFundTarget(state.settings.monthlyExpenses)
+      : bigEmergencyFundTarget(targetMonths, state.settings.monthlyExpenses);
+  const target = efTarget(budget, nodeId, computed);
+
+  /** First edit on an empty fund materializes the single v1-style envelope. */
+  const ensureCategory = (): string => {
+    const s = useStore.getState();
+    const existing = efCategories(s.budget);
+    if (existing.length > 0) return existing[0].id;
+    const months =
+      (s.nodes.BigEF.data as { targetMonths?: 3 | 4 | 5 | 6 } | undefined)?.targetMonths ?? 3;
+    const comp =
+      nodeId === "SmallEF"
+        ? emergencyFundTarget(s.settings.monthlyExpenses)
+        : bigEmergencyFundTarget(months, s.settings.monthlyExpenses);
+    const plan = planCreateLinkedCategory(
+      s.budget,
+      nodeId,
+      "Emergency Fund",
+      comp > 0 ? { balanceTarget: comp } : undefined,
+    );
+    s.applyBookOps(plan.ops);
+    setDraftId(plan.categoryId);
+    return plan.categoryId;
+  };
+
+  const simple = rows.length === 0 || (rows.length === 1 && rows[0].category.id === draftId);
+
+  const hint = (
+    <div className="text-xs text-white/55">
+      {target > 0 ? (
+        <>
+          Target: <span className="font-semibold text-white/85">${target.toLocaleString()}</span>
+        </>
+      ) : (
+        "Set monthly expenses in Settings to compute target."
+      )}
+    </div>
+  );
+
+  const monthsSelect = nodeId === "BigEF" && (
+    <Field label="Target months">
+      <GlassSelect
+        value={targetMonths}
+        onChange={(e) =>
+          useStore.getState().patchNodeData("BigEF", {
+            targetMonths: Number(e.target.value) as 3 | 4 | 5 | 6,
+          })
+        }
+      >
+        <option value={3}>3 months</option>
+        <option value={4}>4 months</option>
+        <option value={5}>5 months</option>
+        <option value={6}>6 months</option>
+      </GlassSelect>
+    </Field>
+  );
+
+  const balanceField = (
+    <Field label="Current balance">
+      <NumberField
+        value={rows[0]?.available ?? 0}
+        onChange={(v) => setAvailable(ensureCategory(), v)}
+      />
+    </Field>
+  );
+
+  if (simple) {
+    return (
+      <div className="space-y-3">
+        {nodeId === "BigEF" ? (
+          <div className="grid grid-cols-2 gap-3">
+            {monthsSelect}
+            {balanceField}
+          </div>
+        ) : (
+          <>
+            {hint}
+            {balanceField}
+          </>
+        )}
+        {nodeId === "BigEF" && hint}
+        <div className="space-y-2">
+          <div className="text-[11px] uppercase tracking-[0.2em] text-white/55">
+            Or split into buckets
+          </div>
+          <InlineAdd
+            label="Add bucket"
+            placeholder="Bucket name (e.g., Car repairs)"
+            onAdd={(name) => addCategoryFor(nodeId, name)}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {monthsSelect}
+      {hint}
+      <div className="space-y-2">
+        {rows.map((row, i) => (
+          <RowCard
+            key={row.category.id}
+            name={row.category.name}
+            placeholder="Bucket name (e.g., Car repairs)"
+            onRename={(name) => patchCategory(row.category.id, { name })}
+            drop={i === 0 ? "down" : "up"}
+            menu={
+              <ConfirmDelete
+                name={row.category.name || "bucket"}
+                onDelete={() => useStore.getState().deleteCategory(row.category.id)}
+              />
+            }
+          >
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Target $">
+                <NumberField
+                  value={row.category.balanceTarget ?? 0}
+                  onChange={(v) =>
+                    patchCategory(row.category.id, { balanceTarget: v > 0 ? v : undefined })
+                  }
+                />
+              </Field>
+              <Field label="Balance $">
+                <NumberField
+                  value={row.available}
+                  onChange={(v) => setAvailable(row.category.id, v)}
+                />
+              </Field>
+            </div>
+          </RowCard>
+        ))}
+      </div>
+      <InlineAdd
+        label="Add bucket"
+        placeholder="Bucket name (e.g., Car repairs)"
+        onAdd={(name) => addCategoryFor(nodeId, name)}
+      />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Payload-only nodes — percent and limit fields with no ledger meaning
 
 export function MatchFields() {
   const state = useStore();
@@ -253,46 +588,63 @@ export function Increase401kFields() {
   );
 }
 
-export function SavePurchaseFields() {
-  const state = useStore();
-  const data = (state.nodes.SavePurchase.data as
-    | {
-        goalName: string;
-        target: number;
-        saved: { value: number; source: "manual" };
-        byDate?: string;
-      }
-    | undefined) ?? { goalName: "", target: 0, saved: { value: 0, source: "manual" as const } };
+// ---------------------------------------------------------------------------
+// Savings goals — SavePurchase and Goals share one editor over linked envelopes
+
+export function GoalEditor({ nodeId }: { nodeId: "SavePurchase" | "Goals" }) {
+  const budget = useStore((s) => s.budget);
+  const rows = nodeRows(budget, snapshot(budget, ymKey()), nodeId);
   return (
-    <div className="space-y-3">
-      <Field label="Goal name">
-        <GlassInput
-          value={data.goalName}
-          onChange={(e) =>
-            useStore.getState().patchNodeData("SavePurchase", { goalName: e.target.value })
+    <div className="space-y-2">
+      {rows.length === 0 && (
+        <p className="text-xs text-white/45">Add a goal to start saving toward it.</p>
+      )}
+      {rows.map((row, i) => (
+        <RowCard
+          key={row.category.id}
+          name={row.category.name}
+          placeholder="Goal"
+          onRename={(name) => patchCategory(row.category.id, { name })}
+          drop={i === 0 ? "down" : "up"}
+          menu={
+            <ConfirmDelete
+              name={row.category.name || "goal"}
+              onDelete={() => useStore.getState().deleteCategory(row.category.id)}
+            />
           }
-        />
-      </Field>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Target $">
-          <NumberField
-            value={data.target}
-            onChange={(v) =>
-              useStore.getState().patchNodeData("SavePurchase", { target: v })
-            }
-          />
-        </Field>
-        <Field label="Saved $">
-          <NumberField
-            value={data.saved.value}
-            onChange={(v) =>
-              useStore.getState().patchNodeData("SavePurchase", {
-                saved: { value: v, source: "manual" },
-              })
-            }
-          />
-        </Field>
-      </div>
+        >
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Target $">
+              <NumberField
+                value={row.category.balanceTarget ?? 0}
+                onChange={(v) =>
+                  patchCategory(row.category.id, { balanceTarget: v > 0 ? v : undefined })
+                }
+              />
+            </Field>
+            <Field label="Saved $">
+              <NumberField
+                value={row.available}
+                onChange={(v) => setAvailable(row.category.id, v)}
+              />
+            </Field>
+          </div>
+          <Field label="By date">
+            <GlassInput
+              type="date"
+              value={row.category.targetDate ?? ""}
+              onChange={(e) =>
+                patchCategory(row.category.id, { targetDate: e.target.value || undefined })
+              }
+            />
+          </Field>
+        </RowCard>
+      ))}
+      <InlineAdd
+        label="Add goal"
+        placeholder="Goal name"
+        onAdd={(name) => addCategoryFor(nodeId, name)}
+      />
     </div>
   );
 }
@@ -300,12 +652,8 @@ export function SavePurchaseFields() {
 export function CollegeFields() {
   const state = useStore();
   const data = (state.nodes.College.data as
-    | {
-        monthlyContribution: number;
-        balance: { value: number; source: "manual" };
-        targetAge?: number;
-      }
-    | undefined) ?? { monthlyContribution: 0, balance: { value: 0, source: "manual" as const } };
+    | { monthlyContribution: number; targetAge?: number }
+    | undefined) ?? { monthlyContribution: 0 };
   return (
     <div className="grid grid-cols-2 gap-3">
       <Field label="Monthly $">
@@ -318,34 +666,41 @@ export function CollegeFields() {
       </Field>
       <Field label="Balance $">
         <NumberField
-          value={data.balance.value}
-          onChange={(v) =>
-            useStore.getState().patchNodeData("College", {
-              balance: { value: v, source: "manual" },
-            })
-          }
+          value={collegeBalance(state.budget)}
+          onChange={(v) => {
+            const s = useStore.getState();
+            s.applyBookOps(planCollegeBalanceEdit(s.budget, v, isoDay()));
+          }}
         />
       </Field>
     </div>
   );
 }
 
-function uid() {
-  return Math.random().toString(36).slice(2, 9);
-}
+// ---------------------------------------------------------------------------
+// Debts — rows are open loan accounts linked to the node
 
-export function DebtFields({ nodeId, aprThreshold }: { nodeId: "HighDebt" | "ModDebt"; aprThreshold: number }) {
-  const state = useStore();
-  const data = (state.nodes[nodeId].data as { debts: Debt[] } | undefined) ?? { debts: [] };
-  const update = (debts: Debt[]) => useStore.getState().setNodeData(nodeId, { debts });
-  const add = () =>
-    update([
-      ...data.debts,
-      { id: uid(), name: "", balance: 0, apr: aprThreshold, minPayment: 0, paid: false },
-    ]);
-  const patch = (id: string, p: Partial<Debt>) =>
-    update(data.debts.map((d) => (d.id === id ? { ...d, ...p } : d)));
-  const remove = (id: string) => update(data.debts.filter((d) => d.id !== id));
+export function DebtEditor({
+  nodeId,
+  aprThreshold,
+}: {
+  nodeId: "HighDebt" | "ModDebt";
+  aprThreshold: number;
+}) {
+  const budget = useStore((s) => s.budget);
+  const rows = debtRows(budget, nodeId);
+
+  const addDebt = () => {
+    const s = useStore.getState();
+    s.applyBookOps(
+      planCreateDebtAccount(
+        s.budget,
+        nodeId,
+        { name: "", balance: 0, apr: aprThreshold, minPayment: 0 },
+        isoDay(),
+      ).ops,
+    );
+  };
 
   return (
     <div className="space-y-2">
@@ -353,64 +708,76 @@ export function DebtFields({ nodeId, aprThreshold }: { nodeId: "HighDebt" | "Mod
         Threshold: <span className="font-semibold text-white/85">{aprThreshold}%+ APR</span>. Avalanche
         (highest APR first) or snowball (smallest balance first).
       </div>
-      {data.debts.map((d) => (
-        <motion.div
-          key={d.id}
-          layout
-          className="space-y-2 rounded-xl p-3"
-          style={{
-            background: "rgba(255,255,255,0.04)",
-            border: "1px solid rgba(255,255,255,0.08)",
-          }}
-        >
-          <div className="flex gap-2">
-            <GlassInput
-              placeholder="Name"
-              value={d.name}
-              onChange={(e) => patch(d.id, { name: e.target.value })}
+      {rows.length === 0 && (
+        <p className="text-xs text-white/45">Add a debt to track your payoff.</p>
+      )}
+      {rows.map((row, i) => (
+        <RowCard
+          key={row.account.id}
+          name={row.account.name}
+          placeholder="Name"
+          onRename={(name) => patchAccount(row.account.id, { name })}
+          drop={i === 0 ? "down" : "up"}
+          aside={
+            row.paid ? (
+              <span
+                className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                style={{
+                  background: "rgba(52, 211, 153, 0.14)",
+                  color: "#a7f3d0",
+                  border: "1px solid rgba(52, 211, 153, 0.32)",
+                }}
+              >
+                Paid
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => markDebtPaid(row.account.id)}
+                className="shrink-0 rounded-full px-3 py-1 text-[11px] font-medium"
+                style={{
+                  background: "rgba(52, 211, 153, 0.14)",
+                  border: "1px solid rgba(52, 211, 153, 0.32)",
+                  color: "#a7f3d0",
+                }}
+              >
+                Mark paid
+              </button>
+            )
+          }
+          menu={
+            <ConfirmClose
+              name={row.account.name || "debt"}
+              onClose={() => patchAccount(row.account.id, { closed: true })}
             />
-            <button
-              type="button"
-              onClick={() => remove(d.id)}
-              className="rounded-full px-2 text-xs text-red-300 hover:bg-red-500/10"
-            >
-              ×
-            </button>
-          </div>
+          }
+        >
           <div className="grid grid-cols-3 gap-2">
             <Field label="Balance">
               <NumberField
-                value={d.balance}
-                onChange={(v) => patch(d.id, { balance: v })}
+                value={row.outstanding}
+                onChange={(v) => setOutstanding(row.account.id, v)}
               />
             </Field>
             <Field label="APR %">
               <NumberField
                 step="0.1"
-                value={d.apr}
-                onChange={(v) => patch(d.id, { apr: v })}
+                value={row.account.apr ?? 0}
+                onChange={(v) => patchAccount(row.account.id, { apr: v })}
               />
             </Field>
             <Field label="Min pay">
               <NumberField
-                value={d.minPayment}
-                onChange={(v) => patch(d.id, { minPayment: v })}
+                value={row.account.minPayment ?? 0}
+                onChange={(v) => patchAccount(row.account.id, { minPayment: v })}
               />
             </Field>
           </div>
-          <label className="flex items-center gap-2 text-xs text-white/80">
-            <input
-              type="checkbox"
-              checked={d.paid}
-              onChange={(e) => patch(d.id, { paid: e.target.checked })}
-            />
-            Paid off
-          </label>
-        </motion.div>
+        </RowCard>
       ))}
       <button
         type="button"
-        onClick={add}
+        onClick={addDebt}
         className="w-full rounded-xl border border-dashed border-white/15 py-2 text-xs text-white/65 hover:bg-white/5"
       >
         + Add debt
@@ -419,397 +786,27 @@ export function DebtFields({ nodeId, aprThreshold }: { nodeId: "HighDebt" | "Mod
   );
 }
 
-export function GoalsFields() {
-  const state = useStore();
-  const data = (state.nodes.Goals.data as
-    | { items: { id: string; name: string; target: number; saved: number; horizonYears: number }[] }
-    | undefined) ?? { items: [] };
-  const update = (items: typeof data.items) => useStore.getState().setNodeData("Goals", { items });
-  const add = () =>
-    update([
-      ...data.items,
-      { id: uid(), name: "", target: 0, saved: 0, horizonYears: 1 },
-    ]);
-  const patch = (
-    id: string,
-    p: Partial<(typeof data.items)[number]>,
-  ) => update(data.items.map((g) => (g.id === id ? { ...g, ...p } : g)));
-  const remove = (id: string) => update(data.items.filter((g) => g.id !== id));
-
-  return (
-    <div className="space-y-2">
-      {data.items.map((g) => (
-        <motion.div
-          key={g.id}
-          layout
-          className="space-y-2 rounded-xl p-3"
-          style={{
-            background: "rgba(255,255,255,0.04)",
-            border: "1px solid rgba(255,255,255,0.08)",
-          }}
-        >
-          <div className="flex gap-2">
-            <GlassInput
-              placeholder="Goal"
-              value={g.name}
-              onChange={(e) => patch(g.id, { name: e.target.value })}
-            />
-            <button
-              type="button"
-              onClick={() => remove(g.id)}
-              className="rounded-full px-2 text-xs text-red-300 hover:bg-red-500/10"
-            >
-              ×
-            </button>
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            <Field label="Target">
-              <NumberField
-                value={g.target}
-                onChange={(v) => patch(g.id, { target: v })}
-              />
-            </Field>
-            <Field label="Saved">
-              <NumberField
-                value={g.saved}
-                onChange={(v) => patch(g.id, { saved: v })}
-              />
-            </Field>
-            <Field label="Years">
-              <NumberField
-                value={g.horizonYears}
-                onChange={(v) => patch(g.id, { horizonYears: v })}
-              />
-            </Field>
-          </div>
-        </motion.div>
-      ))}
-      <button
-        type="button"
-        onClick={add}
-        className="w-full rounded-xl border border-dashed border-white/15 py-2 text-xs text-white/65 hover:bg-white/5"
-      >
-        + Add goal
-      </button>
-    </div>
-  );
-}
-
 export const FORM_BY_NODE: Partial<Record<NodeId, () => JSX.Element>> = {
-  Rent: () => <RecurringSavedField nodeId="Rent" />,
-  Food: () => <RecurringSavedField nodeId="Food" />,
-  Essential: () => <RecurringSavedField nodeId="Essential" />,
-  Income: () => <RecurringSavedField nodeId="Income" />,
-  Health: () => <RecurringSavedField nodeId="Health" />,
-  MinDebt: () => <RecurringSavedField nodeId="MinDebt" />,
-  NonEssential: () => <RecurringSavedField nodeId="NonEssential" />,
-  SmallEF: SmallEFFields,
-  BigEF: BigEFFields,
+  Rent: () => <RecurringEditor nodeId="Rent" />,
+  Food: () => <RecurringEditor nodeId="Food" />,
+  Essential: () => <RecurringEditor nodeId="Essential" />,
+  Income: () => <RecurringEditor nodeId="Income" />,
+  Health: () => <RecurringEditor nodeId="Health" />,
+  MinDebt: () => <RecurringEditor nodeId="MinDebt" />,
+  NonEssential: () => <RecurringEditor nodeId="NonEssential" />,
+  SmallEF: () => <EFEditor nodeId="SmallEF" />,
+  BigEF: () => <EFEditor nodeId="BigEF" />,
   Match: MatchFields,
   IRA: IRAFields,
   HSA: HSAFields,
   Increase401k: Increase401kFields,
-  SavePurchase: SavePurchaseFields,
+  SavePurchase: () => <GoalEditor nodeId="SavePurchase" />,
   College: CollegeFields,
-  HighDebt: () => <DebtFields nodeId="HighDebt" aprThreshold={10} />,
-  ModDebt: () => <DebtFields nodeId="ModDebt" aprThreshold={4} />,
-  Goals: GoalsFields,
+  HighDebt: () => <DebtEditor nodeId="HighDebt" aprThreshold={10} />,
+  ModDebt: () => <DebtEditor nodeId="ModDebt" aprThreshold={4} />,
+  Goals: () => <GoalEditor nodeId="Goals" />,
 };
 
-type RecurringNodeId =
-  | "Rent"
-  | "Food"
-  | "Essential"
-  | "Income"
-  | "Health"
-  | "MinDebt"
-  | "NonEssential";
-
-let categoryCache: { budgetId: string; groups: YnabCategoryGroup[] } | null = null;
-
-function recurringData(
-  raw: unknown,
-): {
-  target: { value: number; source: "manual" | "ynab" };
-  funded?: { value: number; source: "manual" | "ynab"; lastSyncedAt?: string };
-  items?: RecurringItem[];
-} {
-  return (
-    (raw as
-      | {
-          target: { value: number; source: "manual" | "ynab" };
-          funded?: { value: number; source: "manual" | "ynab"; lastSyncedAt?: string };
-          items?: RecurringItem[];
-        }
-      | undefined) ?? { target: { value: 0, source: "manual" as const } }
-  );
-}
-
-function uidShort() {
-  return Math.random().toString(36).slice(2, 9);
-}
-
-export function RecurringSavedField({ nodeId }: { nodeId: RecurringNodeId }) {
-  const state = useStore();
-  const data = recurringData(state.nodes[nodeId].data);
-  const hasItems = (data.items?.length ?? 0) > 0;
-  if (hasItems) return null;
-  return (
-    <Field label="Saved this month ($)">
-      <NumberField
-        value={data.funded?.value ?? 0}
-        onChange={(v) =>
-          useStore.getState().setNodeData(nodeId, {
-            ...data,
-            funded: { value: v, source: "manual" },
-          })
-        }
-      />
-    </Field>
-  );
-}
-
-export function RecurringGoalMenu({ nodeId, label }: { nodeId: RecurringNodeId; label: string }) {
-  const state = useStore();
-  const ynab = useYnab();
-  const ynabConnected = Boolean(ynab.pat && ynab.budgetId);
-  const data = recurringData(state.nodes[nodeId].data);
-  const items = data.items ?? [];
-  const hasItems = items.length > 0;
-  const mappedCategoryId = state.categoryMap?.[nodeId];
-
-  const [groups, setGroups] = useState<YnabCategoryGroup[]>(
-    categoryCache?.budgetId === ynab.budgetId ? categoryCache.groups : [],
-  );
-  const [refreshError, setRefreshError] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-
-  useEffect(() => {
-    if (!ynabConnected || !ynab.pat || !ynab.budgetId) return;
-    if (categoryCache?.budgetId === ynab.budgetId) {
-      setGroups(categoryCache.groups);
-      return;
-    }
-    let cancelled = false;
-    new YnabClient(ynab.pat)
-      .getCategoryGroups(ynab.budgetId)
-      .then((g) => {
-        if (cancelled) return;
-        categoryCache = { budgetId: ynab.budgetId!, groups: g };
-        setGroups(g);
-      })
-      .catch((e: unknown) => {
-        if (cancelled) return;
-        setRefreshError(e instanceof Error ? e.message : String(e));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [ynabConnected, ynab.pat, ynab.budgetId]);
-
-  const refresh = async () => {
-    if (!ynab.pat || !ynab.budgetId || !mappedCategoryId) return;
-    setRefreshing(true);
-    setRefreshError(null);
-    try {
-      const cat = await new YnabClient(ynab.pat).getCategoryCurrent(ynab.budgetId, mappedCategoryId);
-      const targetDollars =
-        cat.goal_target && cat.goal_target > 0 ? milliToDollar(cat.goal_target) : data.target.value;
-      const fundedDollars = milliToDollar(Math.max(0, cat.budgeted));
-      const now = new Date().toISOString();
-      useStore.getState().setNodeData(nodeId, {
-        ...data,
-        target: { value: targetDollars, source: "ynab" },
-        funded: { value: fundedDollars, source: "ynab", lastSyncedAt: now },
-      });
-    } catch (e: unknown) {
-      setRefreshError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
-  const updateData = (
-    patch: Partial<{
-      target: { value: number; source: "manual" | "ynab" };
-      funded: { value: number; source: "manual" | "ynab"; lastSyncedAt?: string };
-      items: RecurringItem[];
-    }>,
-  ) => useStore.getState().setNodeData(nodeId, { ...data, ...patch });
-
-  const addItem = () => {
-    const next: RecurringItem = {
-      id: uidShort(),
-      name: "",
-      target: { value: 0, source: "manual" },
-    };
-    updateData({ items: [...items, next] });
-  };
-
-  const patchItem = (id: string, patch: Partial<RecurringItem>) => {
-    updateData({ items: items.map((it) => (it.id === id ? { ...it, ...patch } : it)) });
-  };
-
-  const removeItem = (id: string) => {
-    updateData({ items: items.filter((it) => it.id !== id) });
-  };
-
-  const fundedSyncedAt = data.funded?.lastSyncedAt;
-
-  return (
-    <div className="space-y-4">
-      <div className="text-xs font-semibold uppercase tracking-[0.22em] text-white/70">
-        Goal settings
-      </div>
-
-      {!hasItems && (
-        <Field label={`Monthly ${label.toLowerCase()} target ($)`}>
-          <NumberField
-            value={data.target.value}
-            onChange={(v) =>
-              updateData({ target: { value: v, source: "manual" } })
-            }
-          />
-        </Field>
-      )}
-
-      <div className="space-y-2">
-        <div className="text-[11px] uppercase tracking-[0.2em] text-white/55">
-          {hasItems ? "Items — bar totals their goals" : "Or split into items"}
-        </div>
-        {items.map((it) => (
-          <motion.div
-            key={it.id}
-            layout
-            className="space-y-2 rounded-xl p-2.5"
-            style={{
-              background: "rgba(255,255,255,0.03)",
-              border: "1px solid rgba(255,255,255,0.08)",
-            }}
-          >
-            <div className="flex gap-2">
-              <GlassInput
-                placeholder="Item name (e.g., Power)"
-                value={it.name}
-                onChange={(e) => patchItem(it.id, { name: e.target.value })}
-              />
-              <button
-                type="button"
-                onClick={() => removeItem(it.id)}
-                className="rounded-full px-2 text-xs text-red-300 hover:bg-red-500/10"
-              >
-                ×
-              </button>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <Field label="Target $">
-                <NumberField
-                  value={it.target.value}
-                  onChange={(v) =>
-                    patchItem(it.id, { target: { value: v, source: "manual" } })
-                  }
-                />
-              </Field>
-              <Field label="Saved $">
-                <NumberField
-                  value={it.funded?.value ?? 0}
-                  onChange={(v) =>
-                    patchItem(it.id, { funded: { value: v, source: "manual" } })
-                  }
-                />
-              </Field>
-            </div>
-          </motion.div>
-        ))}
-        <button
-          type="button"
-          onClick={addItem}
-          className="w-full rounded-xl border border-dashed border-white/15 py-2 text-xs text-white/65 hover:bg-white/5"
-        >
-          + Add item
-        </button>
-      </div>
-
-      {ynabConnected && (
-        <div
-          className="space-y-2 rounded-xl px-3 py-2.5"
-          style={{
-            background: "rgba(255,255,255,0.03)",
-            border: "1px solid rgba(255,255,255,0.08)",
-          }}
-        >
-          <Field label="YNAB category">
-            <GlassSelect
-              value={mappedCategoryId ?? ""}
-              onChange={(e) =>
-                useStore.getState().setCategoryMap(nodeId, e.target.value || null)
-              }
-            >
-              <option value="">— Not linked —</option>
-              {groups.map((g) => (
-                <optgroup key={g.id} label={g.name}>
-                  {g.categories.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </GlassSelect>
-          </Field>
-          <div className="flex items-center justify-between gap-2 text-[11px]">
-            <span className="text-white/45">
-              {fundedSyncedAt
-                ? `Last synced ${new Date(fundedSyncedAt).toLocaleString()}`
-                : mappedCategoryId
-                  ? "Not yet synced."
-                  : "Pick a category to sync."}
-            </span>
-            <button
-              type="button"
-              onClick={refresh}
-              disabled={!mappedCategoryId || refreshing}
-              className="rounded-full px-3 py-1 text-[11px] font-medium transition-opacity disabled:opacity-40"
-              style={{
-                background: "rgba(96, 165, 250, 0.16)",
-                border: "1px solid rgba(96, 165, 250, 0.45)",
-                color: "#dbeafe",
-              }}
-            >
-              {refreshing ? "Syncing…" : "Refresh from YNAB"}
-            </button>
-          </div>
-          {refreshError && (
-            <div className="text-[11px]" style={{ color: "#fecaca" }}>
-              {refreshError}
-            </div>
-          )}
-          <p className="text-[10px] text-white/35">
-            Pulls the current-month assigned amount, plus the goal target if set.
-            Single-mode only — items are managed locally.
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-const RECURRING_LABEL: Record<RecurringNodeId, string> = {
-  Rent: "Rent / mortgage",
-  Food: "Groceries",
-  Essential: "Utilities & essentials",
-  Income: "Transportation, internet, phone",
-  Health: "Insurance & health care",
-  MinDebt: "Total minimum payments",
-  NonEssential: "Non-essential subscriptions",
-};
-
-export const MENU_BY_NODE: Partial<Record<NodeId, () => JSX.Element>> = {
-  Rent: () => <RecurringGoalMenu nodeId="Rent" label={RECURRING_LABEL.Rent} />,
-  Food: () => <RecurringGoalMenu nodeId="Food" label={RECURRING_LABEL.Food} />,
-  Essential: () => <RecurringGoalMenu nodeId="Essential" label={RECURRING_LABEL.Essential} />,
-  Income: () => <RecurringGoalMenu nodeId="Income" label={RECURRING_LABEL.Income} />,
-  Health: () => <RecurringGoalMenu nodeId="Health" label={RECURRING_LABEL.Health} />,
-  MinDebt: () => <RecurringGoalMenu nodeId="MinDebt" label={RECURRING_LABEL.MinDebt} />,
-  NonEssential: () => <RecurringGoalMenu nodeId="NonEssential" label={RECURRING_LABEL.NonEssential} />,
-};
+// Goal settings moved inline — the editors above ARE the settings, so the
+// kebab menu has nothing left to hold. The map stays for FocusCard's wiring.
+export const MENU_BY_NODE: Partial<Record<NodeId, () => JSX.Element>> = {};

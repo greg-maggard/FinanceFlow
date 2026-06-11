@@ -250,9 +250,10 @@ public struct PurchaseGoal: Codable, Equatable, Sendable, Identifiable {
 }
 
 /// Payload for the SavePurchase node. Mirrors the `SavePurchase` shape in `NodeDataMap`.
-/// When `items` is present the scalar fields are legacy mirrors maintained by
-/// `normalized()` (goalName/byDate from the first goal, target/saved as sums)
-/// so readers that predate the list still display correct totals.
+/// The scalar fields and `items` are legacy v2 fields kept only so existing
+/// documents decode; the live numbers come from the node's linked ledger
+/// categories (see `Domain/NodeLedger.swift`). Nothing maintains the scalar
+/// mirrors anymore.
 public struct SavePurchaseData: Codable, Equatable, Sendable {
     public var goalName: String
     public var target: Decimal
