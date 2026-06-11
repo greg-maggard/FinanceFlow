@@ -39,12 +39,13 @@ tests on every PR — see `.github/workflows/`.
 `npm run build` produces `dist/`, which deploys as-is to GitHub Pages, Vercel,
 Netlify, or any static host.
 
-## Integrations
+## One book, two faces
 
-- **YNAB** (`src/integrations/ynab.ts`, `src/state/ynabStore.ts`) — connect
-  with a personal access token (Settings → YNAB), map recurring expense
-  categories to YNAB categories, and "Refresh from YNAB" pulls each mapped
-  category's budgeted amount and goal target for the current month.
+The envelope ledger (`AppState.budget`) is the single source of truth for all
+money: the Budget screen and the flowchart nodes are two editors over the same
+accounts, categories, and assignments (`src/budget/nodeLedger.ts` is the
+node ↔ ledger view layer). The earlier YNAB integration is retired —
+FinanceFlow *is* the budget now.
 
 ## Extension seams (designed in, not built)
 
