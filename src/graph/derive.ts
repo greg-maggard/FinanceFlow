@@ -1,5 +1,8 @@
-import type { AppState, NodeId, RecurringData } from "../state/schema";
+import type { AppState, MonthKey, NodeId } from "../state/schema";
 import { RECURRING } from "../theme/identity";
+import { fromCents, snapshot, toCents } from "../budget/ledger";
+import { recurringTotals } from "../budget/nodeLedger";
+import { ymKey } from "../state/recurring";
 import { GRAPH, GRAPH_BY_ID, type GraphNode } from "./flowchart";
 
 export type Status = "done" | "current" | "upcoming" | "skipped";
@@ -99,35 +102,21 @@ export function overallProgress(state: AppState): { done: number; total: number;
   return { done, total, pct: total === 0 ? 0 : Math.round((done / total) * 100) };
 }
 
-/**
- * The node's monthly goal/funded pair: sums of the item-level goals when the
- * budget is split into items, else the single top-level pair.
- * Mirrors `RecurringData.effectiveTarget/effectiveFunded` in FinanceFlowKit.
- */
-export function recurringTotals(data: RecurringData | undefined): { target: number; funded: number } {
-  const items = data?.items;
-  if (items && items.length > 0) {
-    return {
-      target: items.reduce((s, it) => s + (it.target?.value ?? 0), 0),
-      funded: items.reduce((s, it) => s + (it.funded?.value ?? 0), 0),
-    };
-  }
-  return { target: data?.target?.value ?? 0, funded: data?.funded?.value ?? 0 };
-}
-
 export type BudgetSummary = { target: number; funded: number };
 
 /**
  * Dollar-denominated rollup of the monthly budget across the seven recurring
- * nodes. Mirrors `Derive.monthlyBudgetSummary` in FinanceFlowKit.
+ * nodes' linked ledger categories: target = Σ monthly targets, funded = Σ
+ * assigned this month. Mirrors `Derive.monthlyBudgetSummary` in FinanceFlowKit.
  */
-export function monthlyBudgetSummary(state: AppState): BudgetSummary {
-  let target = 0;
-  let funded = 0;
+export function monthlyBudgetSummary(state: AppState, month: MonthKey = ymKey()): BudgetSummary {
+  const snap = snapshot(state.budget, month);
+  let targetC = 0;
+  let fundedC = 0;
   for (const id of RECURRING) {
-    const totals = recurringTotals(state.nodes[id]?.data as RecurringData | undefined);
-    target += totals.target;
-    funded += totals.funded;
+    const totals = recurringTotals(state.budget, snap, id);
+    targetC += toCents(totals.target);
+    fundedC += toCents(totals.funded);
   }
-  return { target, funded };
+  return { target: fromCents(targetC), funded: fromCents(fundedC) };
 }
