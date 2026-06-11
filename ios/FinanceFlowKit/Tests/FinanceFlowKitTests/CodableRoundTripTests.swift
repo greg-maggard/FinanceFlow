@@ -12,7 +12,7 @@ struct CodableRoundTripTests {
         #expect(decoded == original)
     }
 
-    @Test("rich state round-trips every NodeData case")
+    @Test("rich v3 state round-trips every surviving NodeData kind plus budget data")
     func richRoundTrips() throws {
         var s = AppState.makeInitial()
         s.settings.monthlyExpenses = 3200
@@ -23,39 +23,81 @@ struct CodableRoundTripTests {
         s.nodes[.Start]?.completed = true
         s.nodes[.Start]?.completedAt = Date(timeIntervalSince1970: 1_700_000_000)
         s.nodes[.Rent]?.notes = "renters insurance via Lemonade"
-        s.nodes[.Rent]?.data = .recurring(RecurringData(
-            target: .manual(1800),
-            funded: SourcedNumber(value: 1800, source: .manual),
-            items: [RecurringItem(name: "Base rent", target: .manual(1500), funded: .manual(1500))]
-        ))
         s.nodes[.Rent]?.monthlyChecks = ["2026-05": true, "2026-04": true]
-        s.nodes[.SmallEF]?.data = .smallEF(SmallEFData(balance: .manual(1000)))
-        s.nodes[.BigEF]?.data = .bigEF(BigEFData(targetMonths: 6, balance: .manual(9000), items: [
-            EFBucket(name: "Car", target: 4000, balance: .manual(2500)),
-            EFBucket(name: "Medical", target: 5000, balance: .manual(6500)),
-        ]))
+        s.nodes[.BigEF]?.data = .bigEF(BigEFData(targetMonths: 6))
         s.nodes[.Match]?.data = .match(matchPct: 5, currentContribPct: 5)
-        s.nodes[.HighDebt]?.data = .debts([
-            // apr via Decimal(string:) — a `22.9` float literal would route through
-            // Double and store 22.8999…986, which is exactly the drift we're removing.
-            Debt(name: "Card", balance: 4200, apr: Decimal(string: "22.9")!, minPayment: 120, paid: false),
-        ])
         s.nodes[.IRA]?.data = .ira(IRAData(type: .roth, ytdContribution: .manual(3500), annualLimit: 7000))
-        s.nodes[.SavePurchase]?.data = .savePurchase(SavePurchaseData(
-            goalName: "Car", target: 12000, saved: .manual(4000), byDate: "2027-01",
-            items: [PurchaseGoal(name: "Car", target: 12000, saved: .manual(4000), byDate: "2027-01")]
-        ))
         s.nodes[.Increase401k]?.data = .increase401k(currentPct: 8, targetPct: 15)
         s.nodes[.HSA]?.data = .hsa(HSAData(coverage: .family, ytdContribution: .manual(2000), annualLimit: 8550))
-        s.nodes[.College]?.data = .college(CollegeData(monthlyContribution: 200, balance: .manual(5000), targetAge: 18))
-        s.nodes[.Goals]?.data = .goals([Goal(name: "Vacation", target: 5000, saved: 1200, horizonYears: 2)])
+        s.nodes[.College]?.data = .college(CollegeData(monthlyContribution: 200, targetAge: 18))
         s.shownCelebrations = [.Start]
         s.earnedMedals = [0]
-        s.categoryMap[.Rent] = "ynab-cat-123"
+
+        // v3: the money lives in the budget book.
+        s.budget.accounts = [
+            Account(id: "checking", name: "Checking", kind: .checking),
+            // apr via Decimal(string:) — a `22.9` float literal would route through
+            // Double and store 22.8999…986, which is exactly the drift we're removing.
+            Account(id: "debt:d1", name: "Card", kind: .loan, apr: Decimal(string: "22.9")!, minPayment: 120, nodeId: .HighDebt),
+        ]
+        s.budget.transactions = [
+            Txn(id: "t1", accountId: "checking", date: "2026-06-01", amount: 2500, categoryId: Ledger.rtaCategoryID),
+            Txn(id: "t2", accountId: "debt:d1", date: "2026-06-01", payee: "Starting balance", amount: -4200),
+        ]
+        s.budget.groups = [
+            CategoryGroup(id: "g:bills", name: "Bills", order: 0),
+            CategoryGroup(id: "g:goals", name: "Savings Goals", order: 1),
+        ]
+        s.budget.categories = [
+            BudgetCategory(id: "Rent:r1", groupId: "g:bills", name: "Apartment", order: 0, monthlyTarget: 1800, nodeId: .Rent),
+            BudgetCategory(id: "Goals:gl1", groupId: "g:goals", name: "Vacation", order: 1, balanceTarget: 5000, targetDate: "2028-06-10", nodeId: .Goals),
+        ]
+        s.budget.assignments = ["2026-06": ["Rent:r1": 1800, "Goals:gl1": 250]]
 
         let data = try JSONCoder.encode(s)
         let decoded = try JSONCoder.decode(data)
         #expect(decoded == s)
+    }
+
+    /// v2 documents still carry the wide payload shapes (recurring items, EF
+    /// buckets, purchase goals, debt lists) plus the retired `categoryMap`.
+    /// They must keep decoding into the relic structs losslessly: a payload
+    /// decode failure would make the AppState decoder's per-node `try?`
+    /// silently discard that node's `completed`/`notes`.
+    @Test("a raw v2 document decodes its wide payloads into the relic structs")
+    func rawV2DocumentDecodes() throws {
+        let v2JSON = """
+        {
+          "version": 2,
+          "settings": { "iraAnnualLimit": 7000, "hsaSelfLimit": 4300, "hsaFamilyLimit": 8550 },
+          "decisions": { "Q_Match": "yes" },
+          "nodes": {
+            "Start": { "completed": true, "notes": "kickoff" },
+            "SmallEF": { "completed": false, "notes": "starter fund", "data": {
+              "balance": { "value": 1000, "source": "manual" },
+              "items": [
+                { "id": "s1", "name": "Buffer", "target": 500.5, "balance": { "value": 250.25, "source": "manual" } }
+              ]
+            } }
+          },
+          "categoryMap": { "Rent": "ynab-cat-123" },
+          "budget": { "accounts": [], "transactions": [], "groups": [], "categories": [], "assignments": {} }
+        }
+        """
+        // Decode only — deliberately NOT migrated.
+        let decoded = try JSONCoder.decode(Data(v2JSON.utf8))
+        #expect(decoded.version == 2)
+        #expect(decoded.node(.Start).completed == true)
+        #expect(decoded.node(.Start).notes == "kickoff")
+        #expect(decoded.decisions[.Q_Match] == .yes)
+
+        #expect(decoded.node(.SmallEF).notes == "starter fund")
+        let ef = try #require(decoded.node(.SmallEF).data?.smallEF)
+        #expect(ef.balance.value == 1000)
+        let bucket = try #require(ef.items?.first)
+        #expect(bucket.id == "s1")
+        #expect(bucket.target == Decimal(string: "500.5")!)
+        #expect(bucket.balance.value == Decimal(string: "250.25")!)
     }
 
     @Test("decisions serialize as a keyed JSON object (not a flat array)")
