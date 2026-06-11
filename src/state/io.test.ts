@@ -21,6 +21,9 @@ function makeV1(): any {
 function makeRichV1(): any {
   const v1 = makeV1();
   v1.settings.monthlyExpenses = 4000;
+  v1.nodes.Start.completed = true;
+  v1.nodes.Rent.notes = "due on the 1st";
+  v1.nodes.Rent.monthlyChecks = { "2026-05": true };
   v1.nodes.Rent.data = {
     target: m(1800),
     funded: m(1800),
@@ -48,18 +51,33 @@ function makeRichV1(): any {
   v1.nodes.HighDebt.data = {
     debts: [{ id: "d1", name: "Visa", balance: 4200, apr: 24.99, minPayment: 50, paid: false }],
   };
+  v1.nodes.IRA.data = { type: "roth", ytdContribution: m(2500), annualLimit: 7000 };
   v1.nodes.College.data = { monthlyContribution: 100, balance: m(2500) };
   return v1;
 }
 
+/** A version-2 document: budget present, payloads still wide. */
+function makeV2(budget: any = null): any {
+  const v2 = makeV1();
+  v2.version = 2;
+  v2.budget = budget ?? {
+    accounts: [],
+    transactions: [],
+    groups: [],
+    categories: [],
+    assignments: {},
+  };
+  return v2;
+}
+
 describe("migrate", () => {
-  it("passes a version-2 document through", () => {
+  it("passes a version-3 document through", () => {
     const s = makeInitialState();
     expect(migrate(s)).toEqual(s);
   });
 
   it("throws on a newer version instead of silently resetting", () => {
-    const s = { ...makeInitialState(), version: 3 };
+    const s = { ...makeInitialState(), version: 4 };
     expect(() => migrate(s)).toThrow(/version/i);
   });
 
@@ -67,63 +85,22 @@ describe("migrate", () => {
     expect(() => migrate("nope")).toThrow();
     expect(() => migrate(null)).toThrow();
   });
+});
 
-  it("upgrades an empty v1 document to balanced empty books", () => {
-    const out = migrate(makeV1(), NOW);
-    expect(out.version).toBe(2);
-    expect(out.budget.categories).toEqual([]);
-    expect(out.budget.accounts.map((a) => a.id)).toEqual(["acct:cash"]);
-    expect(out.budget.transactions).toEqual([]);
-    expect(out.budget.assignments).toEqual({});
-  });
-
-  it("preserves every v1 field untouched", () => {
-    const v1 = makeRichV1();
-    const out = migrate(v1, NOW);
-    expect(out.nodes).toEqual(v1.nodes);
-    expect(out.settings).toEqual(v1.settings);
-    expect(out.decisions).toEqual(v1.decisions);
-  });
-
-  it("seeds categories from items with deterministic ids", () => {
+describe("v1 -> v3 chain", () => {
+  it("books match the old v1->v2 goldens and payloads are stripped", () => {
     const out = migrate(makeRichV1(), NOW);
-    const ids = out.budget.categories.map((c) => c.id);
-    expect(ids).toEqual(["Rent:r1", "Food", "BigEF:b1", "BigEF:b2", "SavePurchase:p1", "Goals:gl1"]);
+    expect(out.version).toBe(3);
 
-    const byId = Object.fromEntries(out.budget.categories.map((c) => [c.id, c]));
-    expect(byId["Rent:r1"]).toMatchObject({ groupId: "g:bills", monthlyTarget: 1800, nodeId: "Rent" });
-    expect(byId["Food"]).toMatchObject({ groupId: "g:bills", monthlyTarget: 600 });
-    expect(byId["BigEF:b1"]).toMatchObject({ groupId: "g:ef", name: "Medical", balanceTarget: 3000 });
-    expect(byId["SavePurchase:p1"]).toMatchObject({
-      groupId: "g:goals",
-      balanceTarget: 20000,
-      targetDate: "2027-01-01",
-    });
-    expect(byId["Goals:gl1"]).toMatchObject({ groupId: "g:goals", balanceTarget: 3000 });
-  });
-
-  it("seeds the emergency fund from BigEF only when BigEF has data", () => {
-    const out = migrate(makeRichV1(), NOW);
-    expect(out.budget.categories.some((c) => c.id.startsWith("SmallEF"))).toBe(false);
-
-    const v1 = makeV1();
-    v1.nodes.SmallEF.data = { balance: m(700) };
-    const small = migrate(v1, NOW);
-    expect(small.budget.categories.map((c) => c.id)).toEqual(["SmallEF"]);
-    expect(small.budget.categories[0]).toMatchObject({ name: "Emergency Fund", balanceTarget: 1000 });
-  });
-
-  it("turns debts into loan accounts and the 529 into a tracking account", () => {
-    const out = migrate(makeRichV1(), NOW);
-    const byId = Object.fromEntries(out.budget.accounts.map((a) => [a.id, a]));
-    expect(byId["debt:d1"]).toMatchObject({ kind: "loan", apr: 24.99, minPayment: 50 });
-    expect(byId["acct:college"]).toMatchObject({ kind: "tracking" });
-    expect(accountBalance(out.budget, "debt:d1")).toBe(-4200);
-    expect(accountBalance(out.budget, "acct:college")).toBe(2500);
-  });
-
-  it("opens the books balanced: bars preserved and RTA exactly zero", () => {
-    const out = migrate(makeRichV1(), NOW);
+    // Ledger goldens (same numbers the v1->v2 migration always produced).
+    expect(out.budget.categories.map((c) => c.id)).toEqual([
+      "Rent:r1",
+      "Food",
+      "BigEF:b1",
+      "BigEF:b2",
+      "SavePurchase:p1",
+      "Goals:gl1",
+    ]);
     expect(out.budget.assignments).toEqual({
       "2026-06": {
         "Rent:r1": 1800,
@@ -134,20 +111,156 @@ describe("migrate", () => {
         "Goals:gl1": 500,
       },
     });
-
     const inflow = out.budget.transactions.find((t) => t.categoryId === "rta");
     expect(inflow).toMatchObject({ accountId: "acct:cash", amount: 9750 });
-
     const june = snapshot(out.budget, "2026-06");
     expect(june.readyToAssign).toBe(0);
-    expect(june.categories["Rent:r1"].available).toBe(1800);
     expect(june.categories["BigEF:b1"].available).toBe(1200);
-    expect(june.categories["SavePurchase:p1"].available).toBe(5000);
+
+    // v3 additions: account backlinks and horizon -> target date.
+    const debt = out.budget.accounts.find((a) => a.id === "debt:d1");
+    expect(debt).toMatchObject({ nodeId: "HighDebt", apr: 24.99 });
+    expect(accountBalance(out.budget, "debt:d1")).toBe(-4200);
+    expect(out.budget.accounts.find((a) => a.id === "acct:college")?.nodeId).toBe("College");
+    expect(out.budget.categories.find((c) => c.id === "Goals:gl1")?.targetDate).toBe("2028-06-10");
+
+    // Payloads: ledger-owned ones gone, node-only ones kept or slimmed.
+    expect(out.nodes.Rent.data).toBeUndefined();
+    expect(out.nodes.SmallEF.data).toBeUndefined();
+    expect(out.nodes.SavePurchase.data).toBeUndefined();
+    expect(out.nodes.Goals.data).toBeUndefined();
+    expect(out.nodes.HighDebt.data).toBeUndefined();
+    expect(out.nodes.BigEF.data).toEqual({ targetMonths: 6 });
+    expect(out.nodes.College.data).toEqual({ monthlyContribution: 100 });
+    expect(out.nodes.IRA.data).toEqual({
+      type: "roth",
+      ytdContribution: m(2500),
+      annualLimit: 7000,
+    });
+
+    // Non-financial node state is preserved.
+    expect(out.nodes.Start.completed).toBe(true);
+    expect(out.nodes.Rent.notes).toBe("due on the 1st");
+    expect(out.nodes.Rent.monthlyChecks).toEqual({ "2026-05": true });
+    expect(out.decisions).toEqual(makeRichV1().decisions);
+  });
+});
+
+describe("v2 -> v3 reconcile", () => {
+  it("ledger wins where payload and book describe the same envelope", () => {
+    const v2 = makeV2({
+      accounts: [{ id: "acct:cash", name: "Cash", kind: "cash", source: "manual" }],
+      transactions: [
+        {
+          id: "txn:start:acct:cash",
+          accountId: "acct:cash",
+          date: "2026-06-01",
+          payee: "Starting balance",
+          amount: 500,
+          categoryId: "rta",
+          source: "manual",
+        },
+      ],
+      groups: [{ id: "g:bills", name: "Bills", order: 0 }],
+      categories: [
+        { id: "Rent:r1", groupId: "g:bills", name: "Apartment", order: 0, monthlyTarget: 1900, nodeId: "Rent" },
+      ],
+      assignments: { "2026-06": { "Rent:r1": 500 } },
+    });
+    // Payload diverged after the budget UI edited the ledger.
+    v2.nodes.Rent.data = {
+      target: m(1800),
+      funded: m(450),
+      items: [{ id: "r1", name: "Apartment", target: m(1800), funded: m(450) }],
+    };
+
+    const out = migrate(v2, NOW);
+    const cat = out.budget.categories.find((c) => c.id === "Rent:r1");
+    expect(cat?.monthlyTarget).toBe(1900);
+    expect(out.budget.assignments["2026-06"]).toEqual({ "Rent:r1": 500 });
+    expect(out.budget.transactions).toHaveLength(1);
+    expect(out.budget.categories).toHaveLength(1);
+    expect(out.nodes.Rent.data).toBeUndefined();
+  });
+
+  it("creates payload-only items without moving Ready-to-Assign", () => {
+    const v2 = makeV2();
+    v2.nodes.Food.data = { target: m(600), funded: m(450) };
+    const before = makeV2();
+    expect(snapshot(before.budget, "2026-06").readyToAssign).toBe(0);
+
+    const out = migrate(v2, NOW);
+    expect(out.budget.categories.map((c) => c.id)).toEqual(["Food"]);
+    expect(out.budget.assignments["2026-06"]).toEqual({ Food: 450 });
+    const june = snapshot(out.budget, "2026-06");
+    expect(june.readyToAssign).toBe(0);
+    expect(june.categories.Food.available).toBe(450);
+  });
+
+  it("is idempotent: migrating the migrated document changes nothing", () => {
+    const out = migrate(makeRichV1(), NOW);
+    expect(migrate(JSON.parse(JSON.stringify(out)), NOW)).toEqual(out);
+  });
+
+  it("honors an explicit paid flag the ledger couldn't represent", () => {
+    const v2 = makeV2({
+      accounts: [
+        { id: "debt:d1", name: "Visa", kind: "loan", apr: 24.99, minPayment: 50, source: "manual" },
+      ],
+      transactions: [
+        {
+          id: "txn:start:debt:d1",
+          accountId: "debt:d1",
+          date: "2026-01-05",
+          payee: "Starting balance",
+          amount: -4200,
+          source: "manual",
+        },
+      ],
+      groups: [],
+      categories: [],
+      assignments: {},
+    });
+    v2.nodes.HighDebt.data = {
+      debts: [{ id: "d1", name: "Visa", balance: 4200, apr: 24.99, minPayment: 50, paid: true }],
+    };
+
+    const out = migrate(v2, NOW);
+    expect(out.budget.accounts.find((a) => a.id === "debt:d1")?.nodeId).toBe("HighDebt");
+    const adjust = out.budget.transactions.find((t) => t.id === "txn:adjust:v3:debt:d1");
+    expect(adjust).toMatchObject({ amount: 4200, memo: "Marked paid" });
+    expect(accountBalance(out.budget, "debt:d1")).toBe(0);
+  });
+
+  it("never resurrects the EF scalar mirror once the union is ledger-managed", () => {
+    const v2 = makeV2({
+      accounts: [],
+      transactions: [],
+      groups: [{ id: "g:ef", name: "Emergency Fund", order: 0 }],
+      categories: [
+        { id: "BigEF:b1", groupId: "g:ef", name: "Medical", order: 0, balanceTarget: 3000, nodeId: "BigEF" },
+      ],
+      assignments: {},
+    });
+    // Stale scalar mirror left over from normalized() days.
+    v2.nodes.BigEF.data = { targetMonths: 6, balance: m(9999) };
+    v2.nodes.SmallEF.data = { balance: m(1000) };
+
+    const out = migrate(v2, NOW);
+    expect(out.budget.categories.map((c) => c.id)).toEqual(["BigEF:b1"]);
+    expect(out.nodes.BigEF.data).toEqual({ targetMonths: 6 });
+  });
+
+  it("drops categoryMap", () => {
+    const v2 = makeV2();
+    v2.categoryMap = { Rent: "some-ynab-id" };
+    const out = migrate(v2, NOW);
+    expect("categoryMap" in out).toBe(false);
   });
 });
 
 describe("export/import", () => {
-  it("is identity for a version-2 state", () => {
+  it("is identity for a version-3 state", () => {
     const s = makeInitialState();
     s.nodes.Start.completed = true;
     s.budget.accounts.push({ id: "a1", name: "Checking", kind: "checking", source: "manual" });
@@ -157,7 +270,7 @@ describe("export/import", () => {
 
   it("migrates a v1 export on import", () => {
     const imported = importJson(JSON.stringify(makeRichV1()));
-    expect(imported.version).toBe(2);
+    expect(imported.version).toBe(3);
     expect(imported.budget.categories.length).toBeGreaterThan(0);
   });
 });

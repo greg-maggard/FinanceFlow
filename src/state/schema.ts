@@ -22,77 +22,17 @@ export type SourcedNumber = {
   lastSyncedAt?: string;
 };
 
-export type Debt = {
-  id: string;
-  name: string;
-  balance: number;
-  apr: number;
-  minPayment: number;
-  paid: boolean;
-};
-
-export type Goal = {
-  id: string;
-  name: string;
-  target: number;
-  saved: number;
-  horizonYears: number;
-};
-
-export type RecurringItem = {
-  id: string;
-  name: string;
-  target: SourcedNumber;
-  funded?: SourcedNumber;
-};
-
-export type EFBucket = {
-  id: string;
-  name: string;
-  target: number;
-  balance: SourcedNumber;
-};
-
-export type PurchaseGoal = {
-  id: string;
-  name: string;
-  target: number;
-  saved: SourcedNumber;
-  byDate?: string;
-};
-
-export type RecurringData = {
-  target: SourcedNumber;
-  funded?: SourcedNumber;
-  items?: RecurringItem[];
-};
-
+// v3: financial data lives in `AppState.budget` (the envelope ledger); node
+// payloads keep only what the ledger doesn't model. The old wide payload
+// shapes (recurring items, EF buckets, purchase goals, debt lists) survive
+// as decode/migration-only types in `io.ts`.
 export type NodeDataMap = {
-  Rent: RecurringData;
-  Food: RecurringData;
-  Essential: RecurringData;
-  Income: RecurringData;
-  Health: RecurringData;
-  MinDebt: RecurringData;
-  NonEssential: RecurringData;
-  SmallEF: { balance: SourcedNumber; items?: EFBucket[] };
-  BigEF: { targetMonths: 3 | 4 | 5 | 6; balance: SourcedNumber; items?: EFBucket[] };
+  BigEF: { targetMonths: 3 | 4 | 5 | 6 };
   Match: { matchPct: number; currentContribPct: number };
-  HighDebt: { debts: Debt[] };
-  ModDebt: { debts: Debt[] };
   IRA: {
     type: "roth" | "traditional";
     ytdContribution: SourcedNumber;
     annualLimit: number;
-  };
-  SavePurchase: {
-    // When items is present the scalar fields are legacy mirrors maintained on
-    // write (first goal's name/date, summed target/saved) for older readers.
-    goalName: string;
-    target: number;
-    saved: SourcedNumber;
-    byDate?: string;
-    items?: PurchaseGoal[];
   };
   Increase401k: { currentPct: number; targetPct: number };
   HSA: {
@@ -100,12 +40,7 @@ export type NodeDataMap = {
     ytdContribution: SourcedNumber;
     annualLimit: number;
   };
-  College: {
-    monthlyContribution: number;
-    balance: SourcedNumber;
-    targetAge?: number;
-  };
-  Goals: { items: Goal[] };
+  College: { monthlyContribution: number; targetAge?: number };
 };
 
 export type NodeId =
@@ -250,14 +185,13 @@ export function newId(): string {
 }
 
 export type AppState = {
-  version: 2;
+  version: 3;
   settings: Settings;
   decisions: Decisions;
   nodes: Record<NodeId, NodeState>;
   budget: BudgetBook;
   shownCelebrations?: NodeId[];
   earnedMedals?: number[];
-  categoryMap?: Partial<Record<NodeId, string>>;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -286,7 +220,7 @@ export function makeInitialState(): AppState {
   const nodes = {} as Record<NodeId, NodeState>;
   for (const id of ids) nodes[id] = emptyNodeState();
   return {
-    version: 2,
+    version: 3,
     settings: { ...DEFAULT_SETTINGS },
     budget: emptyBudgetBook(),
     shownCelebrations: [],

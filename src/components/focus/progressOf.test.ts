@@ -107,7 +107,7 @@ describe("progressOf emergency funds", () => {
   it("bucket targets beyond the computed milestone grow the goal", () => {
     const s = seeded((s) => {
       s.settings.monthlyExpenses = 3000;
-      s.nodes.BigEF.data = { targetMonths: 3, balance: { value: 0, source: "manual" } };
+      s.nodes.BigEF.data = { targetMonths: 3 };
       s.budget.categories = [
         cat({ id: "BigEF:medical", nodeId: "BigEF", groupId: "g:ef", balanceTarget: 6000 }),
         cat({ id: "BigEF:home", nodeId: "BigEF", groupId: "g:ef", balanceTarget: 5000 }),
@@ -120,7 +120,7 @@ describe("progressOf emergency funds", () => {
 
   it("BigEF buckets define the goal when expenses are unset", () => {
     const s = seeded((s) => {
-      s.nodes.BigEF.data = { targetMonths: 6, balance: { value: 0, source: "manual" } };
+      s.nodes.BigEF.data = { targetMonths: 6 };
       s.budget.categories = [cat({ id: "BigEF:car", nodeId: "BigEF", groupId: "g:ef", balanceTarget: 4000 })];
       s.budget.assignments = { [MONTH]: { "BigEF:car": 4000 } };
     });
@@ -130,7 +130,7 @@ describe("progressOf emergency funds", () => {
   it("BigEF without balance targets keeps the computed goal", () => {
     const s = seeded((s) => {
       s.settings.monthlyExpenses = 3000;
-      s.nodes.BigEF.data = { targetMonths: 6, balance: { value: 0, source: "manual" } };
+      s.nodes.BigEF.data = { targetMonths: 6 };
       s.budget.categories = [cat({ id: "BigEF", nodeId: "BigEF", groupId: "g:ef" })];
       s.budget.assignments = { [MONTH]: { BigEF: 18000 } };
     });
