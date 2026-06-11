@@ -141,12 +141,14 @@ private enum TxnDate {
 /// the scroll view keeps them; VoiceOver gets a named action on the row above.
 private struct SwipeToDeleteRow<Content: View>: View {
     @Environment(\.theme) private var theme
+    @Environment(TapAwayCenter.self) private var tapAway
     let onDelete: () -> Void
     @ViewBuilder var content: Content
 
     @State private var offset: CGFloat = 0
-    @State private var isOpen = false
+    @State private var token: Int?
 
+    private var isOpen: Bool { tapAway.isOpen(token) }
     private var revealWidth: CGFloat { theme.spacing.xxl * 2 }
 
     var body: some View {
@@ -174,8 +176,17 @@ private struct SwipeToDeleteRow<Content: View>: View {
             .onTapGesture {
                 guard isOpen else { return }
                 withAnimation(theme.motion.standard) {
-                    isOpen = false
+                    tapAway.close(token)
+                    token = nil
                     offset = 0
+                }
+            }
+            // Displaced by another transient opening (or a tap-away dismiss):
+            // retract the reveal.
+            .onChange(of: tapAway.openToken) { _, _ in
+                if token != nil, !isOpen {
+                    token = nil
+                    withAnimation(theme.motion.standard) { offset = 0 }
                 }
             }
     }
@@ -193,10 +204,11 @@ private struct SwipeToDeleteRow<Content: View>: View {
                 let settled = base + value.translation.width
                 withAnimation(theme.motion.standard) {
                     if settled < -revealWidth / 2 {
-                        isOpen = true
+                        if !isOpen { token = tapAway.open() }
                         offset = -revealWidth
                     } else {
-                        isOpen = false
+                        tapAway.close(token)
+                        token = nil
                         offset = 0
                     }
                 }

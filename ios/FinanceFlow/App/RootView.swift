@@ -32,6 +32,8 @@ struct RootView: View {
     @State private var selectedNode: NodeId?
     @State private var showOverview = false
     @State private var showSettings = false
+    @State private var tapAway = TapAwayCenter()
+    @State private var switcherToken: Int?
 
     private var activePhase: Phase {
         let status = store.status
@@ -57,6 +59,18 @@ struct RootView: View {
                 }
             }
             .transition(.opacity)
+
+            // Tap-away scrim for the expanded mode switcher: swallows the
+            // outside tap (menu semantics) instead of activating the board.
+            if tapAway.isOpen(switcherToken) {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        withAnimation(theme.motion.standard) { tapAway.dismiss() }
+                    }
+                    .accessibilityHidden(true)
+            }
 
             VStack {
                 topBar
@@ -89,6 +103,7 @@ struct RootView: View {
         } message: {
             Text(store.loadError ?? "")
         }
+        .environment(tapAway)
     }
 
     private var showBudgetRow: Bool { store.budget.target > 0 }
@@ -119,7 +134,7 @@ struct RootView: View {
 
                 Spacer()
 
-                ModeSwitcher(mode: $mode)
+                ModeSwitcher(mode: $mode, token: $switcherToken)
 
                 GlassIconButton(systemName: "gearshape.fill") { showSettings = true }
             }
@@ -169,19 +184,28 @@ struct RootView: View {
 
 /// Collapsed-by-default board switcher: shows only the current screen's icon
 /// (sized and styled like its `GlassIconButton` siblings), unfolds to reveal
-/// the alternatives on tap, and folds back once one is chosen.
+/// the alternatives on tap, and folds back on selection — or on any outside
+/// tap, via the `TapAwayCenter` scrim RootView renders while it holds the slot.
 private struct ModeSwitcher: View {
     @Environment(\.theme) private var theme
+    @Environment(TapAwayCenter.self) private var tapAway
     @Binding var mode: BoardMode
-    @State private var expanded = false
+    @Binding var token: Int?
+
+    private var expanded: Bool { tapAway.isOpen(token) }
 
     var body: some View {
         HStack(spacing: 0) {
             ForEach(visibleModes, id: \.self) { m in
                 Button {
                     withAnimation(theme.motion.standard) {
-                        if expanded { mode = m }
-                        expanded.toggle()
+                        if expanded {
+                            mode = m
+                            tapAway.close(token)
+                            token = nil
+                        } else {
+                            token = tapAway.open()
+                        }
                     }
                 } label: {
                     Image(systemName: m.icon)
