@@ -33,6 +33,7 @@ struct RootView: View {
     @State private var showOverview = false
     @State private var showSettings = false
     @State private var tapAway = TapAwayCenter()
+    @State private var nav = NavigationCenter()
     @State private var switcherToken: Int?
 
     private var activePhase: Phase {
@@ -104,6 +105,22 @@ struct RootView: View {
             Text(store.loadError ?? "")
         }
         .environment(tapAway)
+        .environment(nav)
+        // Cross-navigation: a pending budget jump dismisses the node sheet
+        // here (rows must not call dismiss() themselves — it would race this
+        // mode switch) and flips to the Budget board, where BudgetScreen
+        // scrolls, highlights, and consumes the focus.
+        .onChange(of: nav.pendingBudgetFocus) { _, focus in
+            guard focus != nil else { return }
+            selectedNode = nil
+            withAnimation(theme.motion.standard) { mode = .budget }
+        }
+        // A budget row's node chip: present that node's detail sheet in place.
+        .onChange(of: nav.pendingNode) { _, id in
+            guard let id else { return }
+            selectedNode = id
+            nav.consumeNode()
+        }
     }
 
     private var showBudgetRow: Bool { store.budget.target > 0 }

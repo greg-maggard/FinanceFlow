@@ -9,28 +9,60 @@ import FinanceFlowKit
 /// no refresh step.
 struct BudgetScreen: View {
     @Environment(AppStore.self) private var store
+    @Environment(NavigationCenter.self) private var nav
     @Environment(\.theme) private var theme
     /// Clearance under the floating top bar (RootView passes this, Trail-style).
     var topInset: CGFloat = 112
 
     /// The "YYYY-MM" month on display; the chevrons move it.
     @State private var month: String = Recurring.ymKey()
+    /// Row ringed after a cross-navigation jump; cleared ~2s later.
+    @State private var highlightedId: String?
 
     var body: some View {
         let book = store.state.budget
         let snapshot = Ledger.snapshot(book, month: month)
 
-        ScrollView {
-            VStack(spacing: theme.spacing.xl) {
-                monthHeader
-                readyToAssignCard(snapshot.readyToAssign)
-                CategoriesSection(book: book, month: month, snapshot: snapshot)
-                AccountsSection(book: book)
-                TransactionsSection(book: book)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: theme.spacing.xl) {
+                    monthHeader
+                    readyToAssignCard(snapshot.readyToAssign)
+                    CategoriesSection(
+                        book: book,
+                        month: month,
+                        snapshot: snapshot,
+                        highlightedId: highlightedId
+                    )
+                    AccountsSection(book: book, highlightedId: highlightedId)
+                    TransactionsSection(book: book)
+                }
+                .padding(.horizontal, theme.spacing.lg)
+                .padding(.top, topInset)
+                .padding(.bottom, 60)
             }
-            .padding(.horizontal, theme.spacing.lg)
-            .padding(.top, topInset)
-            .padding(.bottom, 60)
+            // onAppear covers arrival via RootView's mode switch; onChange
+            // covers a jump requested while the board is already showing.
+            .onAppear { landPendingFocus(proxy) }
+            .onChange(of: nav.pendingBudgetFocus) { _, _ in landPendingFocus(proxy) }
+        }
+    }
+
+    /// Lands a cross-navigation jump: scroll to the requested envelope or
+    /// account row, ring it for ~2s, and consume the request so revisits
+    /// stay put. Rows that no longer exist make both steps no-ops.
+    private func landPendingFocus(_ proxy: ScrollViewProxy) {
+        guard let focus = nav.pendingBudgetFocus else { return }
+        nav.consumeBudgetFocus()
+        guard let id = focus.categoryId ?? focus.accountId else { return }
+        withAnimation(theme.motion.standard) { proxy.scrollTo(id, anchor: .center) }
+        withAnimation(theme.motion.standard) { highlightedId = id }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            // Only clear our own pulse — a newer jump may have re-rung.
+            if highlightedId == id {
+                withAnimation(theme.motion.standard) { highlightedId = nil }
+            }
         }
     }
 

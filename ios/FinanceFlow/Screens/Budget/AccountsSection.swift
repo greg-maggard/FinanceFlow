@@ -6,7 +6,10 @@ import FinanceFlowKit
 /// never inflate Ready-to-Assign.
 struct AccountsSection: View {
     @Environment(\.theme) private var theme
+    @Environment(NavigationCenter.self) private var nav
     let book: BudgetBook
+    /// Row to ring after a cross-navigation jump (see BudgetScreen).
+    var highlightedId: String? = nil
 
     @State private var showAdd = false
 
@@ -67,6 +70,17 @@ struct AccountsSection: View {
                         text: onBudget ? "On budget" : "Off budget",
                         color: onBudget ? theme.colors.success : theme.colors.textTertiary
                     )
+                    if let nodeId = account.nodeId {
+                        // The account reports into a flowchart node — jump to it.
+                        Button {
+                            nav.openNode(nodeId)
+                        } label: {
+                            Chip(text: Flowchart.node(nodeId).label, color: theme.colors.primary)
+                        }
+                        .buttonStyle(.plain)
+                        .lineLimit(1)
+                        .accessibilityLabel("Open \(Flowchart.node(nodeId).label) on the path")
+                    }
                 }
             }
             Spacer()
@@ -74,7 +88,23 @@ struct AccountsSection: View {
                 .font(theme.typography.callout)
                 .foregroundStyle(balance < 0 ? theme.colors.danger : theme.colors.textPrimary)
         }
-        .accessibilityElement(children: .combine)
+        // Keep rows one VoiceOver element unless they carry the node chip,
+        // which must stay independently tappable.
+        .accessibilityElement(children: account.nodeId == nil ? .combine : .contain)
+        // Cross-navigation pulse: a primary ring + glow that BudgetScreen
+        // raises on arrival and drops ~2s later. Non-interactive by design.
+        .overlay {
+            if account.id == highlightedId {
+                RoundedRectangle(cornerRadius: theme.radii.md, style: .continuous)
+                    .strokeBorder(theme.colors.primary, lineWidth: 1.5)
+                    .shadow(color: theme.colors.primary.opacity(0.45), radius: 8)
+                    .padding(-theme.spacing.sm)
+                    .allowsHitTesting(false)
+            }
+        }
+        .animation(theme.motion.standard, value: account.id == highlightedId)
+        // Scroll anchor for BudgetScreen's ScrollViewReader.
+        .id(account.id)
     }
 }
 

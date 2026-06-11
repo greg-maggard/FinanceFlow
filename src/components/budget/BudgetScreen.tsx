@@ -1,13 +1,14 @@
 import { motion } from "framer-motion";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useStore } from "../../state/store";
+import { useUI } from "../../state/uiStore";
 import type { MonthKey } from "../../state/schema";
 import { snapshot } from "../../budget/ledger";
 import { ymKey } from "../../state/recurring";
 import { M } from "../../theme/motion";
 import { GlassCard } from "../glass/GlassCard";
 import { dollars } from "./bits";
-import { CategoryGroups } from "./CategoryGroups";
+import { CategoryGroups, FUND_GLOW } from "./CategoryGroups";
 import { AccountsSection } from "./AccountsSection";
 import { TransactionsSection } from "./TransactionsSection";
 
@@ -83,9 +84,38 @@ function RtaPill({ amount }: { amount: number }) {
 
 export function BudgetScreen() {
   const budget = useStore((s) => s.budget);
+  const budgetFocus = useUI((s) => s.budgetFocus);
   const [month, setMonth] = useState<MonthKey>(() => ymKey());
   // Live-derived: any edit to the book lands here on the next render.
   const snap = useMemo(() => snapshot(budget, month), [budget, month]);
+
+  // Cross-navigation landing: scroll the requested row into view and pulse it
+  // in the funding green for ~2s. The request is consumed up front so the
+  // re-run this triggers (and any later visit) is a no-op; the pulse is plain
+  // inline style because the row belongs to a child section, not to us.
+  useEffect(() => {
+    if (!budgetFocus) return;
+    useUI.getState().clearBudgetFocus();
+    const domId = budgetFocus.categoryId
+      ? `cat-${budgetFocus.categoryId}`
+      : budgetFocus.accountId
+        ? `acct-${budgetFocus.accountId}`
+        : null;
+    const el = domId ? document.getElementById(domId) : null;
+    if (!el) return;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    el.style.transition = "box-shadow 500ms ease";
+    el.style.borderRadius = "0.75rem";
+    el.style.boxShadow = `0 0 0 1px ${FUND_GLOW}, 0 0 24px ${FUND_GLOW}`;
+    window.setTimeout(() => {
+      el.style.boxShadow = "";
+      // Drop the rest only after the fade so it animates out cleanly.
+      window.setTimeout(() => {
+        el.style.transition = "";
+        el.style.borderRadius = "";
+      }, 500);
+    }, 2000);
+  }, [budgetFocus]);
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-5 px-3 pb-4 sm:px-5">
