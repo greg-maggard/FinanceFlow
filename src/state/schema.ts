@@ -177,6 +177,8 @@ export type Account = {
   closed?: boolean;
   source: Source;
   plaidAccountId?: string;
+  /** Flowchart node this account reports into, if any (debt nodes, College). */
+  nodeId?: NodeId;
 };
 
 /**
