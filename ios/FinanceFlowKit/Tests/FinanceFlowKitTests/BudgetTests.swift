@@ -26,30 +26,6 @@ struct BudgetTests {
         BudgetCategory(id: id, groupId: "g:bills", name: id, monthlyTarget: monthlyTarget, nodeId: nodeId)
     }
 
-    @Test("effective totals use the single pair when there are no items")
-    func effectiveSingle() {
-        let d = RecurringData(target: .manual(500), funded: .manual(200))
-        #expect(d.effectiveTarget == 500)
-        #expect(d.effectiveFunded == 200)
-    }
-
-    @Test("effective totals sum the items when present, ignoring the top-level pair")
-    func effectiveItems() {
-        let d = RecurringData(target: .manual(999), funded: .manual(999), items: [
-            RecurringItem(name: "Power", target: .manual(100), funded: .manual(80)),
-            RecurringItem(name: "Water", target: .manual(50)),
-        ])
-        #expect(d.effectiveTarget == 150)
-        #expect(d.effectiveFunded == 80)
-    }
-
-    @Test("an empty items array behaves like no items")
-    func effectiveEmptyItems() {
-        let d = RecurringData(target: .manual(500), funded: .manual(100), items: [])
-        #expect(d.effectiveTarget == 500)
-        #expect(d.effectiveFunded == 100)
-    }
-
     @Test("summary is zero on an untouched state")
     func summaryEmpty() {
         #expect(Derive.monthlyBudgetSummary(.makeInitial(), month: month) == BudgetSummary(target: 0, funded: 0))

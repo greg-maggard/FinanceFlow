@@ -192,7 +192,7 @@ function CategoryRow({
 }
 
 /** Two-tap delete: arming explains where the money goes before committing. */
-function ConfirmDelete({ name, onDelete }: { name: string; onDelete: () => void }) {
+export function ConfirmDelete({ name, onDelete }: { name: string; onDelete: () => void }) {
   const [armed, setArmed] = useState(false);
   return (
     <div className="space-y-1.5">

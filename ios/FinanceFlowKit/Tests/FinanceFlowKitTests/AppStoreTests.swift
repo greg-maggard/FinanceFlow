@@ -35,6 +35,14 @@ struct AppStoreTests {
         #expect(store.status(of: .Rent) == .current)
     }
 
+    @Test("setNodeData stores the payload verbatim")
+    func setNodeDataVerbatim() {
+        let store = AppStore(storage: MemoryStorageAdapter())
+        let data = NodeData.bigEF(BigEFData(targetMonths: 6))
+        store.setNodeData(.BigEF, data)
+        #expect(store.state.node(.BigEF).data == data)
+    }
+
     @Test("monthly check toggles on and off")
     func monthlyCheck() {
         let store = AppStore(storage: MemoryStorageAdapter())
