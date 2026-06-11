@@ -1,0 +1,99 @@
+import SwiftUI
+import Foundation
+import FinanceFlowKit
+
+/// The zero-based envelope budget board: month switcher, Ready-to-Assign,
+/// category envelopes, accounts, and the transaction ledger. Everything is
+/// derived live from `store.state.budget` via `Ledger.snapshot` — bars fill
+/// when dollars are ASSIGNED (funded), not when they're spent, and there is
+/// no refresh step.
+struct BudgetScreen: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var theme
+    /// Clearance under the floating top bar (RootView passes this, Trail-style).
+    var topInset: CGFloat = 112
+
+    /// The "YYYY-MM" month on display; the chevrons move it.
+    @State private var month: String = Recurring.ymKey()
+
+    var body: some View {
+        let book = store.state.budget
+        let snapshot = Ledger.snapshot(book, month: month)
+
+        ScrollView {
+            VStack(spacing: theme.spacing.xl) {
+                monthHeader
+                readyToAssignCard(snapshot.readyToAssign)
+                CategoriesSection(book: book, month: month, snapshot: snapshot)
+                AccountsSection(book: book)
+                TransactionsSection(book: book)
+            }
+            .padding(.horizontal, theme.spacing.lg)
+            .padding(.top, topInset)
+            .padding(.bottom, 60)
+        }
+    }
+
+    // MARK: - Month header
+
+    private var monthHeader: some View {
+        HStack(spacing: theme.spacing.md) {
+            GlassIconButton(systemName: "chevron.left") {
+                withAnimation(theme.motion.standard) { month = BudgetMonth.shift(month, by: -1) }
+            }
+            .accessibilityLabel("Previous month")
+            Spacer()
+            Text(BudgetMonth.label(month))
+                .font(theme.typography.headline)
+                .foregroundStyle(theme.colors.textPrimary)
+            Spacer()
+            GlassIconButton(systemName: "chevron.right") {
+                withAnimation(theme.motion.standard) { month = BudgetMonth.shift(month, by: 1) }
+            }
+            .accessibilityLabel("Next month")
+        }
+    }
+
+    // MARK: - Ready to Assign
+
+    private func readyToAssignCard(_ rta: Decimal) -> some View {
+        let (color, caption): (Color, String) = {
+            if rta > 0 { return (theme.colors.success, "Ready to assign — fund your envelopes") }
+            if rta < 0 { return (theme.colors.danger, "Overassigned — pull money back from a category") }
+            return (theme.colors.textSecondary, "All assigned")
+        }()
+        return GlassCard {
+            VStack(alignment: .leading, spacing: theme.spacing.xs) {
+                FieldLabel(text: "Ready to Assign")
+                Text(CurrencyFormat.string(rta))
+                    .font(theme.typography.display)
+                    .foregroundStyle(color)
+                Text(caption)
+                    .font(theme.typography.caption)
+                    .foregroundStyle(color)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Tiny "YYYY-MM" arithmetic for the month chevrons. String-based on purpose so
+/// it can never drift from the `Recurring.ymKey()` key convention.
+enum BudgetMonth {
+    /// The key `delta` months away from `key` (rolls across year boundaries).
+    static func shift(_ key: String, by delta: Int) -> String {
+        let parts = key.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 2 else { return key }
+        let zeroBased = parts[0] * 12 + (parts[1] - 1) + delta
+        guard zeroBased >= 0 else { return key }
+        return String(format: "%04d-%02d", zeroBased / 12, zeroBased % 12 + 1)
+    }
+
+    /// Human label for a key — e.g. "June 2026".
+    static func label(_ key: String) -> String {
+        let parts = key.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 2, (1...12).contains(parts[1]) else { return key }
+        return "\(Calendar.current.monthSymbols[parts[1] - 1]) \(parts[0])"
+    }
+}

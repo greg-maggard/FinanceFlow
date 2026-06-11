@@ -21,6 +21,58 @@ public enum Ledger {
         }
     }
 
+    /// Local "YYYY-MM-DD" for a date — the convention `Txn.date` uses.
+    /// Mirrors `isoDay` in `src/budget/ledger.ts`.
+    public static func isoDay(_ date: Date = Date(), calendar: Calendar = .current) -> String {
+        let c = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+    }
+
+    /// Build the two rows of a transfer of `amount` (a positive magnitude)
+    /// from one account to another. A category is meaningful only where money
+    /// crosses the budget boundary, so it lands on the on-budget row of an
+    /// on/off pair and is stripped entirely from same-side transfers.
+    /// Mirrors `pairTransfer` in `src/budget/ledger.ts`.
+    public static func pairTransfer(
+        accounts: [Account],
+        from: String,
+        to: String,
+        amount: Decimal,
+        date: String,
+        payee: String? = nil,
+        categoryID: String? = nil
+    ) -> (out: Txn, inflow: Txn) {
+        func kindOf(_ id: String) -> AccountKind {
+            accounts.first { $0.id == id }?.kind ?? .tracking
+        }
+        let fromOn = isOnBudget(kindOf(from))
+        let toOn = isOnBudget(kindOf(to))
+        let magnitude = abs(amount)
+        let outID = ShortID.make()
+        let inID = ShortID.make()
+        let out = Txn(
+            id: outID,
+            accountId: from,
+            date: date,
+            payee: payee,
+            amount: -magnitude,
+            categoryId: fromOn && !toOn ? categoryID : nil,
+            transferAccountId: to,
+            transferPairId: inID
+        )
+        let inflow = Txn(
+            id: inID,
+            accountId: to,
+            date: date,
+            payee: payee,
+            amount: magnitude,
+            categoryId: !fromOn && toOn ? categoryID : nil,
+            transferAccountId: from,
+            transferPairId: outID
+        )
+        return (out, inflow)
+    }
+
     public static func accountBalance(_ book: BudgetBook, _ accountID: String) -> Decimal {
         var total: Decimal = 0
         for t in book.transactions where t.accountId == accountID {

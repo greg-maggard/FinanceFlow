@@ -195,6 +195,8 @@ export type Txn = {
   amount: number;
   categoryId?: string;
   transferAccountId?: string;
+  /** The other row of a transfer pair, so the pair can be edited/deleted atomically. */
+  transferPairId?: string;
   memo?: string;
   source: Source;
   plaidTxnId?: string;
@@ -238,6 +240,11 @@ export type BudgetBook = {
 
 export function emptyBudgetBook(): BudgetBook {
   return { accounts: [], transactions: [], groups: [], categories: [], assignments: {} };
+}
+
+/** Short random id — the same alphabet/length as the iOS `ShortID.make()`. */
+export function newId(): string {
+  return Math.random().toString(36).slice(2, 9);
 }
 
 export type AppState = {

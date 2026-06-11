@@ -1,5 +1,5 @@
-import type { AccountKind, BudgetBook, MonthKey } from "../state/schema";
-import { RTA_CATEGORY_ID } from "../state/schema";
+import type { Account, AccountKind, BudgetBook, MonthKey, Txn } from "../state/schema";
+import { RTA_CATEGORY_ID, newId } from "../state/schema";
 
 // All arithmetic happens in integer cents: every dollars-as-`number` operand
 // is rounded to the cent exactly once on the way in, summed exactly, and
@@ -21,6 +21,55 @@ export function monthOf(date: string): MonthKey {
 /** On-budget dollars are assignable; loan/tracking accounts only report. */
 export function isOnBudget(kind: AccountKind): boolean {
   return kind === "checking" || kind === "savings" || kind === "cash" || kind === "credit";
+}
+
+/** Local "YYYY-MM-DD" for a date — the convention `Txn.date` uses. */
+export function isoDay(d: Date = new Date()): string {
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
+/**
+ * Build the two rows of a transfer of `amount` (a positive magnitude) from
+ * one account to another. A category is meaningful only where money crosses
+ * the budget boundary, so it lands on the on-budget row of an on/off pair
+ * and is stripped entirely from same-side transfers.
+ */
+export function pairTransfer(
+  accounts: Account[],
+  args: { from: string; to: string; amount: number; date: string; payee?: string; categoryId?: string },
+): [Txn, Txn] {
+  const kindOf = (id: string): AccountKind =>
+    accounts.find((a) => a.id === id)?.kind ?? "tracking";
+  const fromOn = isOnBudget(kindOf(args.from));
+  const toOn = isOnBudget(kindOf(args.to));
+  const magnitude = Math.abs(args.amount);
+  const outId = newId();
+  const inId = newId();
+  const out: Txn = {
+    id: outId,
+    accountId: args.from,
+    date: args.date,
+    payee: args.payee,
+    amount: -magnitude,
+    categoryId: fromOn && !toOn ? args.categoryId : undefined,
+    transferAccountId: args.to,
+    transferPairId: inId,
+    source: "manual",
+  };
+  const inflow: Txn = {
+    id: inId,
+    accountId: args.to,
+    date: args.date,
+    payee: args.payee,
+    amount: magnitude,
+    categoryId: !fromOn && toOn ? args.categoryId : undefined,
+    transferAccountId: args.from,
+    transferPairId: outId,
+    source: "manual",
+  };
+  return [out, inflow];
 }
 
 export function accountBalance(book: BudgetBook, accountId: string): number {

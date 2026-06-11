@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Account, BudgetBook, Txn } from "../state/schema";
 import { RTA_CATEGORY_ID, emptyBudgetBook } from "../state/schema";
-import { accountBalance, isOnBudget, monthOf, snapshot } from "./ledger";
+import { accountBalance, isOnBudget, monthOf, pairTransfer, snapshot } from "./ledger";
 
 let nextId = 0;
 function txn(partial: Omit<Txn, "id" | "source">): Txn {
@@ -156,6 +156,51 @@ describe("snapshot", () => {
     const june = snapshot(b, "2026-06");
     expect(june.categories.phone.activity).toBe(-100);
     expect(june.categories.phone.available).toBe(0);
+  });
+
+  it("builds transfer pairs: linked ids, opposite amounts, no category between on-budget accounts", () => {
+    const accounts = book({}).accounts;
+    const [out, inflow] = pairTransfer(accounts, {
+      from: "checking",
+      to: "savings",
+      amount: 200,
+      date: "2026-06-05",
+      categoryId: "should-be-stripped",
+    });
+    expect(out.amount).toBe(-200);
+    expect(inflow.amount).toBe(200);
+    expect(out.transferPairId).toBe(inflow.id);
+    expect(inflow.transferPairId).toBe(out.id);
+    expect(out.transferAccountId).toBe("savings");
+    expect(inflow.transferAccountId).toBe("checking");
+    expect(out.categoryId).toBeUndefined();
+    expect(inflow.categoryId).toBeUndefined();
+  });
+
+  it("puts the category on the on-budget row of an on->off transfer", () => {
+    const accounts = book({}).accounts;
+    const [out, inflow] = pairTransfer(accounts, {
+      from: "checking",
+      to: "ira",
+      amount: 500,
+      date: "2026-06-10",
+      categoryId: "retirement",
+    });
+    expect(out.categoryId).toBe("retirement");
+    expect(inflow.categoryId).toBeUndefined();
+  });
+
+  it("puts the category on the on-budget row of an off->on transfer", () => {
+    const accounts = book({}).accounts;
+    const [out, inflow] = pairTransfer(accounts, {
+      from: "ira",
+      to: "checking",
+      amount: 300,
+      date: "2026-06-12",
+      categoryId: "windfall",
+    });
+    expect(out.categoryId).toBeUndefined();
+    expect(inflow.categoryId).toBe("windfall");
   });
 
   it("accumulates a multi-month funded-vs-spent chain", () => {

@@ -7,6 +7,7 @@ import { SettingsModal } from "./components/SettingsModal";
 import { OverviewSheet } from "./components/OverviewSheet";
 import { CelebrationLayer } from "./components/CelebrationLayer";
 import { FocusStage } from "./components/focus/FocusStage";
+import { BudgetScreen } from "./components/budget/BudgetScreen";
 import { findCurrentNode } from "./components/focus/advance";
 import { useUI } from "./state/uiStore";
 import { GRAPH_BY_ID } from "./graph/flowchart";
@@ -42,6 +43,18 @@ export default function App() {
               className="flex w-full"
             >
               <FocusStage activeId={activeId} />
+            </motion.div>
+          )}
+          {view === "budget" && (
+            <motion.div
+              key="budget-screen"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={M.fade}
+              className="flex w-full self-start"
+            >
+              <BudgetScreen />
             </motion.div>
           )}
         </AnimatePresence>

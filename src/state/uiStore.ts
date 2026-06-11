@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { NodeId } from "./schema";
 import type { Direction } from "../theme/motion";
 
-export type ViewMode = "focus" | "overview" | "shelf";
+export type ViewMode = "focus" | "overview" | "shelf" | "budget";
 
 export type PendingCelebration = { id: NodeId; onPath: boolean };
 
