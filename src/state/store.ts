@@ -245,7 +245,6 @@ if (typeof window !== "undefined") {
       budget: s.budget,
       shownCelebrations: s.shownCelebrations,
       earnedMedals: s.earnedMedals,
-      categoryMap: s.categoryMap,
     };
     void adapter.save(snapshot);
   });
