@@ -42,6 +42,7 @@ type Store = AppState & {
   addGroup: (name: string) => void;
   addCategory: (groupId: string, name: string) => void;
   updateCategory: (category: Category) => void;
+  deleteCategory: (id: string) => void;
   reset: () => void;
   replaceAll: (state: AppState) => void;
 };
@@ -173,6 +174,28 @@ export const useStore = create<Store>((set) => ({
         categories: s.budget.categories.map((c) => (c.id === category.id ? category : c)),
       },
     })),
+  // Deleting never loses money: the category's transactions stay (uncategorized)
+  // and its assignments vanish, so those dollars flow back to Ready-to-Assign.
+  deleteCategory: (id) =>
+    set((s) => {
+      const assignments: AppState["budget"]["assignments"] = {};
+      for (const [month, table] of Object.entries(s.budget.assignments)) {
+        const { [id]: _gone, ...rest } = table;
+        if (Object.keys(rest).length > 0) assignments[month] = rest;
+      }
+      return {
+        budget: {
+          ...s.budget,
+          categories: s.budget.categories.filter((c) => c.id !== id),
+          transactions: s.budget.transactions.map((t) => {
+            if (t.categoryId !== id) return t;
+            const { categoryId: _cleared, ...rest } = t;
+            return rest;
+          }),
+          assignments,
+        },
+      };
+    }),
   reset: () => set(() => ({ ...makeInitialState() })),
   replaceAll: (state) => set(() => ({ ...state })),
 }));

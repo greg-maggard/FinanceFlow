@@ -1,17 +1,28 @@
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { useStore } from "../../state/store";
 import type { Category, CategoryGroup, MonthKey } from "../../state/schema";
 import type { MonthSnapshot } from "../../budget/ledger";
 import { GlassCard } from "../glass/GlassCard";
+import { GlassInput } from "../glass/GlassInput";
 import { NumberField } from "../glass/NumberField";
 import { GoalBar } from "../glass/GoalBar";
-import { InlineAdd, SectionTitle, dollars } from "./bits";
+import { KebabMenu } from "../glass/KebabMenu";
+import { Field, InlineAdd, SectionTitle, dollars } from "./bits";
 
 // Funding green — envelopes glow when money lands in them, not when it leaves.
 const FUND_TINT = "#34d399";
 const FUND_GLOW = "rgba(52, 211, 153, 0.55)";
 
-const GRID = "grid grid-cols-[minmax(0,1fr)_5.5rem_4.5rem_auto] items-center gap-2";
+const GRID = "grid grid-cols-[minmax(0,1fr)_5.5rem_4.5rem_auto_1.25rem] items-center gap-2";
+
+type GoalKind = "none" | "monthly" | "total";
+
+const GOAL_KINDS: { kind: GoalKind; label: string; hint: string }[] = [
+  { kind: "none", label: "No goal", hint: "The envelope just holds what you assign." },
+  { kind: "monthly", label: "Monthly", hint: "Needed every month — the bar tracks available vs. this amount." },
+  { kind: "total", label: "Total", hint: "Save up to a total — the bar fills as the balance grows." },
+];
 
 function availableChipStyle(amount: number): React.CSSProperties {
   const cents = Math.round(amount * 100);
@@ -40,14 +51,102 @@ function CategoryRow({
   cat,
   month,
   snap,
+  menuDrop,
 }: {
   cat: Category;
   month: MonthKey;
   snap: MonthSnapshot;
+  menuDrop: "down" | "up";
 }) {
   const m = snap.categories[cat.id] ?? { assigned: 0, activity: 0, available: 0 };
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(cat.name);
+  const [goalKind, setGoalKind] = useState<GoalKind>("none");
+  const [goalAmount, setGoalAmount] = useState(0);
   // Bars track "needed for spending" first, save-a-total goals otherwise.
   const target = cat.monthlyTarget ?? cat.balanceTarget;
+
+  const beginEdit = () => {
+    setName(cat.name);
+    setGoalKind(cat.monthlyTarget ? "monthly" : cat.balanceTarget ? "total" : "none");
+    setGoalAmount(cat.monthlyTarget ?? cat.balanceTarget ?? 0);
+    setEditing(true);
+  };
+
+  const saveEdit = () => {
+    useStore.getState().updateCategory({
+      ...cat,
+      name: name.trim() || cat.name,
+      monthlyTarget: goalKind === "monthly" && goalAmount > 0 ? goalAmount : undefined,
+      balanceTarget: goalKind === "total" && goalAmount > 0 ? goalAmount : undefined,
+    });
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <motion.div layout className="space-y-3 py-2.5">
+        <Field label={`Edit ${cat.name}`}>
+          <GlassInput
+            autoFocus
+            placeholder="Category name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </Field>
+        <div className="space-y-1.5">
+          <div className="flex gap-1.5">
+            {GOAL_KINDS.map(({ kind, label }) => (
+              <button
+                key={kind}
+                type="button"
+                onClick={() => setGoalKind(kind)}
+                className="rounded-full px-3 py-1 text-[11px] font-medium text-white/75 hover:text-white/95"
+                style={{
+                  background:
+                    goalKind === kind ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.05)",
+                  border: "1px solid rgba(255,255,255,0.10)",
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {goalKind !== "none" && (
+            <NumberField
+              aria-label={`Goal amount for ${cat.name}`}
+              value={goalAmount}
+              onChange={setGoalAmount}
+            />
+          )}
+          <p className="text-[11px] text-white/45">
+            {GOAL_KINDS.find((g) => g.kind === goalKind)?.hint}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={saveEdit}
+            className="rounded-xl px-3 py-1.5 text-xs font-medium text-white/85 hover:text-white/95"
+            style={{
+              background: "rgba(255,255,255,0.08)",
+              border: "1px solid rgba(255,255,255,0.16)",
+            }}
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            onClick={() => setEditing(false)}
+            className="rounded-xl px-3 py-1.5 text-xs text-white/55 hover:text-white/80"
+          >
+            Cancel
+          </button>
+        </div>
+      </motion.div>
+    );
+  }
+
   return (
     <motion.div layout className="space-y-2 py-2.5">
       <div className={GRID}>
@@ -66,6 +165,18 @@ function CategoryRow({
         >
           {dollars(m.available)}
         </span>
+        <KebabMenu ariaLabel={`${cat.name} actions`} drop={menuDrop}>
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={beginEdit}
+              className="w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-white/85 hover:bg-white/5"
+            >
+              Edit name &amp; goal
+            </button>
+            <ConfirmDelete name={cat.name} onDelete={() => useStore.getState().deleteCategory(cat.id)} />
+          </div>
+        </KebabMenu>
       </div>
       {target !== undefined && target > 0 && (
         <GoalBar
@@ -77,6 +188,27 @@ function CategoryRow({
         />
       )}
     </motion.div>
+  );
+}
+
+/** Two-tap delete: arming explains where the money goes before committing. */
+function ConfirmDelete({ name, onDelete }: { name: string; onDelete: () => void }) {
+  const [armed, setArmed] = useState(false);
+  return (
+    <div className="space-y-1.5">
+      {armed && (
+        <p className="text-[11px] text-white/45">
+          Transactions stay, uncategorized; assigned dollars return to Ready to Assign.
+        </p>
+      )}
+      <button
+        type="button"
+        onClick={() => (armed ? onDelete() : setArmed(true))}
+        className="w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-red-300 hover:bg-red-500/10"
+      >
+        {armed ? "Tap again to confirm" : `Delete ${name}`}
+      </button>
+    </div>
   );
 }
 
@@ -100,10 +232,17 @@ function GroupCard({
           <span>Assigned</span>
           <span className="text-right">Activity</span>
           <span className="justify-self-end">Available</span>
+          <span />
         </div>
         <div className="divide-y divide-white/5">
-          {categories.map((c) => (
-            <CategoryRow key={c.id} cat={c} month={month} snap={snap} />
+          {categories.map((c, i) => (
+            <CategoryRow
+              key={c.id}
+              cat={c}
+              month={month}
+              snap={snap}
+              menuDrop={i === 0 ? "down" : "up"}
+            />
           ))}
           {categories.length === 0 && (
             <p className="py-2 text-xs text-white/40">Nothing here yet.</p>

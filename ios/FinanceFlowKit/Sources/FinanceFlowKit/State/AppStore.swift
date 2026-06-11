@@ -220,6 +220,24 @@ public final class AppStore {
         }
     }
 
+    /// Deleting never loses money: the category's transactions stay
+    /// (uncategorized) and its assignments vanish, so those dollars flow back
+    /// to Ready-to-Assign. Mirrors `deleteCategory` in store.ts.
+    public func deleteCategory(_ id: String) {
+        mutate { state in
+            state.budget.categories.removeAll { $0.id == id }
+            for i in state.budget.transactions.indices
+            where state.budget.transactions[i].categoryId == id {
+                state.budget.transactions[i].categoryId = nil
+            }
+            for month in Array(state.budget.assignments.keys) {
+                guard var table = state.budget.assignments[month], table[id] != nil else { continue }
+                table[id] = nil
+                state.budget.assignments[month] = table.isEmpty ? nil : table
+            }
+        }
+    }
+
     /// Mark a node's completion celebration as shown (idempotent).
     public func markCelebrationShown(_ id: NodeId) {
         mutate {

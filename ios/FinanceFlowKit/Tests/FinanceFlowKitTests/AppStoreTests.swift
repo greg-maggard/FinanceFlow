@@ -105,6 +105,27 @@ struct AppStoreTests {
         #expect(store.state.budget.transactions.isEmpty)
     }
 
+    @Test("deleteCategory uncategorizes its transactions and returns assignments to RTA")
+    func deleteCategoryCleansUp() {
+        let store = AppStore(storage: MemoryStorageAdapter())
+        store.addAccount(Account(id: "checking", name: "Checking", kind: .checking))
+        store.addGroup(name: "Bills")
+        let groupID = store.state.budget.groups[0].id
+        store.addCategory(groupID: groupID, name: "Phone")
+        let catID = store.state.budget.categories[0].id
+        store.addTxn(Txn(id: "t1", accountId: "checking", date: "2026-06-01", amount: 1000, categoryId: Ledger.rtaCategoryID))
+        store.addTxn(Txn(id: "t2", accountId: "checking", date: "2026-06-05", amount: -40, categoryId: catID))
+        store.assign(month: "2026-06", categoryID: catID, amount: 100)
+        #expect(Ledger.snapshot(store.state.budget, month: "2026-06").readyToAssign == 900)
+
+        store.deleteCategory(catID)
+        #expect(store.state.budget.categories.isEmpty)
+        #expect(store.state.budget.transactions.first { $0.id == "t2" }?.categoryId == nil)
+        #expect(store.state.budget.assignments.isEmpty)
+        // The deleted envelope's dollars are back in the pool — nothing vanished.
+        #expect(Ledger.snapshot(store.state.budget, month: "2026-06").readyToAssign == 1000)
+    }
+
     @Test("addGroup and addCategory assign sequential orders")
     func groupAndCategoryOrders() {
         let store = AppStore(storage: MemoryStorageAdapter())
