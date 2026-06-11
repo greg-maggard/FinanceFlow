@@ -125,16 +125,6 @@ public final class AppStore {
         mutate { patch(&$0.settings) }
     }
 
-    public func setCategoryMap(_ id: NodeId, _ categoryId: String?) {
-        mutate {
-            if let categoryId, !categoryId.isEmpty {
-                $0.categoryMap[id] = categoryId
-            } else {
-                $0.categoryMap[id] = nil
-            }
-        }
-    }
-
     // MARK: - Budget mutations (mirror the budget actions in store.ts)
 
     /// Set (or clear, with `amount <= 0`) a category's assignment for a month.
