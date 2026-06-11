@@ -13,6 +13,7 @@ import type {
 } from "./schema";
 import { makeInitialState, newId } from "./schema";
 import { pairTransfer } from "../budget/ledger";
+import type { BookOps } from "../budget/nodeLedger";
 import { migrate } from "./io";
 import { LocalStorageAdapter } from "./storage";
 import type { StorageAdapter } from "./storage";
@@ -43,6 +44,7 @@ type Store = AppState & {
   addCategory: (groupId: string, name: string) => void;
   updateCategory: (category: Category) => void;
   deleteCategory: (id: string) => void;
+  applyBookOps: (ops: BookOps) => void;
   reset: () => void;
   replaceAll: (state: AppState) => void;
 };
@@ -174,6 +176,41 @@ export const useStore = create<Store>((set) => ({
         categories: s.budget.categories.map((c) => (c.id === category.id ? category : c)),
       },
     })),
+  // A planner's batch lands in one set() — one autosave, no partial states.
+  applyBookOps: (ops) =>
+    set((s) => {
+      const b = s.budget;
+      let groups = b.groups;
+      let accounts = b.accounts;
+      let categories = b.categories;
+      let transactions = b.transactions;
+      let assignments = b.assignments;
+      if (ops.addGroups?.length) groups = [...groups, ...ops.addGroups];
+      if (ops.addAccounts?.length) accounts = [...accounts, ...ops.addAccounts];
+      if (ops.updateAccounts?.length)
+        accounts = accounts.map((a) => ops.updateAccounts!.find((u) => u.id === a.id) ?? a);
+      if (ops.addCategories?.length) categories = [...categories, ...ops.addCategories];
+      if (ops.updateCategories?.length)
+        categories = categories.map((c) => ops.updateCategories!.find((u) => u.id === c.id) ?? c);
+      if (ops.addTxns?.length) transactions = [...transactions, ...ops.addTxns];
+      if (ops.updateTxns?.length)
+        transactions = transactions.map((t) => ops.updateTxns!.find((u) => u.id === t.id) ?? t);
+      if (ops.deleteTxnIds?.length) {
+        const dead = new Set(ops.deleteTxnIds);
+        transactions = transactions.filter((t) => !dead.has(t.id));
+      }
+      if (ops.setAssignments?.length) {
+        assignments = { ...assignments };
+        for (const sa of ops.setAssignments) {
+          const table = { ...(assignments[sa.month] ?? {}) };
+          if (sa.amount > 0) table[sa.categoryId] = sa.amount;
+          else delete table[sa.categoryId];
+          if (Object.keys(table).length > 0) assignments[sa.month] = table;
+          else delete assignments[sa.month];
+        }
+      }
+      return { budget: { ...b, groups, accounts, categories, transactions, assignments } };
+    }),
   // Deleting never loses money: the category's transactions stay (uncategorized)
   // and its assignments vanish, so those dollars flow back to Ready-to-Assign.
   deleteCategory: (id) =>

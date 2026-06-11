@@ -220,6 +220,45 @@ public final class AppStore {
         }
     }
 
+    /// Apply a planner's batch atomically — one mutation, one autosave, no
+    /// partial states. Mirrors `applyBookOps` in store.ts.
+    public func apply(_ ops: NodeLedger.BookOps) {
+        mutate { state in
+            state.budget.groups.append(contentsOf: ops.addGroups)
+            state.budget.accounts.append(contentsOf: ops.addAccounts)
+            for account in ops.updateAccounts {
+                if let i = state.budget.accounts.firstIndex(where: { $0.id == account.id }) {
+                    state.budget.accounts[i] = account
+                }
+            }
+            state.budget.categories.append(contentsOf: ops.addCategories)
+            for category in ops.updateCategories {
+                if let i = state.budget.categories.firstIndex(where: { $0.id == category.id }) {
+                    state.budget.categories[i] = category
+                }
+            }
+            state.budget.transactions.append(contentsOf: ops.addTxns)
+            for txn in ops.updateTxns {
+                if let i = state.budget.transactions.firstIndex(where: { $0.id == txn.id }) {
+                    state.budget.transactions[i] = txn
+                }
+            }
+            if !ops.deleteTxnIDs.isEmpty {
+                let dead = Set(ops.deleteTxnIDs)
+                state.budget.transactions.removeAll { dead.contains($0.id) }
+            }
+            for assignment in ops.setAssignments {
+                var table = state.budget.assignments[assignment.month] ?? [:]
+                if assignment.amount > 0 {
+                    table[assignment.categoryID] = assignment.amount
+                } else {
+                    table[assignment.categoryID] = nil
+                }
+                state.budget.assignments[assignment.month] = table.isEmpty ? nil : table
+            }
+        }
+    }
+
     /// Deleting never loses money: the category's transactions stay
     /// (uncategorized) and its assignments vanish, so those dollars flow back
     /// to Ready-to-Assign. Mirrors `deleteCategory` in store.ts.
