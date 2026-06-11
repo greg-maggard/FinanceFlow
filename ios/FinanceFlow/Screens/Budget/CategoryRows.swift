@@ -10,6 +10,8 @@ struct CategoriesSection: View {
     let book: BudgetBook
     let month: String
     let snapshot: Ledger.MonthSnapshot
+    /// Row to ring after a cross-navigation jump (see BudgetScreen).
+    var highlightedId: String? = nil
 
     /// What the single name-entry alert is creating.
     private enum AddTarget {
@@ -75,8 +77,11 @@ struct CategoriesSection: View {
                             category: category,
                             month: month,
                             entry: snapshot.categories[category.id]
-                                ?? Ledger.CategoryMonth(assigned: 0, activity: 0, available: 0)
+                                ?? Ledger.CategoryMonth(assigned: 0, activity: 0, available: 0),
+                            highlighted: category.id == highlightedId
                         )
+                        // Scroll anchor for BudgetScreen's ScrollViewReader.
+                        .id(category.id)
                         if category.id != cats.last?.id {
                             Rectangle()
                                 .fill(theme.colors.separator)
@@ -154,9 +159,12 @@ private struct CategoryRow: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var theme
     @Environment(TapAwayCenter.self) private var tapAway
+    @Environment(NavigationCenter.self) private var nav
     let category: BudgetCategory
     let month: String
     let entry: Ledger.CategoryMonth
+    /// Ring this row (cross-navigation just landed on it).
+    var highlighted: Bool = false
 
     @State private var token: Int?
     @State private var showEditor = false
@@ -169,6 +177,17 @@ private struct CategoryRow: View {
                 Text(category.name)
                     .font(theme.typography.callout)
                     .foregroundStyle(theme.colors.textPrimary)
+                if let nodeId = category.nodeId {
+                    // The envelope reports into a flowchart node — jump to it.
+                    Button {
+                        nav.openNode(nodeId)
+                    } label: {
+                        Chip(text: Flowchart.node(nodeId).label, color: theme.colors.primary)
+                    }
+                    .buttonStyle(.plain)
+                    .lineLimit(1)
+                    .accessibilityLabel("Open \(Flowchart.node(nodeId).label) on the path")
+                }
                 Spacer()
                 Text(CurrencyFormat.string(entry.available))
                     .font(theme.typography.callout)
@@ -227,6 +246,18 @@ private struct CategoryRow: View {
                 targetBar(target: target)
             }
         }
+        // Cross-navigation pulse: a primary ring + glow that BudgetScreen
+        // raises on arrival and drops ~2s later. Non-interactive by design.
+        .overlay {
+            if highlighted {
+                RoundedRectangle(cornerRadius: theme.radii.md, style: .continuous)
+                    .strokeBorder(theme.colors.primary, lineWidth: 1.5)
+                    .shadow(color: theme.colors.primary.opacity(0.45), radius: 8)
+                    .padding(-theme.spacing.sm)
+                    .allowsHitTesting(false)
+            }
+        }
+        .animation(theme.motion.standard, value: highlighted)
         .sheet(isPresented: $showEditor) {
             CategoryEditorSheet(category: category)
                 .presentationDetents([.medium, .large])

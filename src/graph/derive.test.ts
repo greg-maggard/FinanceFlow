@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { makeInitialState } from "../state/schema";
-import type { AppState, NodeId, RecurringData } from "../state/schema";
-import { deriveStatus, monthlyBudgetSummary, recurringTotals } from "./derive";
+import { RTA_CATEGORY_ID, makeInitialState } from "../state/schema";
+import type { AppState, Category, NodeId } from "../state/schema";
+import { deriveStatus, monthlyBudgetSummary } from "./derive";
 
 function complete(state: AppState, ids: NodeId[]): AppState {
   const next = structuredClone(state);
@@ -107,59 +107,52 @@ describe("deriveStatus", () => {
   });
 });
 
-describe("recurringTotals", () => {
-  it("uses the single pair when there are no items", () => {
-    const data: RecurringData = {
-      target: { value: 500, source: "manual" },
-      funded: { value: 200, source: "manual" },
-    };
-    expect(recurringTotals(data)).toEqual({ target: 500, funded: 200 });
-  });
-
-  it("sums the items when present, ignoring the top-level pair", () => {
-    const data: RecurringData = {
-      target: { value: 999, source: "manual" },
-      funded: { value: 999, source: "manual" },
-      items: [
-        { id: "a", name: "Power", target: { value: 100, source: "manual" }, funded: { value: 80, source: "manual" } },
-        { id: "b", name: "Water", target: { value: 50, source: "manual" } },
-      ],
-    };
-    expect(recurringTotals(data)).toEqual({ target: 150, funded: 80 });
-  });
-
-  it("treats an empty items array like no items", () => {
-    const data: RecurringData = {
-      target: { value: 500, source: "manual" },
-      funded: { value: 100, source: "manual" },
-      items: [],
-    };
-    expect(recurringTotals(data)).toEqual({ target: 500, funded: 100 });
-  });
-
-  it("handles missing data", () => {
-    expect(recurringTotals(undefined)).toEqual({ target: 0, funded: 0 });
-  });
-});
-
 describe("monthlyBudgetSummary", () => {
+  const MONTH = "2026-06";
+
+  function cat(partial: Partial<Category> & Pick<Category, "id" | "nodeId">): Category {
+    return { groupId: "g:bills", name: partial.id, order: 0, ...partial };
+  }
+
+  /** A state whose book has an on-budget account and an RTA inflow funding it. */
+  function seeded(
+    categories: Category[],
+    assignments: Record<string, number>,
+  ): AppState {
+    const s = makeInitialState();
+    s.budget.accounts = [{ id: "checking", name: "checking", kind: "checking", source: "manual" }];
+    s.budget.transactions = [
+      { id: "t:rta", accountId: "checking", date: "2026-06-01", amount: 100000, categoryId: RTA_CATEGORY_ID, source: "manual" },
+    ];
+    s.budget.categories = categories;
+    s.budget.assignments = { [MONTH]: assignments };
+    return s;
+  }
+
   it("is zero on an untouched state", () => {
-    expect(monthlyBudgetSummary(makeInitialState())).toEqual({ target: 0, funded: 0 });
+    expect(monthlyBudgetSummary(makeInitialState(), MONTH)).toEqual({ target: 0, funded: 0 });
   });
 
-  it("sums single and itemized recurring nodes", () => {
-    const s = makeInitialState();
-    s.nodes.Rent.data = {
-      target: { value: 1800, source: "manual" },
-      funded: { value: 1800, source: "manual" },
-    };
-    s.nodes.Essential.data = {
-      target: { value: 0, source: "manual" },
-      items: [
-        { id: "a", name: "Power", target: { value: 120, source: "manual" }, funded: { value: 90, source: "manual" } },
-        { id: "b", name: "Water", target: { value: 40, source: "manual" }, funded: { value: 40, source: "manual" } },
+  it("sums targets and assignments across the recurring nodes' categories", () => {
+    const s = seeded(
+      [
+        cat({ id: "Rent", nodeId: "Rent", monthlyTarget: 1800 }),
+        cat({ id: "Essential:power", nodeId: "Essential", monthlyTarget: 120 }),
+        cat({ id: "Essential:water", nodeId: "Essential", monthlyTarget: 40 }),
       ],
-    };
-    expect(monthlyBudgetSummary(s)).toEqual({ target: 1960, funded: 1930 });
+      { Rent: 1800, "Essential:power": 90, "Essential:water": 40 },
+    );
+    expect(monthlyBudgetSummary(s, MONTH)).toEqual({ target: 1960, funded: 1930 });
+  });
+
+  it("summary sums stay exact across fractional amounts and nodes", () => {
+    const s = seeded(
+      [
+        cat({ id: "Rent", nodeId: "Rent", monthlyTarget: 0.1 }),
+        cat({ id: "Food", nodeId: "Food", monthlyTarget: 0.2 }),
+      ],
+      { Rent: 0.1, Food: 0.2 },
+    );
+    expect(monthlyBudgetSummary(s, MONTH)).toEqual({ target: 0.3, funded: 0.3 });
   });
 });

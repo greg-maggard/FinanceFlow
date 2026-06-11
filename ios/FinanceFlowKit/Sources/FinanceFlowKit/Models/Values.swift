@@ -161,14 +161,16 @@ public struct SmallEFData: Codable, Equatable, Sendable {
     }
 }
 
-/// Payload for the BigEF node: target months + balance, optionally split into
-/// named buckets. Mirrors the `BigEF` shape in `NodeDataMap`.
+/// Payload for the BigEF node. Mirrors the `BigEF` shape in `NodeDataMap`:
+/// v3 keeps only `targetMonths` — `balance`/`items` are legacy v2 fields kept
+/// optional so existing documents decode (and slim v3 payloads encode without
+/// the keys); the live numbers come from the node's linked ledger categories.
 public struct BigEFData: Codable, Equatable, Sendable {
     public var targetMonths: Int
-    public var balance: SourcedNumber
+    public var balance: SourcedNumber?
     public var items: [EFBucket]?
 
-    public init(targetMonths: Int = 3, balance: SourcedNumber = .manual(0), items: [EFBucket]? = nil) {
+    public init(targetMonths: Int = 3, balance: SourcedNumber? = nil, items: [EFBucket]? = nil) {
         self.targetMonths = targetMonths
         self.balance = balance
         self.items = items
@@ -250,9 +252,10 @@ public struct PurchaseGoal: Codable, Equatable, Sendable, Identifiable {
 }
 
 /// Payload for the SavePurchase node. Mirrors the `SavePurchase` shape in `NodeDataMap`.
-/// When `items` is present the scalar fields are legacy mirrors maintained by
-/// `normalized()` (goalName/byDate from the first goal, target/saved as sums)
-/// so readers that predate the list still display correct totals.
+/// The scalar fields and `items` are legacy v2 fields kept only so existing
+/// documents decode; the live numbers come from the node's linked ledger
+/// categories (see `Domain/NodeLedger.swift`). Nothing maintains the scalar
+/// mirrors anymore.
 public struct SavePurchaseData: Codable, Equatable, Sendable {
     public var goalName: String
     public var target: Decimal
@@ -275,13 +278,17 @@ public struct SavePurchaseData: Codable, Equatable, Sendable {
     }
 }
 
-/// Payload for the College (529) node. Mirrors the `College` shape in `NodeDataMap`.
+/// Payload for the College (529) node. Mirrors the `College` shape in
+/// `NodeDataMap`: v3 keeps `monthlyContribution`/`targetAge` — `balance` is a
+/// legacy v2 field kept optional so existing documents decode (and slim v3
+/// payloads encode without the key); the live balance is the `acct:college`
+/// tracking account.
 public struct CollegeData: Codable, Equatable, Sendable {
     public var monthlyContribution: Decimal
-    public var balance: SourcedNumber
+    public var balance: SourcedNumber?
     public var targetAge: Int?
 
-    public init(monthlyContribution: Decimal = 0, balance: SourcedNumber = .manual(0), targetAge: Int? = nil) {
+    public init(monthlyContribution: Decimal = 0, balance: SourcedNumber? = nil, targetAge: Int? = nil) {
         self.monthlyContribution = monthlyContribution
         self.balance = balance
         self.targetAge = targetAge

@@ -105,7 +105,7 @@ public final class AppStore {
     }
 
     public func setNodeData(_ id: NodeId, _ data: NodeData) {
-        mutate { $0.nodes[id, default: NodeState()].data = data.normalized() }
+        mutate { $0.nodes[id, default: NodeState()].data = data }
     }
 
     public func toggleMonthlyCheck(_ id: NodeId, _ ymKey: String) {
@@ -123,16 +123,6 @@ public final class AppStore {
 
     public func updateSettings(_ patch: (inout Settings) -> Void) {
         mutate { patch(&$0.settings) }
-    }
-
-    public func setCategoryMap(_ id: NodeId, _ categoryId: String?) {
-        mutate {
-            if let categoryId, !categoryId.isEmpty {
-                $0.categoryMap[id] = categoryId
-            } else {
-                $0.categoryMap[id] = nil
-            }
-        }
     }
 
     // MARK: - Budget mutations (mirror the budget actions in store.ts)
@@ -216,6 +206,45 @@ public final class AppStore {
         mutate { state in
             if let i = state.budget.categories.firstIndex(where: { $0.id == category.id }) {
                 state.budget.categories[i] = category
+            }
+        }
+    }
+
+    /// Apply a planner's batch atomically — one mutation, one autosave, no
+    /// partial states. Mirrors `applyBookOps` in store.ts.
+    public func apply(_ ops: NodeLedger.BookOps) {
+        mutate { state in
+            state.budget.groups.append(contentsOf: ops.addGroups)
+            state.budget.accounts.append(contentsOf: ops.addAccounts)
+            for account in ops.updateAccounts {
+                if let i = state.budget.accounts.firstIndex(where: { $0.id == account.id }) {
+                    state.budget.accounts[i] = account
+                }
+            }
+            state.budget.categories.append(contentsOf: ops.addCategories)
+            for category in ops.updateCategories {
+                if let i = state.budget.categories.firstIndex(where: { $0.id == category.id }) {
+                    state.budget.categories[i] = category
+                }
+            }
+            state.budget.transactions.append(contentsOf: ops.addTxns)
+            for txn in ops.updateTxns {
+                if let i = state.budget.transactions.firstIndex(where: { $0.id == txn.id }) {
+                    state.budget.transactions[i] = txn
+                }
+            }
+            if !ops.deleteTxnIDs.isEmpty {
+                let dead = Set(ops.deleteTxnIDs)
+                state.budget.transactions.removeAll { dead.contains($0.id) }
+            }
+            for assignment in ops.setAssignments {
+                var table = state.budget.assignments[assignment.month] ?? [:]
+                if assignment.amount > 0 {
+                    table[assignment.categoryID] = assignment.amount
+                } else {
+                    table[assignment.categoryID] = nil
+                }
+                state.budget.assignments[assignment.month] = table.isEmpty ? nil : table
             }
         }
     }

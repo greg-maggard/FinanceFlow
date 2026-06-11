@@ -1,9 +1,14 @@
 import type {
   Account,
   AppState,
+  BudgetBook,
   Category,
+  Decisions,
   NodeDataMap,
   NodeId,
+  NodeState,
+  Settings,
+  SourcedNumber,
   Txn,
 } from "./schema";
 import {
@@ -13,7 +18,14 @@ import {
   emptyBudgetBook,
 } from "./schema";
 import { ymKey } from "./recurring";
-import { fromCents, isoDay, toCents } from "../budget/ledger";
+import { accountBalance, fromCents, isoDay, toCents } from "../budget/ledger";
+import {
+  COLLEGE_ACCOUNT_ID,
+  GROUP_BILLS,
+  GROUP_EF,
+  GROUP_GOALS,
+  ensureGroup,
+} from "../budget/nodeLedger";
 
 export function exportJson(state: AppState): string {
   return JSON.stringify(state, null, 2);
@@ -28,28 +40,50 @@ export function migrate(input: unknown, now: Date = new Date()): AppState {
   if (!input || typeof input !== "object") {
     throw new Error("Not a FinanceFlow document.");
   }
-  const obj = input as Partial<AppState> & { version?: number };
-  if (obj.version === 2) return obj as AppState;
-  if (obj.version === 1) return migrateV1(obj as unknown as V1State, now);
+  const obj = input as { version?: number };
+  if (obj.version === 3) return obj as AppState;
+  if (obj.version === 2) return migrateV2(obj as unknown as V2State, now);
+  if (obj.version === 1) return migrateV2(migrateV1(obj as unknown as V1State, now), now);
   // Never silently reset: a document from a newer (or unknown) version must
   // surface as an error the caller can show, not vanish into a fresh state.
   throw new Error(`Unsupported FinanceFlow version: ${String(obj.version)}.`);
 }
 
 // ---------------------------------------------------------------------------
-// v1 -> v2: seed the budget book from the node payloads.
-//
-// The v1 payloads stay untouched (the UI still reads them until it switches
-// to the ledger), so this is purely additive bootstrap data. Every generated
-// id derives from a stable v1 id, making the migration deterministic — the
-// web and iOS apps migrate the same document to the same book.
-//
-// Seeding rule: each funded/saved amount becomes that category's assignment
-// in the migration month, and one starting-balance inflow on a seeded Cash
-// account covers the total — so every envelope's available matches its v1
-// bar exactly and Ready-to-Assign lands at exactly zero.
+// Legacy payload shapes (v1/v2 documents) — decode/migration-only. The live
+// schema no longer carries these; see `NodeDataMap` in schema.ts.
 
-type V1State = Omit<AppState, "version" | "budget"> & { version: 1 };
+type V2RecurringItem = { id: string; name: string; target: SourcedNumber; funded?: SourcedNumber };
+type V2RecurringData = { target: SourcedNumber; funded?: SourcedNumber; items?: V2RecurringItem[] };
+type V2EFBucket = { id: string; name: string; target: number; balance: SourcedNumber };
+type V2SmallEF = { balance: SourcedNumber; items?: V2EFBucket[] };
+type V2BigEF = { targetMonths: number; balance?: SourcedNumber; items?: V2EFBucket[] };
+type V2PurchaseGoal = { id: string; name: string; target: number; saved: SourcedNumber; byDate?: string };
+type V2SavePurchase = {
+  goalName: string;
+  target: number;
+  saved: SourcedNumber;
+  byDate?: string;
+  items?: V2PurchaseGoal[];
+};
+type V2Goal = { id: string; name: string; target: number; saved: number; horizonYears: number };
+type V2Goals = { items?: V2Goal[] };
+type V2Debts = { debts?: V2Debt[] };
+type V2Debt = { id: string; name: string; balance: number; apr: number; minPayment: number; paid: boolean };
+type V2College = { monthlyContribution: number; balance?: SourcedNumber; targetAge?: number };
+
+type LegacyNodeState = Omit<NodeState, "data"> & { data?: unknown };
+
+type V1State = {
+  version: 1;
+  settings: Settings;
+  decisions: Decisions;
+  nodes: Record<NodeId, LegacyNodeState>;
+  shownCelebrations?: NodeId[];
+  earnedMedals?: number[];
+};
+
+type V2State = Omit<V1State, "version"> & { version: 2; budget?: BudgetBook };
 
 const RECURRING_NODES = [
   "Rent",
@@ -61,7 +95,17 @@ const RECURRING_NODES = [
   "NonEssential",
 ] as const;
 
-function migrateV1(v1: V1State, now: Date): AppState {
+// ---------------------------------------------------------------------------
+// v1 -> v2: seed the budget book from the node payloads (payloads preserved;
+// v2 -> v3 strips them). Deterministic ids — both platforms migrate one
+// document identically.
+//
+// Seeding rule: each funded/saved amount becomes that category's assignment
+// in the migration month, and one starting-balance inflow on a seeded Cash
+// account covers the total — so every envelope's available matches its v1
+// bar exactly and Ready-to-Assign lands at exactly zero.
+
+function migrateV1(v1: V1State, now: Date): V2State {
   const book = emptyBudgetBook();
   const month = ymKey(now);
   const today = isoDay(now);
@@ -73,16 +117,16 @@ function migrateV1(v1: V1State, now: Date): AppState {
   };
 
   // Bills: the recurring nodes' items (or single target/funded pair).
-  book.groups.push({ id: "g:bills", name: "Bills", order: 0 });
+  book.groups.push({ id: GROUP_BILLS, name: "Bills", order: 0 });
   for (const nodeId of RECURRING_NODES) {
-    const data = v1.nodes[nodeId]?.data as NodeDataMap[(typeof RECURRING_NODES)[number]] | undefined;
+    const data = v1.nodes[nodeId]?.data as V2RecurringData | undefined;
     if (!data) continue;
     if (data.items?.length) {
       for (const item of data.items) {
         addCategory(
           {
             id: `${nodeId}:${item.id}`,
-            groupId: "g:bills",
+            groupId: GROUP_BILLS,
             name: item.name,
             monthlyTarget: item.target.value,
             nodeId,
@@ -94,7 +138,7 @@ function migrateV1(v1: V1State, now: Date): AppState {
       addCategory(
         {
           id: nodeId,
-          groupId: "g:bills",
+          groupId: GROUP_BILLS,
           name: nodeId,
           monthlyTarget: data.target.value,
           nodeId,
@@ -106,23 +150,23 @@ function migrateV1(v1: V1State, now: Date): AppState {
 
   // Emergency fund. SmallEF grows into BigEF, so when BigEF holds any data it
   // is treated as the superset and SmallEF is not seeded a second time.
-  book.groups.push({ id: "g:ef", name: "Emergency Fund", order: 1 });
-  const big = v1.nodes.BigEF?.data as NodeDataMap["BigEF"] | undefined;
-  const small = v1.nodes.SmallEF?.data as NodeDataMap["SmallEF"] | undefined;
+  book.groups.push({ id: GROUP_EF, name: "Emergency Fund", order: 1 });
+  const big = v1.nodes.BigEF?.data as V2BigEF | undefined;
+  const small = v1.nodes.SmallEF?.data as V2SmallEF | undefined;
   const efNode: NodeId | null =
-    big && (big.balance.value > 0 || (big.items?.length ?? 0) > 0)
+    big && ((big.balance?.value ?? 0) > 0 || (big.items?.length ?? 0) > 0)
       ? "BigEF"
       : small
         ? "SmallEF"
         : null;
   if (efNode) {
-    const data = (efNode === "BigEF" ? big : small)!;
+    const data = (efNode === "BigEF" ? big : small) as V2BigEF & V2SmallEF;
     if (data.items?.length) {
       for (const bucket of data.items) {
         addCategory(
           {
             id: `${efNode}:${bucket.id}`,
-            groupId: "g:ef",
+            groupId: GROUP_EF,
             name: bucket.name,
             balanceTarget: bucket.target,
             nodeId: efNode,
@@ -130,36 +174,33 @@ function migrateV1(v1: V1State, now: Date): AppState {
           bucket.balance.value,
         );
       }
-    } else if (data.balance.value > 0) {
+    } else if ((data.balance?.value ?? 0) > 0) {
       const target =
         efNode === "BigEF"
-          ? bigEmergencyFundTarget(
-              (data as NodeDataMap["BigEF"]).targetMonths,
-              v1.settings.monthlyExpenses,
-            )
+          ? bigEmergencyFundTarget(big!.targetMonths, v1.settings.monthlyExpenses)
           : emergencyFundTarget(v1.settings.monthlyExpenses);
       addCategory(
         {
           id: efNode,
-          groupId: "g:ef",
+          groupId: GROUP_EF,
           name: "Emergency Fund",
           balanceTarget: target > 0 ? target : undefined,
           nodeId: efNode,
         },
-        data.balance.value,
+        data.balance!.value,
       );
     }
   }
 
   // Savings goals: SavePurchase goals plus the long-term Goals list.
-  book.groups.push({ id: "g:goals", name: "Savings Goals", order: 2 });
-  const purchase = v1.nodes.SavePurchase?.data as NodeDataMap["SavePurchase"] | undefined;
+  book.groups.push({ id: GROUP_GOALS, name: "Savings Goals", order: 2 });
+  const purchase = v1.nodes.SavePurchase?.data as V2SavePurchase | undefined;
   if (purchase?.items?.length) {
     for (const goal of purchase.items) {
       addCategory(
         {
           id: `SavePurchase:${goal.id}`,
-          groupId: "g:goals",
+          groupId: GROUP_GOALS,
           name: goal.name,
           balanceTarget: goal.target,
           targetDate: goal.byDate,
@@ -172,7 +213,7 @@ function migrateV1(v1: V1State, now: Date): AppState {
     addCategory(
       {
         id: "SavePurchase",
-        groupId: "g:goals",
+        groupId: GROUP_GOALS,
         name: purchase.goalName || "SavePurchase",
         balanceTarget: purchase.target,
         targetDate: purchase.byDate,
@@ -181,12 +222,12 @@ function migrateV1(v1: V1State, now: Date): AppState {
       purchase.saved.value,
     );
   }
-  const goals = v1.nodes.Goals?.data as NodeDataMap["Goals"] | undefined;
-  for (const goal of goals?.items ?? []) {
+  const goals = (v1.nodes.Goals?.data as V2Goals | undefined)?.items ?? [];
+  for (const goal of goals) {
     addCategory(
       {
         id: `Goals:${goal.id}`,
-        groupId: "g:goals",
+        groupId: GROUP_GOALS,
         name: goal.name,
         balanceTarget: goal.target,
         nodeId: "Goals",
@@ -197,8 +238,8 @@ function migrateV1(v1: V1State, now: Date): AppState {
 
   // Debts become off-budget loan accounts (balance, APR, minimum payment).
   for (const nodeId of ["HighDebt", "ModDebt"] as const) {
-    const data = v1.nodes[nodeId]?.data as NodeDataMap["HighDebt"] | undefined;
-    for (const debt of data?.debts ?? []) {
+    const debts = (v1.nodes[nodeId]?.data as V2Debts | undefined)?.debts ?? [];
+    for (const debt of debts) {
       const account: Account = {
         id: `debt:${debt.id}`,
         name: debt.name,
@@ -206,6 +247,7 @@ function migrateV1(v1: V1State, now: Date): AppState {
         apr: debt.apr,
         minPayment: debt.minPayment,
         source: "manual",
+        nodeId,
       };
       book.accounts.push(account);
       if (debt.balance !== 0) {
@@ -215,15 +257,16 @@ function migrateV1(v1: V1State, now: Date): AppState {
   }
 
   // The 529 balance becomes a tracking account.
-  const college = v1.nodes.College?.data as NodeDataMap["College"] | undefined;
-  if (college && college.balance.value > 0) {
+  const college = v1.nodes.College?.data as V2College | undefined;
+  if (college && (college.balance?.value ?? 0) > 0) {
     book.accounts.push({
-      id: "acct:college",
+      id: COLLEGE_ACCOUNT_ID,
       name: "529 Plan",
       kind: "tracking",
       source: "manual",
+      nodeId: "College",
     });
-    book.transactions.push(startingTxn("acct:college", today, college.balance.value));
+    book.transactions.push(startingTxn(COLLEGE_ACCOUNT_ID, today, college.balance!.value));
   }
 
   // Cash account + one RTA inflow covering everything seeded, so the books
@@ -241,8 +284,296 @@ function migrateV1(v1: V1State, now: Date): AppState {
     book.assignments = { [month]: seeded };
   }
 
-  const { version: _v, ...rest } = v1;
-  return { ...rest, version: 2, budget: book };
+  return { ...v1, version: 2, budget: book };
+}
+
+// ---------------------------------------------------------------------------
+// v2 -> v3: reconcile, then strip.
+//
+// Both UIs were live during v2, so payloads and ledger may have diverged.
+// The ledger wins wherever both describe the same thing (it has the
+// transaction history); payload items with no linked ledger entity are
+// created with the same deterministic ids the v1 migration used, their
+// funded/saved amounts seeded as this month's assignments and covered by one
+// RTA inflow so Ready-to-Assign is unchanged. The single payload-wins case:
+// a debt explicitly marked paid gets a zeroing adjustment, because that user
+// action had no ledger representation. Then every ledger-owned payload field
+// is stripped; nodes keep only what the ledger doesn't model.
+
+function migrateV2(v2: V2State, now: Date): AppState {
+  const book: BudgetBook = JSON.parse(JSON.stringify(v2.budget ?? emptyBudgetBook()));
+  const month = ymKey(now);
+  const today = isoDay(now);
+  const seeded: Record<string, number> = {};
+
+  const catExists = (id: string) => book.categories.some((c) => c.id === id);
+  const accountById = (id: string) => book.accounts.find((a) => a.id === id);
+  const ensureGrp = (groupId: string) => {
+    const group = ensureGroup(book, groupId);
+    if (group) book.groups.push(group);
+  };
+  const addCat = (cat: Omit<Category, "order">, seed: number) => {
+    ensureGrp(cat.groupId);
+    book.categories.push({ ...cat, order: book.categories.length });
+    if (seed > 0) seeded[cat.id] = seed;
+  };
+
+  // 1. Recurring: create missing payload items; ledger wins where ids match.
+  for (const nodeId of RECURRING_NODES) {
+    const data = v2.nodes[nodeId]?.data as V2RecurringData | undefined;
+    if (!data) continue;
+    if (data.items?.length) {
+      for (const item of data.items) {
+        const id = `${nodeId}:${item.id}`;
+        if (catExists(id)) continue;
+        addCat(
+          { id, groupId: GROUP_BILLS, name: item.name, monthlyTarget: item.target.value, nodeId },
+          item.funded?.value ?? 0,
+        );
+      }
+    } else if (data.target.value > 0 || (data.funded?.value ?? 0) > 0) {
+      if (!catExists(nodeId)) {
+        addCat(
+          { id: nodeId, groupId: GROUP_BILLS, name: nodeId, monthlyTarget: data.target.value, nodeId },
+          data.funded?.value ?? 0,
+        );
+      }
+    }
+  }
+
+  // 2. Emergency fund. If ANY union category exists the fund is
+  // ledger-managed: create only missing payload buckets, never the scalar
+  // mirror. An empty union applies the v1 rules verbatim (BigEF supersedes).
+  const big = v2.nodes.BigEF?.data as V2BigEF | undefined;
+  const small = v2.nodes.SmallEF?.data as V2SmallEF | undefined;
+  const unionExists = book.categories.some(
+    (c) => c.nodeId === "SmallEF" || c.nodeId === "BigEF",
+  );
+  if (unionExists) {
+    for (const [node, data] of [["BigEF", big], ["SmallEF", small]] as const) {
+      for (const bucket of data?.items ?? []) {
+        const id = `${node}:${bucket.id}`;
+        if (catExists(id)) continue;
+        addCat(
+          { id, groupId: GROUP_EF, name: bucket.name, balanceTarget: bucket.target, nodeId: node },
+          bucket.balance.value,
+        );
+      }
+    }
+  } else {
+    const efNode: NodeId | null =
+      big && ((big.balance?.value ?? 0) > 0 || (big.items?.length ?? 0) > 0)
+        ? "BigEF"
+        : small
+          ? "SmallEF"
+          : null;
+    if (efNode) {
+      const data = (efNode === "BigEF" ? big : small) as V2BigEF & V2SmallEF;
+      if (data.items?.length) {
+        for (const bucket of data.items) {
+          addCat(
+            {
+              id: `${efNode}:${bucket.id}`,
+              groupId: GROUP_EF,
+              name: bucket.name,
+              balanceTarget: bucket.target,
+              nodeId: efNode,
+            },
+            bucket.balance.value,
+          );
+        }
+      } else if ((data.balance?.value ?? 0) > 0) {
+        const target =
+          efNode === "BigEF"
+            ? bigEmergencyFundTarget(big!.targetMonths, v2.settings.monthlyExpenses)
+            : emergencyFundTarget(v2.settings.monthlyExpenses);
+        addCat(
+          {
+            id: efNode,
+            groupId: GROUP_EF,
+            name: "Emergency Fund",
+            balanceTarget: target > 0 ? target : undefined,
+            nodeId: efNode,
+          },
+          data.balance!.value,
+        );
+      }
+    }
+  }
+
+  // 3. SavePurchase / Goals. Goals' horizonYears becomes a target date.
+  const purchase = v2.nodes.SavePurchase?.data as V2SavePurchase | undefined;
+  if (purchase?.items?.length) {
+    for (const goal of purchase.items) {
+      const id = `SavePurchase:${goal.id}`;
+      if (catExists(id)) continue;
+      addCat(
+        {
+          id,
+          groupId: GROUP_GOALS,
+          name: goal.name,
+          balanceTarget: goal.target,
+          targetDate: goal.byDate,
+          nodeId: "SavePurchase",
+        },
+        goal.saved.value,
+      );
+    }
+  } else if (purchase && (purchase.target > 0 || purchase.saved.value > 0)) {
+    if (!catExists("SavePurchase")) {
+      addCat(
+        {
+          id: "SavePurchase",
+          groupId: GROUP_GOALS,
+          name: purchase.goalName || "SavePurchase",
+          balanceTarget: purchase.target,
+          targetDate: purchase.byDate,
+          nodeId: "SavePurchase",
+        },
+        purchase.saved.value,
+      );
+    }
+  }
+  for (const goal of (v2.nodes.Goals?.data as V2Goals | undefined)?.items ?? []) {
+    const id = `Goals:${goal.id}`;
+    const existing = book.categories.find((c) => c.id === id);
+    if (existing) {
+      if (!existing.targetDate) existing.targetDate = horizonDate(now, goal.horizonYears);
+      continue;
+    }
+    addCat(
+      {
+        id,
+        groupId: GROUP_GOALS,
+        name: goal.name,
+        balanceTarget: goal.target,
+        targetDate: horizonDate(now, goal.horizonYears),
+        nodeId: "Goals",
+      },
+      goal.saved,
+    );
+  }
+
+  // 4. Debts: backfill nodeId on matched accounts; create missing ones; honor
+  // an explicit paid flag the ledger couldn't represent.
+  for (const nodeId of ["HighDebt", "ModDebt"] as const) {
+    const debts = (v2.nodes[nodeId]?.data as V2Debts | undefined)?.debts ?? [];
+    for (const debt of debts) {
+      const id = `debt:${debt.id}`;
+      const existing = accountById(id);
+      if (existing) {
+        if (!existing.nodeId) existing.nodeId = nodeId;
+        const balanceC = toCents(accountBalance(book, id));
+        if (debt.paid && balanceC < 0) {
+          book.transactions.push({
+            id: `txn:adjust:v3:debt:${debt.id}`,
+            accountId: id,
+            date: today,
+            payee: "Balance adjustment",
+            memo: "Marked paid",
+            amount: fromCents(-balanceC),
+            source: "manual",
+          });
+        }
+      } else {
+        book.accounts.push({
+          id,
+          name: debt.name,
+          kind: "loan",
+          apr: debt.apr,
+          minPayment: debt.minPayment,
+          source: "manual",
+          nodeId,
+        });
+        if (debt.balance !== 0) {
+          book.transactions.push(startingTxn(id, today, -debt.balance));
+        }
+      }
+    }
+  }
+
+  // 5. College: ensure/backfill the tracking account.
+  const college = v2.nodes.College?.data as V2College | undefined;
+  if (college) {
+    const existing = accountById(COLLEGE_ACCOUNT_ID);
+    if (existing) {
+      if (!existing.nodeId) existing.nodeId = "College";
+    } else if ((college.balance?.value ?? 0) > 0) {
+      book.accounts.push({
+        id: COLLEGE_ACCOUNT_ID,
+        name: "529 Plan",
+        kind: "tracking",
+        source: "manual",
+        nodeId: "College",
+      });
+      book.transactions.push(startingTxn(COLLEGE_ACCOUNT_ID, today, college.balance!.value));
+    }
+  }
+
+  // 6. Seed cover: created categories' amounts become this month's
+  // assignments, balanced by one RTA inflow — migration never moves RTA.
+  let totalC = 0;
+  for (const v of Object.values(seeded)) totalC += toCents(v);
+  if (Object.keys(seeded).length > 0) {
+    book.assignments[month] = { ...(book.assignments[month] ?? {}), ...seeded };
+  }
+  if (totalC > 0) {
+    if (!accountById("acct:cash")) {
+      book.accounts.push({ id: "acct:cash", name: "Cash", kind: "cash", source: "manual" });
+    }
+    book.transactions.push({
+      id: "txn:start:v3",
+      accountId: "acct:cash",
+      date: today,
+      payee: "Starting balance",
+      amount: fromCents(totalC),
+      categoryId: RTA_CATEGORY_ID,
+      source: "manual",
+    });
+  }
+
+  // Phase 2 — strip: nodes keep only what the ledger doesn't model.
+  const nodes = {} as Record<NodeId, NodeState>;
+  for (const [id, legacy] of Object.entries(v2.nodes) as [NodeId, LegacyNodeState][]) {
+    const { data, ...rest } = legacy;
+    const node: NodeState = { ...rest };
+    if (data !== undefined) {
+      if (id === "BigEF") {
+        const months = (data as V2BigEF).targetMonths;
+        node.data = {
+          targetMonths: (months === 4 || months === 5 || months === 6 ? months : 3),
+        } satisfies NodeDataMap["BigEF"];
+      } else if (id === "College") {
+        const c = data as V2College;
+        node.data = {
+          monthlyContribution: c.monthlyContribution ?? 0,
+          ...(c.targetAge !== undefined ? { targetAge: c.targetAge } : {}),
+        } satisfies NodeDataMap["College"];
+      } else if (id === "Match" || id === "IRA" || id === "HSA" || id === "Increase401k") {
+        node.data = data as NodeState["data"];
+      }
+      // Everything else (recurring, EFs, SavePurchase, Goals, debts) is
+      // ledger-owned now — the payload is dropped.
+    }
+    nodes[id] = node;
+  }
+
+  return {
+    version: 3,
+    settings: v2.settings,
+    decisions: v2.decisions,
+    nodes,
+    budget: book,
+    shownCelebrations: v2.shownCelebrations ?? [],
+    earnedMedals: v2.earnedMedals ?? [],
+  };
+}
+
+/** `now` shifted by a (possibly fractional) number of years, as a local day. */
+function horizonDate(now: Date, years: number): string {
+  const d = new Date(now);
+  d.setMonth(d.getMonth() + Math.round(years * 12));
+  return isoDay(d);
 }
 
 function startingTxn(accountId: string, date: string, amount: number): Txn {

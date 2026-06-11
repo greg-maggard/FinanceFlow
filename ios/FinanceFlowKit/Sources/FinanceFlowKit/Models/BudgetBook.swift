@@ -32,6 +32,8 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
     public var closed: Bool?
     public var source: Source
     public var plaidAccountId: String?
+    /// Flowchart node this account reports into, if any (debt nodes, College).
+    public var nodeId: NodeId?
 
     public init(
         id: String = ShortID.make(),
@@ -41,7 +43,8 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
         minPayment: Decimal? = nil,
         closed: Bool? = nil,
         source: Source = .manual,
-        plaidAccountId: String? = nil
+        plaidAccountId: String? = nil,
+        nodeId: NodeId? = nil
     ) {
         self.id = id
         self.name = name
@@ -51,6 +54,7 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
         self.closed = closed
         self.source = source
         self.plaidAccountId = plaidAccountId
+        self.nodeId = nodeId
     }
 }
 

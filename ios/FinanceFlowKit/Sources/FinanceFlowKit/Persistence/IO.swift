@@ -34,8 +34,10 @@ public enum IO {
     public static func migrate(_ state: AppState, now: Date = Date()) throws -> AppState {
         switch state.version {
         case 1:
-            return Migration.v1ToV2(state, now: now)
+            return Migration.v2ToV3(Migration.v1ToV2(state, now: now), now: now)
         case 2:
+            return Migration.v2ToV3(state, now: now)
+        case 3:
             return state
         default:
             throw ImportError.unsupportedVersion(state.version)

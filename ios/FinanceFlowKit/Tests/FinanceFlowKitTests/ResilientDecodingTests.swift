@@ -51,4 +51,80 @@ struct ResilientDecodingTests {
         #expect(decoded.node(.IRA).data == nil)             // corrupt node reset to default
         #expect(decoded.node(.Start).completed == true)     // unrelated good data survived
     }
+
+    /// The v3 worry case: a full-fat v2 document (wide payloads, categoryMap,
+    /// budget) must come through `IO.importString` with every node's
+    /// completed/notes intact, payloads stripped to the node-only fields, and
+    /// the ledger reconciled — never a silent reset.
+    @Test("a full-fat v2 document migrates with node state intact and payloads stripped")
+    func fullFatV2DocumentMigrates() throws {
+        let v2JSON = """
+        {
+          "version": 2,
+          "settings": { "monthlyExpenses": 4000, "iraAnnualLimit": 7000, "hsaSelfLimit": 4300, "hsaFamilyLimit": 8550 },
+          "decisions": { "Q_HighDebt": "yes" },
+          "nodes": {
+            "Start": { "completed": true, "notes": "kickoff" },
+            "Rent": { "completed": true, "notes": "due on the 1st", "monthlyChecks": { "2026-05": true }, "data": {
+              "target": { "value": 1800, "source": "manual" },
+              "funded": { "value": 1800, "source": "manual" },
+              "items": [{ "id": "r1", "name": "Apartment", "target": { "value": 1800, "source": "manual" }, "funded": { "value": 1800, "source": "manual" } }]
+            } },
+            "BigEF": { "completed": false, "notes": "fund note", "data": {
+              "targetMonths": 6,
+              "balance": { "value": 0, "source": "manual" },
+              "items": [{ "id": "b1", "name": "Medical", "target": 3000, "balance": { "value": 1200, "source": "manual" } }]
+            } },
+            "HighDebt": { "completed": false, "notes": "snowball", "data": {
+              "debts": [{ "id": "d1", "name": "Visa", "balance": 4200, "apr": 24.99, "minPayment": 50, "paid": false }]
+            } },
+            "IRA": { "completed": false, "notes": "roth first", "data": {
+              "type": "roth", "ytdContribution": { "value": 2500, "source": "manual" }, "annualLimit": 7000
+            } }
+          },
+          "categoryMap": { "Rent": "ynab-cat-123" },
+          "budget": {
+            "accounts": [{ "id": "acct:cash", "name": "Cash", "kind": "cash", "source": "manual" }],
+            "transactions": [
+              { "id": "txn:start:acct:cash", "accountId": "acct:cash", "date": "2026-06-01", "payee": "Starting balance", "amount": 3000, "categoryId": "rta", "source": "manual" }
+            ],
+            "groups": [{ "id": "g:bills", "name": "Bills", "order": 0 }],
+            "categories": [
+              { "id": "Rent:r1", "groupId": "g:bills", "name": "Apartment", "order": 0, "monthlyTarget": 1800, "nodeId": "Rent" }
+            ],
+            "assignments": { "2026-06": { "Rent:r1": 1800 } }
+          }
+        }
+        """
+        let out = try IO.importString(v2JSON)
+        #expect(out.version == 3)
+
+        // Every node's non-financial state survived the migration.
+        #expect(out.node(.Start).completed == true)
+        #expect(out.node(.Start).notes == "kickoff")
+        #expect(out.node(.Rent).completed == true)
+        #expect(out.node(.Rent).notes == "due on the 1st")
+        #expect(out.node(.Rent).monthlyChecks == ["2026-05": true])
+        #expect(out.node(.BigEF).notes == "fund note")
+        #expect(out.node(.HighDebt).notes == "snowball")
+        #expect(out.node(.IRA).notes == "roth first")
+        #expect(out.decisions[.Q_HighDebt] == .yes)
+
+        // Ledger-owned payloads stripped; node-only ones kept or slimmed.
+        #expect(out.node(.Rent).data == nil)
+        #expect(out.node(.HighDebt).data == nil)
+        #expect(out.node(.BigEF).data == .bigEF(BigEFData(targetMonths: 6)))
+        #expect(out.node(.IRA).data == .ira(IRAData(
+            type: .roth,
+            ytdContribution: .manual(2500),
+            annualLimit: 7000
+        )))
+
+        // The ledger was reconciled: existing rows kept, missing ones created.
+        #expect(out.budget.categories.map(\.id) == ["Rent:r1", "BigEF:b1"])
+        #expect(out.budget.accounts.contains { $0.id == "debt:d1" && $0.nodeId == .HighDebt })
+        #expect(Ledger.accountBalance(out.budget, "debt:d1") == -4200)
+        // RTA is untouched by migration: 3000 - 1800 before, (3000+1200) - (1800+1200) after.
+        #expect(Ledger.snapshot(out.budget, month: "2099-12").readyToAssign == 1200)
+    }
 }
