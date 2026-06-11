@@ -159,6 +159,7 @@ private struct CategoryRow: View {
     let entry: Ledger.CategoryMonth
 
     @State private var token: Int?
+    @State private var showEditor = false
 
     private var isEditing: Bool { tapAway.isOpen(token) }
 
@@ -172,10 +173,24 @@ private struct CategoryRow: View {
                 Text(CurrencyFormat.string(entry.available))
                     .font(theme.typography.callout)
                     .foregroundStyle(availableColor)
+                Button {
+                    showEditor = true
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(theme.typography.caption)
+                        .foregroundStyle(theme.colors.textSecondary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Edit \(category.name)")
             }
 
             if isEditing {
                 HStack(spacing: theme.spacing.sm) {
+                    Text("Assign")
+                        .font(theme.typography.caption)
+                        .foregroundStyle(theme.colors.textSecondary)
                     NumberField(value: entry.assigned) { v in
                         store.assign(month: month, categoryID: category.id, amount: v)
                     }
@@ -211,6 +226,11 @@ private struct CategoryRow: View {
             if let target = category.monthlyTarget ?? category.balanceTarget, target > 0 {
                 targetBar(target: target)
             }
+        }
+        .sheet(isPresented: $showEditor) {
+            CategoryEditorSheet(category: category)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
     }
 
