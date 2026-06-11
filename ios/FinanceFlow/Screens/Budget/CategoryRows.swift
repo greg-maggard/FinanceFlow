@@ -153,11 +153,14 @@ struct CategoriesSection: View {
 private struct CategoryRow: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var theme
+    @Environment(TapAwayCenter.self) private var tapAway
     let category: BudgetCategory
     let month: String
     let entry: Ledger.CategoryMonth
 
-    @State private var isEditing = false
+    @State private var token: Int?
+
+    private var isEditing: Bool { tapAway.isOpen(token) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: theme.spacing.xs) {
@@ -177,14 +180,17 @@ private struct CategoryRow: View {
                         store.assign(month: month, categoryID: category.id, amount: v)
                     }
                     GlassIconButton(systemName: "checkmark") {
-                        withAnimation(theme.motion.standard) { isEditing = false }
+                        withAnimation(theme.motion.standard) {
+                            tapAway.close(token)
+                            token = nil
+                        }
                     }
                     .accessibilityLabel("Done assigning to \(category.name)")
                 }
             } else {
                 HStack {
                     Button {
-                        withAnimation(theme.motion.standard) { isEditing = true }
+                        withAnimation(theme.motion.standard) { token = tapAway.open() }
                     } label: {
                         HStack(spacing: theme.spacing.xs) {
                             Image(systemName: "pencil")
