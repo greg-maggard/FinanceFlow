@@ -57,7 +57,7 @@ describe("applyBookOps", () => {
 
     // Lower past the assignment: un-assign + one coalesced adjustment txn.
     const book = useStore.getState().budget;
-    s.applyBookOps(planBalanceEdit(book, month, catId, -25, "2026-06-10"));
+    s.applyBookOps(planBalanceEdit(book, month, catId, -25, `${month}-10`));
 
     const after = useStore.getState().budget;
     expect(after.assignments[month]?.[catId]).toBeUndefined();
