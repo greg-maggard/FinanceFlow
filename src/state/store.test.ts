@@ -1,8 +1,62 @@
-import { describe, expect, it } from "vitest";
-import { useStore } from "./store";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { adapter, flushSave, useStore } from "./store";
 import { snapshot } from "../budget/ledger";
 import { ADJUST_ACCOUNT_ID, planBalanceEdit } from "../budget/nodeLedger";
 import { ymKey } from "./recurring";
+
+// File-scope reset: a failing assertion must not leak one block's accounts,
+// transactions or assignments into the next, turning one real failure into
+// several misleading ones.
+afterEach(() => {
+  useStore.getState().reset();
+});
+
+describe("persistence debounce", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    useStore.getState().reset();
+    // Prime the debounce baseline so the reset() itself doesn't count as
+    // one of the writes a test is asserting about.
+    flushSave();
+  });
+
+  afterEach(() => {
+    flushSave();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("coalesces N rapid mutations into exactly one write", () => {
+    const spy = vi.spyOn(adapter, "save");
+    const s = useStore.getState();
+    for (let i = 0; i < 5; i++) s.setNotes("Start", `note ${i}`);
+    expect(spy).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(300);
+    expect(spy).toHaveBeenCalledTimes(1);
+    // Trailing edge: the one write reflects the last keystroke, not the first.
+    expect(spy.mock.calls[0][0].nodes.Start.notes).toBe("note 4");
+  });
+
+  it("flushSave() writes immediately without waiting for the debounce timer", () => {
+    const spy = vi.spyOn(adapter, "save");
+    useStore.getState().setNotes("Start", "flushed");
+    expect(spy).not.toHaveBeenCalled();
+    flushSave();
+    expect(spy).toHaveBeenCalledTimes(1);
+    // No duplicate write once the original timer would have fired.
+    vi.advanceTimersByTime(1000);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("a no-op set produces no write", () => {
+    const spy = vi.spyOn(adapter, "save");
+    // deleteTxn on an id that doesn't exist returns {} — a set() with no
+    // field of the persisted slice actually changing by reference.
+    useStore.getState().deleteTxn("does-not-exist");
+    vi.advanceTimersByTime(1000);
+    expect(spy).not.toHaveBeenCalled();
+  });
+});
 
 describe("deleteCategory", () => {
   it("uncategorizes its transactions and returns its assignments to RTA", () => {
@@ -40,7 +94,6 @@ describe("deleteCategory", () => {
     expect(budget.assignments).toEqual({});
     // The deleted envelope's dollars are back in the pool — nothing vanished.
     expect(snapshot(budget, "2026-06").readyToAssign).toBe(1000);
-    useStore.getState().reset();
   });
 });
 
@@ -66,6 +119,5 @@ describe("applyBookOps", () => {
     expect(adjustments[0].amount).toBe(-25);
     expect(after.accounts.some((a) => a.id === ADJUST_ACCOUNT_ID)).toBe(true);
     expect(snapshot(after, month).categories[catId].available).toBe(-25);
-    useStore.getState().reset();
   });
 });
