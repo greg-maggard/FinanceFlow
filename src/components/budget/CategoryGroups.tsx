@@ -284,16 +284,16 @@ export function ConfirmDelete({ cat, name }: { cat: Category; name?: string }) {
             return;
           }
           const reassignTo = hasTxns ? target : UNCATEGORIZED_CATEGORY_ID;
-          // w3-search-undo: deleteCategory reassigns transactions and merges
-          // monthly assignments, so nothing short of the whole pre-delete
-          // book slice round-trips byte-for-byte on undo — capture it before
-          // the delete runs, not after.
-          const preDeleteBudget = useStore.getState().budget;
-          useStore.getState().deleteCategory(cat.id, reassignTo);
+          // w3-search-undo: deleteCategory hands back an inverse patch, not a
+          // whole pre-delete book slice — undoDeleteCategory applies it over
+          // whatever the budget looks like when Undo is tapped, so edits made
+          // during the toast's five-second window survive (Finding 4).
+          const patch = useStore.getState().deleteCategory(cat.id, reassignTo);
+          if (!patch) return;
           useUI.getState().setPendingUndo({
             kind: "category",
             message: `Deleted ${label}`,
-            budget: preDeleteBudget,
+            patch,
           });
         }}
         className="w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-red-300 hover:bg-red-500/10"

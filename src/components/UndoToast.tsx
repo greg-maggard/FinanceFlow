@@ -13,9 +13,10 @@ const UNDO_MS = 5000;
  * (uiStore's `pendingUndo`) and can hand it straight back:
  *   - a transaction delete restores the exact removed row(s) verbatim
  *     (a transfer's two legs together), so the id round-trips.
- *   - a category delete restores the entire pre-delete book slice, since
- *     deleteCategory reassigns transactions and merges assignments and
- *     nothing narrower round-trips byte-for-byte.
+ *   - a category delete applies deleteCategory's inverse patch over the
+ *     *current* budget (store.ts's undoDeleteCategory) rather than replacing
+ *     the whole slice, so an assignment or transaction added during the
+ *     five-second window survives undo instead of being silently discarded.
  * Letting the toast expire — or deleting something else, which replaces the
  * pending entry outright — discards the held state for good.
  *
@@ -40,7 +41,7 @@ export function UndoToast() {
     if (pending.kind === "txn") {
       useStore.getState().restoreTxns(pending.txns);
     } else {
-      useStore.getState().restoreBudget(pending.budget);
+      useStore.getState().undoDeleteCategory(pending.patch);
     }
     useUI.getState().setPendingUndo(null);
   };
