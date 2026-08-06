@@ -79,7 +79,7 @@ describe("w3-perf: keystroke cost on a big book", () => {
     useStore.getState().replaceAll({ ...useStore.getState(), budget: makeBigBook(txnCount) });
   }
 
-  it("typing one character into a category's Assigned field invokes snapshot() at most once", () => {
+  it("typing one character into a category's Assigned field invokes snapshot() exactly once", () => {
     seedBudget(20_000);
     render(createElement(BudgetScreen));
 
@@ -91,7 +91,7 @@ describe("w3-perf: keystroke cost on a big book", () => {
     const input = screen.getAllByLabelText(/^Assigned to /)[0] as HTMLInputElement;
     fireEvent.change(input, { target: { value: "5" } });
 
-    expect(snapshotSpy.mock.calls.length).toBeLessThanOrEqual(1);
+    expect(snapshotSpy.mock.calls.length).toBe(1);
   });
 
   it("TopBar/CelebrationLayer/OverviewSheet — always-mounted siblings that don't touch `budget` — do not re-render on a Budget-screen keystroke", () => {

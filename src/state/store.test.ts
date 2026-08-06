@@ -197,6 +197,135 @@ describe("deleteCategory", () => {
   });
 });
 
+describe("undoDeleteCategory (w3-search-undo Finding 4)", () => {
+  // Reviewer-verified interleaving: delete Food -> assign 150 to Gas -> add a
+  // new transaction on Gas -> Undo. The old restoreBudget (whole pre-delete
+  // slice) silently discarded the assignment and the new transaction. The
+  // inverse patch must leave both intact while still restoring Food and
+  // conserving total assigned dollars (drift stays 0).
+  it("survives a budget edit and a new transaction made during the undo window", () => {
+    const s = useStore.getState();
+    s.reset();
+    s.addAccount({ id: "checking", name: "Checking", kind: "checking", source: "manual" });
+    s.addGroup("Envelopes");
+    const groupId = useStore.getState().budget.groups[0].id;
+    s.addCategory(groupId, "Food");
+    s.addCategory(groupId, "Gas");
+    const foodId = useStore.getState().budget.categories[0].id;
+    const gasId = useStore.getState().budget.categories[1].id;
+    s.addTxn({
+      id: "income",
+      accountId: "checking",
+      date: "2026-06-01",
+      amount: 100_000,
+      categoryId: "rta",
+      source: "manual",
+    });
+    s.addTxn({
+      id: "grocery",
+      accountId: "checking",
+      date: "2026-06-05",
+      amount: -4000,
+      categoryId: foodId,
+      source: "manual",
+    });
+    s.assign("2026-06", foodId, 10_000);
+    expect(bookIntegrity(useStore.getState().budget, "2026-06").drift).toBe(0);
+
+    // Delete Food -> its activity and assignment merge onto Gas.
+    const patch = useStore.getState().deleteCategory(foodId, gasId);
+    expect(patch).not.toBeNull();
+    expect(useStore.getState().budget.assignments["2026-06"]?.[gasId]).toBe(10_000);
+    expect(bookIntegrity(useStore.getState().budget, "2026-06").drift).toBe(0);
+
+    // Inside the 5s undo window: an explicit re-assign of Gas (an absolute
+    // set, not additive) and a brand-new transaction on Gas.
+    s.assign("2026-06", gasId, 15_000);
+    s.addTxn({
+      id: "fuel",
+      accountId: "checking",
+      date: "2026-06-06",
+      amount: -3000,
+      categoryId: gasId,
+      source: "manual",
+    });
+    expect(bookIntegrity(useStore.getState().budget, "2026-06").drift).toBe(0);
+
+    useStore.getState().undoDeleteCategory(patch!);
+
+    const budget = useStore.getState().budget;
+    // Food is back, and the transaction it originally carried moved back
+    // with it — that transaction was never touched during the window, so
+    // reclaiming it is safe.
+    expect(budget.categories.map((c) => c.id)).toContain(foodId);
+    expect(budget.transactions.find((t) => t.id === "grocery")?.categoryId).toBe(foodId);
+    expect(budget.assignments["2026-06"]?.[foodId]).toBe(10_000);
+
+    // Gas's assignment survives the undo: the 10,000 that got merged in by
+    // the delete is subtracted back out of whatever Gas holds *now*
+    // (15,000), not reset to some pre-delete snapshot — the user's edit
+    // during the window isn't erased.
+    expect(budget.assignments["2026-06"]?.[gasId]).toBe(5_000);
+    // The new transaction added during the window survives untouched.
+    expect(budget.transactions.find((t) => t.id === "fuel")?.categoryId).toBe(gasId);
+
+    // Total assigned dollars is unchanged by undo (10,000 moved from Gas
+    // back to Food), so Ready-to-Assign and drift are unaffected.
+    expect(bookIntegrity(budget, "2026-06").drift).toBe(0);
+  });
+
+  it("leaves a transaction alone if it was recategorized again during the undo window", () => {
+    const s = useStore.getState();
+    s.reset();
+    s.addAccount({ id: "checking", name: "Checking", kind: "checking", source: "manual" });
+    s.addGroup("Envelopes");
+    const groupId = useStore.getState().budget.groups[0].id;
+    s.addCategory(groupId, "Food");
+    s.addCategory(groupId, "Gas");
+    s.addCategory(groupId, "Fun");
+    const foodId = useStore.getState().budget.categories[0].id;
+    const gasId = useStore.getState().budget.categories[1].id;
+    const funId = useStore.getState().budget.categories[2].id;
+    s.addTxn({
+      id: "income",
+      accountId: "checking",
+      date: "2026-06-01",
+      amount: 100_000,
+      categoryId: "rta",
+      source: "manual",
+    });
+    s.addTxn({
+      id: "grocery",
+      accountId: "checking",
+      date: "2026-06-05",
+      amount: -4000,
+      categoryId: foodId,
+      source: "manual",
+    });
+
+    const patch = useStore.getState().deleteCategory(foodId, gasId);
+    expect(patch).not.toBeNull();
+    // The user notices the txn landed on Gas and moves it to Fun before
+    // tapping Undo.
+    s.updateTxn({
+      id: "grocery",
+      accountId: "checking",
+      date: "2026-06-05",
+      amount: -4000,
+      categoryId: funId,
+      source: "manual",
+    });
+
+    useStore.getState().undoDeleteCategory(patch!);
+
+    // Undo doesn't clobber the user's more recent choice.
+    expect(useStore.getState().budget.transactions.find((t) => t.id === "grocery")?.categoryId).toBe(
+      funId,
+    );
+    expect(bookIntegrity(useStore.getState().budget, "2026-06").drift).toBe(0);
+  });
+});
+
 describe("updateTxn", () => {
   it("corrects an amount in place: same id, same row count, no drift", () => {
     const s = useStore.getState();

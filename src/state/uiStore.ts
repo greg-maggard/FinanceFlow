@@ -1,7 +1,8 @@
 import { create } from "zustand";
-import type { BudgetBook, NodeId, Txn } from "./schema";
+import type { NodeId, Txn } from "./schema";
 import type { Direction } from "../theme/motion";
 import { flushSave } from "./store";
+import type { CategoryDeleteUndo } from "./store";
 
 export type ViewMode = "focus" | "overview" | "shelf" | "budget";
 
@@ -13,17 +14,18 @@ export type BudgetFocus = { categoryId?: string; accountId?: string };
 /**
  * What a five-second undo toast (w3-search-undo, see UndoToast.tsx) is
  * holding. A transaction delete parks the exact removed row(s) — a
- * transfer's two legs come back together. A category delete reassigns
- * transactions and merges monthly assignments, so nothing narrower than the
- * entire pre-delete book slice round-trips byte-for-byte; that slice is
- * captured by the caller (CategoryGroups) before deleteCategory runs.
+ * transfer's two legs come back together. A category delete parks an
+ * *inverse patch* (see `CategoryDeleteUndo`) rather than a whole pre-delete
+ * book slice: replacing the whole slice on undo would discard any edits
+ * made during the toast's five-second window (an assignment, a new
+ * transaction) — see store.ts's `deleteCategory`/`undoDeleteCategory`.
  * Deliberately in-memory only — never persisted, never written to the
  * document as a tombstone. It's either restored before the toast expires,
  * or it's gone for good.
  */
 export type PendingUndo =
   | { kind: "txn"; message: string; txns: Txn[] }
-  | { kind: "category"; message: string; budget: BudgetBook };
+  | { kind: "category"; message: string; patch: CategoryDeleteUndo };
 
 /**
  * Fast-entry memory (w2-fastentry): the account and, per account, the

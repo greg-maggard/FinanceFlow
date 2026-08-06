@@ -31,6 +31,33 @@ import {
 import type { StorageAdapter } from "./storage";
 import { useUI } from "./uiStore";
 
+/**
+ * Everything `undoDeleteCategory` needs to invert a `deleteCategory` call
+ * over whatever the budget looks like *now*, rather than replacing the
+ * whole slice with a pre-delete snapshot (w3-search-undo Finding 4: the
+ * snapshot approach silently destroys edits made during the toast's
+ * five-second window). Each field is scoped to exactly the rows
+ * `deleteCategory` touched:
+ *   - `category`: the deleted row itself, re-inserted verbatim.
+ *   - `txnIds`: ids of the transactions `deleteCategory` retargeted onto
+ *     `reassignTo`. Undo only reclaims a txn if it's *still* sitting on
+ *     `reassignTo` — one the user re-categorized again during the window,
+ *     or that was deleted, is left alone rather than clobbered.
+ *   - `assignments`: the deleted category's original per-month assigned
+ *     cents, keyed by month. When `carriesActivity`, that amount was merged
+ *     into `reassignTo`'s entry for the same month, so undo subtracts it
+ *     back out of whatever `reassignTo` holds *now* (not the pre-delete
+ *     value) before restoring the category's own entry — money-conserving
+ *     regardless of what happened to `reassignTo` in between.
+ */
+export type CategoryDeleteUndo = {
+  category: Category;
+  reassignTo: string;
+  carriesActivity: boolean;
+  txnIds: string[];
+  assignments: Record<MonthKey, Cents>;
+};
+
 type Store = AppState & {
   setDecision: (id: DecisionId, value: Decision) => void;
   toggleComplete: (id: NodeId) => void;
@@ -65,13 +92,18 @@ type Store = AppState & {
   addGroup: (name: string) => void;
   addCategory: (groupId: string, name: string) => void;
   updateCategory: (category: Category) => void;
-  deleteCategory: (id: string, reassignTo: string) => void;
-  /** Drops in a whole prior `budget` slice verbatim — deleteCategory's
-   *  w3-search-undo restore path. It reassigns transactions and merges
-   *  monthly assignments, so nothing narrower than the entire pre-delete
-   *  slice round-trips byte-for-byte; the caller captures that slice before
-   *  calling deleteCategory and hands it back here on undo. */
-  restoreBudget: (budget: AppState["budget"]) => void;
+  /** Returns an inverse patch (`null` for a no-op — the catch-all itself, or
+   *  `id === reassignTo`) so a caller can hand it to `undoDeleteCategory`
+   *  instead of parking a whole pre-delete book slice for w3-search-undo. */
+  deleteCategory: (id: string, reassignTo: string) => CategoryDeleteUndo | null;
+  /** Applies `deleteCategory`'s inverse patch over the *current* budget —
+   *  re-adding the category, un-reassigning transactions still sitting on
+   *  `reassignTo`, and moving each month's assigned dollars back — rather
+   *  than replacing the whole slice. This is what makes undo safe to fire
+   *  after edits happened during the toast's five-second window: an
+   *  assignment or a new transaction made after the delete survives undo
+   *  instead of being silently discarded along with the whole slice. */
+  undoDeleteCategory: (patch: CategoryDeleteUndo) => void;
   applyBookOps: (ops: BookOps) => void;
   reset: () => void;
   replaceAll: (state: AppState) => void;
@@ -353,27 +385,38 @@ export const useStore = create<Store>((set) => ({
   // An envelope no transaction ever touched has no activity to carry, so there
   // is nothing to keep together: its assignments are simply released back to
   // Ready-to-Assign, which is money-preserving precisely because activity is 0.
-  deleteCategory: (id, reassignTo) =>
+  deleteCategory: (id, reassignTo) => {
+    let patch: CategoryDeleteUndo | null = null;
     set((s) => {
       // The catch-all itself is not deletable — there would be nowhere to put
       // what it holds.
       if (id === UNCATEGORIZED_CATEGORY_ID || id === reassignTo) return {};
+      const category = s.budget.categories.find((c) => c.id === id);
+      if (!category) return {};
       const carriesActivity = s.budget.transactions.some((t) => t.categoryId === id);
       const book =
         carriesActivity && reassignTo === UNCATEGORIZED_CATEGORY_ID
           ? ensureUncategorized(s.budget)
           : s.budget;
 
+      const originalAssignments: Record<MonthKey, Cents> = {};
       const assignments: AppState["budget"]["assignments"] = {};
       for (const [month, table] of Object.entries(book.assignments)) {
         const { [id]: moved, ...rest } = table;
-        if (moved !== undefined && carriesActivity) {
-          const merged = (rest[reassignTo] ?? 0) + moved;
-          if (merged !== 0) rest[reassignTo] = cents(merged);
-          else delete rest[reassignTo];
+        if (moved !== undefined) {
+          originalAssignments[month] = moved;
+          if (carriesActivity) {
+            const merged = (rest[reassignTo] ?? 0) + moved;
+            if (merged !== 0) rest[reassignTo] = cents(merged);
+            else delete rest[reassignTo];
+          }
         }
         if (Object.keys(rest).length > 0) assignments[month] = rest;
       }
+
+      const txnIds = book.transactions.filter((t) => t.categoryId === id).map((t) => t.id);
+
+      patch = { category, reassignTo, carriesActivity, txnIds, assignments: originalAssignments };
 
       return {
         budget: {
@@ -385,8 +428,40 @@ export const useStore = create<Store>((set) => ({
           assignments,
         },
       };
+    });
+    return patch;
+  },
+  // Inverts `deleteCategory` over the *current* budget rather than replacing
+  // the slice wholesale (w3-search-undo Finding 4) — see `CategoryDeleteUndo`
+  // for why each field is applied the way it is. Every step is scoped by
+  // `patch`, so an assignment or transaction added to `reassignTo` during the
+  // toast's five-second window survives: it's simply never touched.
+  undoDeleteCategory: (patch) =>
+    set((s) => {
+      const { category, reassignTo, carriesActivity, txnIds, assignments: original } = patch;
+      const categories = s.budget.categories.some((c) => c.id === category.id)
+        ? s.budget.categories
+        : [...s.budget.categories, category];
+
+      const reclaim = new Set(txnIds);
+      const transactions = s.budget.transactions.map((t) =>
+        reclaim.has(t.id) && t.categoryId === reassignTo ? { ...t, categoryId: category.id } : t,
+      );
+
+      const assignments: AppState["budget"]["assignments"] = { ...s.budget.assignments };
+      for (const [month, moved] of Object.entries(original)) {
+        const table = { ...(assignments[month] ?? {}) };
+        if (carriesActivity) {
+          const remaining = (table[reassignTo] ?? 0) - moved;
+          if (remaining !== 0) table[reassignTo] = cents(remaining);
+          else delete table[reassignTo];
+        }
+        table[category.id] = moved;
+        assignments[month] = table;
+      }
+
+      return { budget: { ...s.budget, categories, transactions, assignments } };
     }),
-  restoreBudget: (budget) => set(() => ({ budget })),
   reset: () => set(() => ({ ...makeInitialState() })),
   replaceAll: (state) => set(() => ({ ...state })),
 }));
