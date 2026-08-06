@@ -93,9 +93,18 @@ export function AccountSelect({
 export function CategorySelect({
   value,
   onChange,
+  className,
+  ariaLabel,
+  hideNoCategory,
 }: {
   value: string;
   onChange: (id: string) => void;
+  className?: string;
+  ariaLabel?: string;
+  /** Omit the "— No category —" option — for pickers (the review queue's
+   *  inline picker) where every row must land in a real envelope, never a
+   *  blank one. */
+  hideNoCategory?: boolean;
 }) {
   const budget = useStore((s) => s.budget);
   const groups = [...budget.groups].sort((a, b) => a.order - b.order);
@@ -104,8 +113,13 @@ export function CategorySelect({
   // what brings it into being.
   const knowsUncategorized = budget.categories.some((c) => c.id === UNCATEGORIZED_CATEGORY_ID);
   return (
-    <GlassSelect value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value="">— No category —</option>
+    <GlassSelect
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className={className}
+      aria-label={ariaLabel}
+    >
+      {!hideNoCategory && <option value="">— No category —</option>}
       {!knowsUncategorized && (
         <option value={UNCATEGORIZED_CATEGORY_ID}>Uncategorized</option>
       )}
@@ -387,6 +401,7 @@ const TxnRow = memo(function TxnRow({
   accountNames,
   categoryNames,
   onEdit,
+  onCategorize,
 }: {
   txn: Txn;
   accountNames: Map<string, string>;
@@ -395,8 +410,12 @@ const TxnRow = memo(function TxnRow({
    *  about whether that's allowed — a transfer leg still opens it, and the
    *  modal is what refuses. */
   onEdit: (txn: Txn) => void;
+  /** Fires when the inline review-queue picker below lands a category — one
+   *  tap to open the native select, one tap to choose (w3-plaid-ui). */
+  onCategorize: (txn: Txn, categoryId: string) => void;
 }) {
   const isTransfer = Boolean(txn.transferAccountId);
+  const isUncategorized = txn.categoryId === UNCATEGORIZED_CATEGORY_ID;
   const title = isTransfer
     ? `Transfer ${txn.amount < 0 ? "→" : "←"} ${
         accountNames.get(txn.transferAccountId ?? "") ?? "Unknown account"
@@ -405,7 +424,12 @@ const TxnRow = memo(function TxnRow({
   const sub = [
     txn.date,
     accountNames.get(txn.accountId) ?? "Unknown account",
-    txn.categoryId ? categoryNames.get(txn.categoryId) ?? "Uncategorized" : undefined,
+    // The category name is dropped from the sub-line for an uncategorized
+    // row — the inline picker below says the same thing and is what the
+    // user actually acts on.
+    !isUncategorized && txn.categoryId
+      ? categoryNames.get(txn.categoryId) ?? "Uncategorized"
+      : undefined,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -427,6 +451,19 @@ const TxnRow = memo(function TxnRow({
         <div className="truncate text-sm font-medium text-white/90">{title}</div>
         <div className="truncate text-[11px] tabular-nums text-white/45">{sub}</div>
       </button>
+      {/* Review-queue picker (w3-plaid-ui): a sibling of the edit button, not
+          nested inside it — a <select> inside a <button> isn't valid HTML and
+          would fight the row's own click handler. Categorizing an imported
+          row is two taps total: open this native select, choose an envelope. */}
+      {isUncategorized && (
+        <CategorySelect
+          value={UNCATEGORIZED_CATEGORY_ID}
+          onChange={(categoryId) => onCategorize(txn, categoryId)}
+          className="w-32 shrink-0 !py-1.5 !text-xs"
+          ariaLabel={`Categorize ${title}`}
+          hideNoCategory
+        />
+      )}
       <span
         className={`text-sm font-semibold tabular-nums ${
           txn.amount < 0 ? "text-red-300/90" : txn.amount > 0 ? "text-emerald-300/90" : "text-white/60"
@@ -576,22 +613,72 @@ export function TransactionsSection() {
   // The row currently open in the edit modal, or null when it's closed.
   const [editingTxn, setEditingTxn] = useState<Txn | null>(null);
 
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  // Keep the user's place. `txns` gets a fresh identity on every add, delete
-  // and edit, so resetting to page 1 here would throw away their scroll
-  // position every time they delete a row — and the delete button lives
-  // inside the rows being collapsed. Only clamp when the list actually got
-  // shorter than what's on screen.
+  // w3-plaid-ui: the review queue. Counts every uncategorized row, manual
+  // entries included — this is the persistent flag for "something needs
+  // sorting", not just an import artifact, so it doubles as the badge the
+  // spec asks for regardless of how a row ended up in the catch-all.
+  const uncategorizedCount = useMemo(
+    () => allTransactions.filter((t) => t.categoryId === UNCATEGORIZED_CATEGORY_ID).length,
+    [allTransactions],
+  );
+  const [reviewOnly, setReviewOnly] = useState(false);
+  // The toggle only exists while there's something to review — once the
+  // count hits zero there's nothing left to filter down to, and leaving it
+  // on would strand the user looking at an empty list with no way back.
   useEffect(() => {
-    setVisibleCount((n) => Math.min(n, Math.max(PAGE_SIZE, txns.length)));
-  }, [txns]);
-  const visibleTxns = useMemo(() => txns.slice(0, visibleCount), [txns, visibleCount]);
-  const hasMore = visibleCount < txns.length;
+    if (uncategorizedCount === 0) setReviewOnly(false);
+  }, [uncategorizedCount]);
+  const filteredTxns = useMemo(
+    () => (reviewOnly ? txns.filter((t) => t.categoryId === UNCATEGORIZED_CATEGORY_ID) : txns),
+    [txns, reviewOnly],
+  );
+
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  // Keep the user's place. `filteredTxns` gets a fresh identity on every add,
+  // delete and edit, so resetting to page 1 here would throw away their
+  // scroll position every time they delete a row — and the delete button
+  // lives inside the rows being collapsed. Only clamp when the list actually
+  // got shorter than what's on screen.
+  useEffect(() => {
+    setVisibleCount((n) => Math.min(n, Math.max(PAGE_SIZE, filteredTxns.length)));
+  }, [filteredTxns]);
+  const visibleTxns = useMemo(
+    () => filteredTxns.slice(0, visibleCount),
+    [filteredTxns, visibleCount],
+  );
+  const hasMore = visibleCount < filteredTxns.length;
+
+  const categorize = (txn: Txn, categoryId: string) => {
+    useStore.getState().updateTxn({ ...txn, categoryId: categoryId || UNCATEGORIZED_CATEGORY_ID });
+  };
 
   return (
     <GlassCard className="px-5 py-4">
       <div className="space-y-3">
-        <SectionTitle>Transactions</SectionTitle>
+        <div className="flex items-center justify-between gap-2">
+          <SectionTitle>Transactions</SectionTitle>
+          {uncategorizedCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setReviewOnly((v) => !v)}
+              aria-pressed={reviewOnly}
+              className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium"
+              style={{
+                background: reviewOnly ? "rgba(245, 158, 11, 0.18)" : "rgba(255,255,255,0.05)",
+                border: `1px solid rgba(245, 158, 11, ${reviewOnly ? 0.45 : 0.28})`,
+                color: reviewOnly ? "#fde68a" : "rgba(252, 211, 77, 0.85)",
+              }}
+            >
+              <span
+                className="flex h-4 min-w-[1rem] items-center justify-center rounded-full px-1 text-[10px] font-semibold"
+                style={{ background: "rgba(245, 158, 11, 0.35)", color: "#fef3c7" }}
+              >
+                {uncategorizedCount}
+              </span>
+              Uncategorized
+            </button>
+          )}
+        </div>
 
         {accounts.length === 0 ? (
           <p className="text-sm text-white/65">
@@ -610,18 +697,21 @@ export function TransactionsSection() {
                   accountNames={accountNames}
                   categoryNames={categoryNames}
                   onEdit={setEditingTxn}
+                  onCategorize={categorize}
                 />
               ))}
-              {txns.length === 0 && (
+              {filteredTxns.length === 0 && (
                 <p className="py-1 text-xs text-white/40">
-                  No transactions yet — income lands in Ready to Assign.
+                  {reviewOnly
+                    ? "Nothing to review — every transaction is categorized."
+                    : "No transactions yet — income lands in Ready to Assign."}
                 </p>
               )}
             </div>
-            {txns.length > 0 && (
+            {filteredTxns.length > 0 && (
               <div className="flex items-center justify-between pt-1">
                 <span className="text-[11px] text-white/40">
-                  {visibleTxns.length.toLocaleString()} of {txns.length.toLocaleString()}
+                  {visibleTxns.length.toLocaleString()} of {filteredTxns.length.toLocaleString()}
                 </span>
                 {hasMore && (
                   <button
