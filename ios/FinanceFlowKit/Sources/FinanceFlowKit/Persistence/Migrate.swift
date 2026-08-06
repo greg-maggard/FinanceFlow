@@ -65,25 +65,28 @@ enum Migration {
         book.groups.append(CategoryGroup(id: "g:ef", name: "Emergency Fund", order: 1))
         let big = v1.node(.BigEF).data?.bigEF
         let small = v1.node(.SmallEF).data?.smallEF
-        if let big, (big.balance?.value ?? 0) > 0 || !(big.items ?? []).isEmpty {
+        switch efPayloadNode(big, small) {
+        case .BigEF:
             seedEmergencyFund(
                 node: .BigEF,
-                items: big.items,
-                balance: big.balance?.value ?? 0,
+                items: big?.items,
+                balance: big?.balance?.value ?? 0,
                 singleTarget: bigEmergencyFundTarget(
-                    months: big.targetMonths,
+                    months: big?.targetMonths ?? 3,
                     monthlyExpenses: v1.settings.monthlyExpenses
                 ),
                 addCategory: addCategory
             )
-        } else if let small {
+        case .SmallEF:
             seedEmergencyFund(
                 node: .SmallEF,
-                items: small.items,
-                balance: small.balance.value,
+                items: small?.items,
+                balance: small?.balance.value ?? 0,
                 singleTarget: emergencyFundTarget(monthlyExpenses: v1.settings.monthlyExpenses),
                 addCategory: addCategory
             )
+        default:
+            break
         }
 
         // Savings goals: SavePurchase goals plus the long-term Goals list.
@@ -243,16 +246,20 @@ enum Migration {
             }
         }
 
-        // 2. Emergency fund. If ANY union category exists the fund is
-        // ledger-managed: create only missing payload buckets, never the
-        // scalar mirror. An empty union applies the v1 rules verbatim
-        // (BigEF supersedes).
+        // 2. Emergency fund. Supersession is the same domain rule the v1
+        // migration applies (`efPayloadNode`): only the superseding node's
+        // payload seeds anything, so a document with items on BOTH nodes
+        // doesn't get both funds' buckets. `unionExists` gates exactly one
+        // thing — never create the SCALAR MIRROR when the fund is already
+        // bucketed in the ledger. Bucket creation is gated by supersession
+        // plus `catExists`.
         let big = v2.node(.BigEF).data?.bigEF
         let small = v2.node(.SmallEF).data?.smallEF
         let unionExists = book.categories.contains { $0.nodeId == .SmallEF || $0.nodeId == .BigEF }
-        if unionExists {
-            for (node, items) in [(NodeId.BigEF, big?.items), (NodeId.SmallEF, small?.items)] {
-                for bucket in items ?? [] {
+        if let node = efPayloadNode(big, small) {
+            let items = (node == .BigEF ? big?.items : small?.items) ?? []
+            if !items.isEmpty {
+                for bucket in items {
                     let id = "\(node.rawValue):\(bucket.id)"
                     if catExists(id) { continue }
                     addCat(
@@ -266,26 +273,20 @@ enum Migration {
                         seed: bucket.balance.value
                     )
                 }
+            } else if !unionExists {
+                seedEmergencyFund(
+                    node: node,
+                    items: nil,
+                    balance: node == .BigEF ? (big?.balance?.value ?? 0) : (small?.balance.value ?? 0),
+                    singleTarget: node == .BigEF
+                        ? bigEmergencyFundTarget(
+                            months: big?.targetMonths ?? 3,
+                            monthlyExpenses: v2.settings.monthlyExpenses
+                        )
+                        : emergencyFundTarget(monthlyExpenses: v2.settings.monthlyExpenses),
+                    addCategory: addCat
+                )
             }
-        } else if let big, (big.balance?.value ?? 0) > 0 || !(big.items ?? []).isEmpty {
-            seedEmergencyFund(
-                node: .BigEF,
-                items: big.items,
-                balance: big.balance?.value ?? 0,
-                singleTarget: bigEmergencyFundTarget(
-                    months: big.targetMonths,
-                    monthlyExpenses: v2.settings.monthlyExpenses
-                ),
-                addCategory: addCat
-            )
-        } else if let small {
-            seedEmergencyFund(
-                node: .SmallEF,
-                items: small.items,
-                balance: small.balance.value,
-                singleTarget: emergencyFundTarget(monthlyExpenses: v2.settings.monthlyExpenses),
-                addCategory: addCat
-            )
         }
 
         // 3. SavePurchase / Goals. Goals' horizonYears becomes a target date.
@@ -466,6 +467,19 @@ enum Migration {
         let shift = NSDecimalNumber(decimal: rounded).intValue
         let shifted = Calendar.current.date(byAdding: .month, value: shift, to: now) ?? now
         return Ledger.isoDay(shifted)
+    }
+
+    /// Which EF payload node supersedes the other. SmallEF grows into BigEF —
+    /// one real-world fund — so when BigEF holds any data it is the superset
+    /// and SmallEF is not seeded a second time. This is a DOMAIN rule, not a
+    /// v1 rule: it has to hold wherever payload-to-ledger seeding happens, or
+    /// a v2 document carrying items on both nodes gets both funds' buckets and
+    /// two starting inflows for one fund's worth of cash. Mirrors
+    /// `efPayloadNode` in `src/state/io.ts`.
+    private static func efPayloadNode(_ big: BigEFData?, _ small: SmallEFData?) -> NodeId? {
+        if let big, (big.balance?.value ?? 0) > 0 || !(big.items ?? []).isEmpty { return .BigEF }
+        if small != nil { return .SmallEF }
+        return nil
     }
 
     private static func seedEmergencyFund(

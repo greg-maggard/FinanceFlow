@@ -109,6 +109,20 @@ type V2College = { monthlyContribution: number; balance?: SourcedNumber; targetA
 
 type LegacyNodeState = Omit<NodeState, "data"> & { data?: unknown };
 
+/**
+ * Which EF payload node supersedes the other. SmallEF grows into BigEF — one
+ * real-world fund — so when BigEF holds any data it is the superset and
+ * SmallEF is not seeded a second time. This is a DOMAIN rule, not a v1 rule:
+ * it has to hold wherever payload-to-ledger seeding happens, or a v2 document
+ * carrying items on both nodes gets both funds' buckets and two starting
+ * inflows for one fund's worth of cash.
+ */
+function efPayloadNode(big: V2BigEF | undefined, small: V2SmallEF | undefined): NodeId | null {
+  if (big && ((big.balance?.value ?? 0) > 0 || (big.items?.length ?? 0) > 0)) return "BigEF";
+  if (small) return "SmallEF";
+  return null;
+}
+
 type V1State = {
   version: 1;
   settings: Settings;
@@ -188,12 +202,7 @@ function migrateV1(v1: V1State, now: Date): V2State {
   book.groups.push({ id: GROUP_EF, name: "Emergency Fund", order: 1 });
   const big = v1.nodes.BigEF?.data as V2BigEF | undefined;
   const small = v1.nodes.SmallEF?.data as V2SmallEF | undefined;
-  const efNode: NodeId | null =
-    big && ((big.balance?.value ?? 0) > 0 || (big.items?.length ?? 0) > 0)
-      ? "BigEF"
-      : small
-        ? "SmallEF"
-        : null;
+  const efNode = efPayloadNode(big, small);
   if (efNode) {
     const data = (efNode === "BigEF" ? big : small) as V2BigEF & V2SmallEF;
     if (data.items?.length) {
@@ -376,63 +385,50 @@ function migrateV2(v2: V2State, now: Date): AppState {
     }
   }
 
-  // 2. Emergency fund. If ANY union category exists the fund is
-  // ledger-managed: create only missing payload buckets, never the scalar
-  // mirror. An empty union applies the v1 rules verbatim (BigEF supersedes).
+  // 2. Emergency fund. Supersession is the same domain rule the v1 migration
+  // applies (`efPayloadNode`): only the superseding node's payload seeds
+  // anything, so a document with items on BOTH nodes doesn't get both funds'
+  // buckets. `unionExists` gates exactly one thing — never create the SCALAR
+  // MIRROR when the fund is already bucketed in the ledger. Bucket creation is
+  // gated by supersession plus `catExists`.
   const big = v2.nodes.BigEF?.data as V2BigEF | undefined;
   const small = v2.nodes.SmallEF?.data as V2SmallEF | undefined;
   const unionExists = book.categories.some(
     (c) => c.nodeId === "SmallEF" || c.nodeId === "BigEF",
   );
-  if (unionExists) {
-    for (const [node, data] of [["BigEF", big], ["SmallEF", small]] as const) {
-      for (const bucket of data?.items ?? []) {
-        const id = `${node}:${bucket.id}`;
+  const efNode = efPayloadNode(big, small);
+  if (efNode) {
+    const data = (efNode === "BigEF" ? big : small) as V2BigEF & V2SmallEF;
+    if (data.items?.length) {
+      for (const bucket of data.items) {
+        const id = `${efNode}:${bucket.id}`;
         if (catExists(id)) continue;
         addCat(
-          { id, groupId: GROUP_EF, name: bucket.name, balanceTarget: bucket.target, nodeId: node },
+          {
+            id,
+            groupId: GROUP_EF,
+            name: bucket.name,
+            balanceTarget: bucket.target,
+            nodeId: efNode,
+          },
           bucket.balance.value,
         );
       }
-    }
-  } else {
-    const efNode: NodeId | null =
-      big && ((big.balance?.value ?? 0) > 0 || (big.items?.length ?? 0) > 0)
-        ? "BigEF"
-        : small
-          ? "SmallEF"
-          : null;
-    if (efNode) {
-      const data = (efNode === "BigEF" ? big : small) as V2BigEF & V2SmallEF;
-      if (data.items?.length) {
-        for (const bucket of data.items) {
-          addCat(
-            {
-              id: `${efNode}:${bucket.id}`,
-              groupId: GROUP_EF,
-              name: bucket.name,
-              balanceTarget: bucket.target,
-              nodeId: efNode,
-            },
-            bucket.balance.value,
-          );
-        }
-      } else if ((data.balance?.value ?? 0) > 0) {
-        const target =
-          efNode === "BigEF"
-            ? bigEmergencyFundTarget(big!.targetMonths, v2.settings.monthlyExpenses)
-            : emergencyFundTarget(v2.settings.monthlyExpenses);
-        addCat(
-          {
-            id: efNode,
-            groupId: GROUP_EF,
-            name: "Emergency Fund",
-            balanceTarget: target > 0 ? target : undefined,
-            nodeId: efNode,
-          },
-          data.balance!.value,
-        );
-      }
+    } else if (!unionExists && (data.balance?.value ?? 0) > 0) {
+      const target =
+        efNode === "BigEF"
+          ? bigEmergencyFundTarget(big!.targetMonths, v2.settings.monthlyExpenses)
+          : emergencyFundTarget(v2.settings.monthlyExpenses);
+      addCat(
+        {
+          id: efNode,
+          groupId: GROUP_EF,
+          name: "Emergency Fund",
+          balanceTarget: target > 0 ? target : undefined,
+          nodeId: efNode,
+        },
+        data.balance!.value,
+      );
     }
   }
 

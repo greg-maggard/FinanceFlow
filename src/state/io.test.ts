@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { SourcedNumber } from "./schema";
 import { makeInitialState } from "./schema";
 import { exportJson, importJson, migrate } from "./io";
-import { accountBalance, snapshot } from "../budget/ledger";
+import { accountBalance, bookIntegrity, snapshot } from "../budget/ledger";
 
 const NOW = new Date(2026, 5, 10); // 2026-06-10 local
 
@@ -183,6 +183,39 @@ describe("v1 -> v3 chain", () => {
     expect(out.nodes.Rent.notes).toBe("due on the 1st");
     expect(out.nodes.Rent.monthlyChecks).toEqual({ "2026-05": true });
     expect(out.decisions).toEqual(makeRichV1().decisions);
+  });
+
+  // Bug 1: supersession ("SmallEF grows into BigEF; one real-world fund") is a
+  // DOMAIN rule, so it has to survive the v2 leg of the chain too. Before the
+  // fix, migrateV1 seeded only BigEF's bucket but left both payloads intact,
+  // and migrateV2's unionExists branch then resurrected SmallEF's bucket with
+  // a SECOND starting inflow — $2,200 of cash for a $1,200 fund.
+  it("supersedes SmallEF even when BOTH emergency-fund nodes carry items", () => {
+    const v1 = makeV1();
+    v1.settings.monthlyExpenses = 4000;
+    v1.nodes.BigEF.data = {
+      targetMonths: 6,
+      balance: m(0),
+      items: [{ id: "b1", name: "Medical", target: 3000, balance: m(1200) }],
+    };
+    v1.nodes.SmallEF.data = {
+      balance: m(1000),
+      items: [{ id: "s1", name: "Starter", target: 1000, balance: m(1000) }],
+    };
+
+    const out = migrate(v1, NOW);
+    expect(out.budget.categories.map((c) => c.id)).toEqual(["BigEF:b1"]);
+    expect(out.budget.assignments).toEqual({ "2026-06": { "BigEF:b1": 1200 } });
+
+    const inflows = out.budget.transactions.filter((t) => t.categoryId === "rta");
+    expect(inflows).toHaveLength(1);
+    expect(inflows[0]).toMatchObject({ accountId: "acct:cash", amount: 1200 });
+    expect(accountBalance(out.budget, "acct:cash")).toBe(1200);
+
+    const june = snapshot(out.budget, "2026-06");
+    expect(june.readyToAssign).toBe(0);
+    expect(june.categories["BigEF:b1"].available).toBe(1200);
+    expect(bookIntegrity(out.budget, "2026-06").drift).toBe(0);
   });
 });
 
