@@ -1,0 +1,69 @@
+{
+  "accounts": [
+    {
+      "id": "acct-chk",
+      "name": "Total Checking",
+      "kind": "checking",
+      "source": "plaid",
+      "plaidAccountId": "plaid-acct-chk"
+    },
+    {
+      "id": "acct-visa",
+      "name": "Freedom Unlimited",
+      "kind": "credit",
+      "source": "plaid",
+      "plaidAccountId": "plaid-acct-visa"
+    }
+  ],
+  "transactions": [
+    {
+      "id": "txn:start:acct-chk",
+      "accountId": "acct-chk",
+      "date": "2026-07-01",
+      "payee": "Starting balance",
+      "amount": 78861,
+      "categoryId": "rta",
+      "source": "manual"
+    },
+    {
+      "id": "txn:start:acct-visa",
+      "accountId": "acct-visa",
+      "date": "2026-07-01",
+      "payee": "Starting balance",
+      "amount": -85036,
+      "categoryId": "rta",
+      "source": "manual"
+    },
+    {
+      "id": "txn:plaid:syn:plaid-acct-chk|2026-07-31|-13842|CITY UTILITIES#0",
+      "accountId": "acct-chk",
+      "date": "2026-07-31",
+      "payee": "City Utilities",
+      "amount": -13842,
+      "categoryId": "cat:bills",
+      "source": "plaid",
+      "plaidTxnId": "syn:plaid-acct-chk|2026-07-31|-13842|CITY UTILITIES#0"
+    }
+  ],
+  "groups": [
+    {
+      "id": "g:bills",
+      "name": "Bills",
+      "order": 0
+    }
+  ],
+  "categories": [
+    {
+      "id": "cat:bills",
+      "groupId": "g:bills",
+      "name": "Utilities",
+      "order": 0,
+      "monthlyTarget": 15000
+    }
+  ],
+  "assignments": {
+    "2026-07": {
+      "cat:bills": 15000
+    }
+  }
+}

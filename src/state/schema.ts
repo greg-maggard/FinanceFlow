@@ -219,8 +219,13 @@ export const SYSTEM_GROUP_ID = "g:system";
  * so `linkedCategories` keeps it out of every flowchart node's math.
  */
 export const UNCATEGORIZED_CATEGORY_ID = "cat:uncategorized";
-/** Sorts the system group and its envelope after anything the user makes. */
-const SYSTEM_ORDER = 999_999;
+/**
+ * Sorts the system group and its envelope after anything the user makes.
+ * Exported because planners that materialize the system envelope as *ops*
+ * rather than by mutating a book (see `planPlaidImport`) have to spell the
+ * same order, and a second literal is a second thing to drift.
+ */
+export const SYSTEM_ORDER = 999_999;
 
 /**
  * Materialize the system group + Uncategorized envelope if they aren't there
