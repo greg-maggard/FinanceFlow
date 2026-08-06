@@ -273,6 +273,104 @@ describe("TransactionsSection", () => {
     expect(bookIntegrity(budget, "2024-01").drift).toBe(0);
   });
 
+  // w3-plaid-ui: the review queue — a count badge, a filter toggle behind
+  // it, and a two-tap inline category picker on each uncategorized row.
+  it("shows a badge with the uncategorized count, and hides it once nothing is left to review", () => {
+    seedAccount();
+    useStore.getState().addGroup("Everyday");
+    const groupId = useStore.getState().budget.groups[0].id;
+    useStore.getState().addCategory(groupId, "Coffee Shops");
+    const categoryId = useStore.getState().budget.categories[0].id;
+    useStore.getState().addTxn({
+      id: "u1",
+      accountId: "checking",
+      date: "2024-01-05",
+      payee: "Coffee Roasters",
+      amount: -450,
+      categoryId: UNCATEGORIZED_CATEGORY_ID,
+      source: "plaid",
+      plaidTxnId: "syn:1",
+    });
+    render(<TransactionsSection />);
+
+    const badge = screen.getByRole("button", { name: /Uncategorized/ });
+    expect(badge).toBeInTheDocument();
+    expect(badge).toHaveTextContent("1");
+
+    fireEvent.change(screen.getByLabelText("Categorize Coffee Roasters"), {
+      target: { value: categoryId },
+    });
+
+    expect(screen.queryByRole("button", { name: /Uncategorized/ })).toBeNull();
+  });
+
+  it("filters down to the review queue behind the badge toggle", () => {
+    seedAccount();
+    useStore.getState().addTxn({
+      id: "u1",
+      accountId: "checking",
+      date: "2024-01-05",
+      payee: "Coffee Roasters",
+      amount: -450,
+      categoryId: UNCATEGORIZED_CATEGORY_ID,
+      source: "plaid",
+      plaidTxnId: "syn:1",
+    });
+    useStore.getState().addTxn({
+      id: "c1",
+      accountId: "checking",
+      date: "2024-01-06",
+      payee: "Already sorted",
+      amount: -1000,
+      categoryId: "some-other-envelope",
+      source: "manual",
+    });
+    render(<TransactionsSection />);
+
+    expect(screen.getByText("Already sorted")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Uncategorized/ }));
+    expect(screen.getByText("Coffee Roasters")).toBeInTheDocument();
+    expect(screen.queryByText("Already sorted")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Uncategorized/ }));
+    expect(screen.getByText("Already sorted")).toBeInTheDocument();
+  });
+
+  it("categorizes an uncategorized row in two taps from the review queue, and the badge counts down", () => {
+    seedAccount();
+    useStore.getState().addGroup("Everyday");
+    const groupId = useStore.getState().budget.groups[0].id;
+    useStore.getState().addCategory(groupId, "Coffee Shops");
+    const categoryId = useStore.getState().budget.categories[0].id;
+
+    useStore.getState().addTxn({
+      id: "u1",
+      accountId: "checking",
+      date: "2024-01-05",
+      payee: "Coffee Roasters",
+      amount: -450,
+      categoryId: UNCATEGORIZED_CATEGORY_ID,
+      source: "plaid",
+      plaidTxnId: "syn:1",
+    });
+    render(<TransactionsSection />);
+
+    // Tap 1: filter into the review queue.
+    fireEvent.click(screen.getByRole("button", { name: /Uncategorized/ }));
+    // Tap 2 (a native select stands in for open+choose in jsdom): pick the
+    // envelope from the inline picker.
+    fireEvent.change(screen.getByLabelText("Categorize Coffee Roasters"), {
+      target: { value: categoryId },
+    });
+
+    const budget = useStore.getState().budget;
+    expect(budget.transactions.find((t) => t.id === "u1")?.categoryId).toBe(categoryId);
+    expect(bookIntegrity(budget, "2024-01").drift).toBe(0);
+    // Nothing left to review — the badge and the queue are both gone.
+    expect(screen.queryByRole("button", { name: /Uncategorized/ })).toBeNull();
+    expect(screen.getByText("Coffee Roasters")).toBeInTheDocument();
+  });
+
   it("renders the empty state with no transactions", () => {
     seedAccount();
     render(<TransactionsSection />);

@@ -10,6 +10,7 @@ import { readLatestBackup } from "../state/storage";
 import { GlassCard } from "./glass/GlassCard";
 import { FieldLabel } from "./glass/GlassInput";
 import { NumberField } from "./glass/NumberField";
+import { PlaidImportSheet } from "./budget/PlaidImportSheet";
 
 const RESET_PHRASE = "RESET";
 
@@ -70,6 +71,35 @@ function BackupSection() {
       <span className="text-[11px] text-white/45">
         Your data lives only on this device.
       </span>
+    </div>
+  );
+}
+
+/**
+ * Import the nightly Plaid snapshot (w3-plaid-ui) — a file importer, not a
+ * live integration; see PlaidImportSheet for why. Lives right next to the
+ * Export/Import backup buttons above, the other place a file makes its way
+ * into the book.
+ */
+function PlaidImportSection() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="space-y-1.5">
+      <FieldLabel>Bank import</FieldLabel>
+      <button
+        onClick={() => setOpen(true)}
+        className="w-full rounded-full px-3 py-2 text-[12px] font-medium text-white/70 hover:text-white/95"
+        style={{
+          background: "rgba(255,255,255,0.05)",
+          border: "1px solid rgba(255,255,255,0.10)",
+        }}
+      >
+        Import bank snapshot
+      </button>
+      <span className="text-[11px] text-white/45">
+        Reads the nightly snapshot file — nothing here talks to the network.
+      </span>
+      <PlaidImportSheet open={open} onClose={() => setOpen(false)} />
     </div>
   );
 }
@@ -311,6 +341,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
               </div>
               <div className="space-y-4">
                 <BackupSection />
+                <PlaidImportSection />
                 <label className="block space-y-1.5">
                   <FieldLabel>Monthly expenses ($)</FieldLabel>
                   <NumberField
