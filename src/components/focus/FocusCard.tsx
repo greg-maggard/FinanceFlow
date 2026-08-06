@@ -19,6 +19,11 @@ import { advance, findCurrentNode } from "./advance";
 import { KebabMenu } from "../glass/KebabMenu";
 import { isCheckedThisMonth, ymKey } from "../../state/recurring";
 
+function monthNameFor(key: string): string {
+  const [y, m] = key.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleString(undefined, { month: "long" });
+}
+
 export function FocusCard({ nodeId }: { nodeId: NodeId }) {
   const node = GRAPH_BY_ID[nodeId];
   const state = useStore();
@@ -41,9 +46,8 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
   const isFreshCelebration = pendingCelebration?.id === nodeId;
   const fullCelebration = isFreshCelebration && (pendingCelebration?.onPath ?? false);
 
-  const isMarkedDone = recurring
-    ? isCheckedThisMonth(nodeState)
-    : nodeState.completed;
+  const isMarkedDone = nodeState.completed;
+  const checkedThisMonth = recurring && isCheckedThisMonth(nodeState);
 
   const upNextId = useMemo(() => {
     if (isOnPath || isMarkedDone) return null;
@@ -68,15 +72,17 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
   const onMarkComplete = () => {
     if (!canMarkComplete) return;
     const wasOnPath = isOnPath;
-    if (recurring) markRecurringDone(true);
-    else useStore.getState().toggleComplete(nodeId);
+    useStore.getState().toggleComplete(nodeId);
     triggerCelebration(nodeId, wasOnPath);
     advance(nodeId);
   };
 
   const onReopen = () => {
-    if (recurring) markRecurringDone(false);
-    else useStore.getState().toggleComplete(nodeId);
+    useStore.getState().toggleComplete(nodeId);
+  };
+
+  const onToggleCheckIn = () => {
+    markRecurringDone(!checkedThisMonth);
   };
 
   const onDecide = (answer: "yes" | "no") => {
@@ -145,7 +151,7 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
                     border: "1px solid rgba(52, 211, 153, 0.32)",
                   }}
                 >
-                  {recurring ? "Done this month" : "Complete"}
+                  Complete
                 </motion.span>
               )}
               {recurring && <StreakChip node={nodeState} glow={phaseColor.glow} />}
@@ -283,7 +289,28 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
               </AnimatePresence>
             </div>
 
-            <div className="flex min-h-[44px] items-center justify-end pt-2">
+            <div
+              className={`flex min-h-[44px] items-center gap-3 pt-2 ${
+                recurring ? "justify-between" : "justify-end"
+              }`}
+            >
+              {recurring && (
+                <button
+                  type="button"
+                  onClick={onToggleCheckIn}
+                  aria-pressed={checkedThisMonth}
+                  className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                    checkedThisMonth
+                      ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-200"
+                      : "border-white/15 bg-white/5 text-white/60 hover:text-white/85"
+                  }`}
+                >
+                  <span aria-hidden>{checkedThisMonth ? "✓" : "○"}</span>
+                  {checkedThisMonth
+                    ? `Checked in for ${monthNameFor(ymKey())}`
+                    : `Check in for ${monthNameFor(ymKey())}`}
+                </button>
+              )}
               <AnimatePresence mode="wait" initial={false}>
                 {isMarkedDone ? (
                   <motion.div

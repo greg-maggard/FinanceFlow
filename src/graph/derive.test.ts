@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { RTA_CATEGORY_ID, makeInitialState } from "../state/schema";
 import type { AppState, Category, NodeId } from "../state/schema";
-import { deriveStatus, monthlyBudgetSummary } from "./derive";
+import { deriveStatus, monthlyBudgetSummary, overallProgress } from "./derive";
+import { ymKey } from "../state/recurring";
 
 function complete(state: AppState, ids: NodeId[]): AppState {
   const next = structuredClone(state);
@@ -26,6 +27,24 @@ describe("deriveStatus", () => {
     const d = deriveStatus(s);
     expect(d.Start).toBe("done");
     expect(d.Rent).toBe("current");
+  });
+
+  it("marking a recurring node complete (toggleComplete) advances the graph to the next node", () => {
+    let s = makeInitialState();
+    s = complete(s, ["Start", "Rent"]);
+    const d = deriveStatus(s);
+    expect(d.Rent).toBe("done");
+    expect(d.Food).toBe("current");
+  });
+
+  it("setting monthlyChecks alone (monthly check-in) leaves overallProgress unchanged", () => {
+    const s = makeInitialState();
+    const before = overallProgress(s);
+    const withCheckIn = structuredClone(s);
+    withCheckIn.nodes.Rent.monthlyChecks = { [ymKey()]: true };
+    const after = overallProgress(withCheckIn);
+    expect(after).toEqual(before);
+    expect(deriveStatus(withCheckIn).Rent).toBe("upcoming");
   });
 
   it("walks through Step 0 linearly", () => {
