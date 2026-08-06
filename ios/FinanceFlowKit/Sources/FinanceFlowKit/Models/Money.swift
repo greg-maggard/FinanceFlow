@@ -86,7 +86,19 @@ public struct Money: Hashable, Codable, Comparable, AdditiveArithmetic, Sendable
         // unguarded `Int(...)` conversion TRAPS on those — a crash loop at
         // launch on a document we are contractually not allowed to destroy.
         // Clamp instead; the web mirror clamps to the same zero.
-        guard scaled.isFinite, scaled >= Double(Int.min), scaled <= Double(Int.max) else {
+        //
+        // The upper bound is STRICT, and that asymmetry is load-bearing.
+        // `Double(Int.max)` is not Int.max: 2⁶³-1 has no double image, so the
+        // conversion rounds UP to 2⁶³ = 9223372036854775808.0, one past the
+        // largest representable Int. A `<=` here admits exactly that value and
+        // hands it to `Int(_:)`, which traps with SIGTRAP — not a throw, so no
+        // `catch` in `AppStore.bootstrap` ever runs and the app dies on launch
+        // on precisely the hostile document this guard exists to survive.
+        // `"amount": 92233720368547758.08` in a v3 document reaches exactly
+        // 2⁶³ after `d * 100 + 0.5` (see MoneyBoundsTests).
+        // `Double(Int.min)` is exactly -2⁶³ (a power of two, exactly
+        // representable), so `>=` is already right on that side.
+        guard scaled.isFinite, scaled >= Double(Int.min), scaled < Double(Int.max) else {
             return .zero
         }
         return Money(cents: Int(scaled))

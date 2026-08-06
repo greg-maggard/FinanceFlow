@@ -83,7 +83,7 @@ describe("loadInitial recovery (boot path)", () => {
   // the debounced write replaces the stored bytes with the v4 image. The
   // ORIGINAL bytes must be parked under their own version key first, or a bad
   // migration is unrecoverable from inside the app.
-  it("stashes the pre-migration bytes under financeflow:backup:v3 before upgrading", async () => {
+  it("stashes the pre-migration bytes under financeflow:premigration:v3 before upgrading", async () => {
     const v3 = {
       version: 3,
       settings: { iraAnnualLimit: 7000, hsaSelfLimit: 4300, hsaFamilyLimit: 8550 },
@@ -107,18 +107,18 @@ describe("loadInitial recovery (boot path)", () => {
     expect(getBootRecovery()).toBeNull();
     expect(useStore.getState().version).toBe(4);
     // Byte-for-byte the document that was there before the upgrade ran.
-    const envelope = JSON.parse(localStorage.getItem("financeflow:backup:v3")!);
+    const envelope = JSON.parse(localStorage.getItem("financeflow:premigration:v3")!);
     expect(envelope.raw).toBe(raw);
   });
 
   it("never clobbers an existing pre-migration backup", async () => {
     const older = JSON.stringify({ at: 1, raw: '{"version":3,"note":"the one to keep"}' });
-    localStorage.setItem("financeflow:backup:v3", older);
+    localStorage.setItem("financeflow:premigration:v3", older);
     localStorage.setItem(KEY, JSON.stringify({ ...JSON.parse(JSON.stringify(V3_DOC)) }));
 
     await import("./store");
 
-    expect(localStorage.getItem("financeflow:backup:v3")).toBe(older);
+    expect(localStorage.getItem("financeflow:premigration:v3")).toBe(older);
   });
 
   it("F10 case A: routes a bare {version:4} document to recovery, not a silent boot", async () => {

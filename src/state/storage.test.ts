@@ -1,5 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { maybePromoteBackup, readLatestBackup } from "./storage";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { backupPreMigration, maybePromoteBackup, readLatestBackup } from "./storage";
+import { failWritesTo, restoreStorage } from "../test/quotaStorage";
 
 // w3-backup-key: pure unit tests for the rolling last-known-good backup.
 // `maybePromoteBackup`/`readLatestBackup` take an explicit `now` (backup
@@ -71,6 +72,73 @@ describe("maybePromoteBackup", () => {
   });
 });
 
+// The one-shot pre-migration copy. Two properties the rolling backup does not
+// have: its own key prefix (so a rolling promotion can't starve it), and a
+// reported success/failure (so store.ts can gate the migration on it).
+describe("backupPreMigration", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    restoreStorage();
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
+  it("writes under its own premigration prefix, not the rolling backup key", () => {
+    const raw = JSON.stringify({ version: 3, doc: "pre-migration" });
+    expect(backupPreMigration(3, raw, 1000)).toBe(true);
+
+    expect(JSON.parse(localStorage.getItem("financeflow:premigration:v3")!)).toEqual({
+      at: 1000,
+      raw,
+    });
+    expect(localStorage.getItem("financeflow:backup:v3")).toBeNull();
+  });
+
+  // F3: the starvation case, at the level of the two helpers. A rolling
+  // promotion a minute earlier must not consume the pre-migration slot.
+  it("is not starved by a rolling promotion taken moments earlier", () => {
+    const yesterdaysDoc = JSON.stringify({ version: 3, doc: "24h stale" });
+    const atMigration = JSON.stringify({ version: 3, doc: "the bytes being migrated" });
+
+    maybePromoteBackup(yesterdaysDoc, 1000); // rolling snapshot, occupies backup:v3
+    expect(backupPreMigration(3, atMigration, 61_000)).toBe(true);
+
+    // Two distinct slots, each holding what its own policy says it should.
+    expect(JSON.parse(localStorage.getItem("financeflow:backup:v3")!).raw).toBe(yesterdaysDoc);
+    expect(JSON.parse(localStorage.getItem("financeflow:premigration:v3")!).raw).toBe(atMigration);
+
+    // ...and the fresher of the two is what recovery offers.
+    expect(readLatestBackup()).toEqual({ at: 61_000, raw: atMigration });
+  });
+
+  it("write-once: reports success without clobbering an existing pre-migration copy", () => {
+    const keeper = JSON.stringify({ version: 3, doc: "the one to keep" });
+    expect(backupPreMigration(3, keeper, 1000)).toBe(true);
+    expect(backupPreMigration(3, JSON.stringify({ version: 3, doc: "newer" }), 2000)).toBe(true);
+
+    expect(JSON.parse(localStorage.getItem("financeflow:premigration:v3")!)).toEqual({
+      at: 1000,
+      raw: keeper,
+    });
+  });
+
+  it("reports failure — does NOT swallow it — when the write can't be made", () => {
+    failWritesTo(/^financeflow:premigration:/);
+
+    expect(backupPreMigration(3, JSON.stringify({ version: 3 }), 1000)).toBe(false);
+    expect(localStorage.getItem("financeflow:premigration:v3")).toBeNull();
+  });
+
+  it("a failed rolling promotion stays best-effort and throws nothing", () => {
+    failWritesTo(/^financeflow:backup:/);
+
+    expect(() => maybePromoteBackup(JSON.stringify({ version: 3 }), 1000)).not.toThrow();
+  });
+});
+
 describe("readLatestBackup", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -96,6 +164,27 @@ describe("readLatestBackup", () => {
     const latest = readLatestBackup();
     expect(latest?.at).toBe(2000);
     expect(latest?.raw).toBe('{"version":4,"doc":"new"}');
+  });
+
+  // F3: the two mechanisms have separate keys now, so recovery has to read
+  // both prefixes and offer the freshest — in EITHER direction.
+  it("prefers the freshest across the rolling and pre-migration prefixes", () => {
+    localStorage.setItem(
+      "financeflow:premigration:v3",
+      JSON.stringify({ at: 1000, raw: '{"version":3,"doc":"at migration"}' }),
+    );
+    localStorage.setItem(
+      "financeflow:backup:v4",
+      JSON.stringify({ at: 2000, raw: '{"version":4,"doc":"rolling, newer"}' }),
+    );
+    expect(readLatestBackup()?.raw).toBe('{"version":4,"doc":"rolling, newer"}');
+
+    // Same two keys, opposite ages: the pre-migration copy now wins.
+    localStorage.setItem(
+      "financeflow:premigration:v3",
+      JSON.stringify({ at: 3000, raw: '{"version":3,"doc":"at migration"}' }),
+    );
+    expect(readLatestBackup()?.raw).toBe('{"version":3,"doc":"at migration"}');
   });
 
   it("skips an unreadable envelope under a backup-prefixed key instead of throwing", () => {

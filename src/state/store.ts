@@ -105,6 +105,17 @@ export function getBootRecovery(): BootRecovery | null {
 /** The key name is historic — migrate() upgrades v1/v2 documents in place. */
 const STORAGE_KEY = "financeflow:state:v1";
 
+/**
+ * Shown by RecoveryScreen when the pre-migration backup couldn't be written,
+ * so the upgrade was blocked rather than performed unbacked. Mirrored on iOS
+ * as `AppStore.backupBlockedMessage` — same situation, same promise: nothing
+ * has been changed.
+ */
+export const MIGRATION_BLOCKED_MESSAGE =
+  "FinanceFlow couldn't save a backup copy of your data before upgrading it to the new format — " +
+  "this browser's storage is full. Your existing data has NOT been changed, and nothing is being " +
+  "saved this session. Download your data below, then free up space and reload.";
+
 /** Raw stored bytes, if any — for App.tsx's error boundary (F10 belt-and-
  *  braces) to hand to RecoveryScreen when a render crash happens *after*
  *  a successful boot, so the user still gets a download button instead of
@@ -138,9 +149,23 @@ function loadInitial(): AppState {
     // (RecoveryScreen / SettingsModal read this key). `maybePromoteBackup`'s
     // rolling snapshot is throttled to once a day and cannot be relied on to
     // fire at this one instant — see storage.ts.
+    //
+    // The backup GATES the migration. Its failure was previously swallowed
+    // while the overwrite proceeded anyway, and the two are correlated rather
+    // than independent: writing the backup ADDS a second whole copy of the
+    // document, the live save merely REPLACES one, so under quota pressure the
+    // backup is exactly what fails and the overwrite exactly what succeeds —
+    // pre-migration bytes gone, no copy, no signal. Route to the blocking
+    // recovery screen instead. Setting `bootRecovery` suspends the persistence
+    // subscription below, so the original bytes stay in localStorage
+    // untouched and RecoveryScreen's "Download my data" hands the user those
+    // very bytes.
     const storedVersion = (parsed as { version?: unknown }).version;
     if (typeof storedVersion === "number" && storedVersion < migrated.version) {
-      backupPreMigration(storedVersion, raw);
+      if (!backupPreMigration(storedVersion, raw)) {
+        bootRecovery = { message: MIGRATION_BLOCKED_MESSAGE, raw };
+        return makeInitialState();
+      }
     }
     return migrated;
   } catch (err) {
