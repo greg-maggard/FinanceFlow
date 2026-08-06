@@ -1,0 +1,110 @@
+{
+  "_comment": "A v3 document whose money is outside the range integer cents can hold, plus a settings block missing every required limit. Both platforms must produce the SAME v4 image from it: out-of-range money clamps to 0 cents, a missing limit takes the v4 default, and the node table is backfilled. See src/state/io.test.ts and ios/.../SharedMigrationFixtureTests.swift.",
+  "version": 3,
+  "settings": {
+    "monthlyExpenses": 1e17,
+    "preTaxIncome": null
+  },
+  "decisions": {
+    "Q_Match": null,
+    "Q_HighDebt": null,
+    "Q_ModDebt": null,
+    "Q_Purchase": null,
+    "Q_15pct": null,
+    "Q_401k": null,
+    "Q_HSA": null,
+    "Q_College": null,
+    "Q_Early": null,
+    "Q_Goals": null
+  },
+  "nodes": {
+    "Start": {
+      "completed": true,
+      "notes": ""
+    },
+    "College": {
+      "completed": false,
+      "notes": "",
+      "data": {
+        "monthlyContribution": 1e17,
+        "targetAge": 18
+      }
+    }
+  },
+  "budget": {
+    "accounts": [
+      {
+        "id": "checking",
+        "name": "Checking",
+        "kind": "checking",
+        "source": "manual"
+      },
+      {
+        "id": "brokerage",
+        "name": "Brokerage",
+        "kind": "tracking",
+        "source": "manual"
+      }
+    ],
+    "transactions": [
+      {
+        "id": "t-over",
+        "accountId": "checking",
+        "date": "2026-06-01",
+        "payee": "Above Int64 cents",
+        "amount": 1e17,
+        "categoryId": "food",
+        "source": "manual"
+      },
+      {
+        "id": "t-under",
+        "accountId": "checking",
+        "date": "2026-06-02",
+        "payee": "Below Int64 cents",
+        "amount": -1e17,
+        "categoryId": "food",
+        "source": "manual"
+      },
+      {
+        "id": "t-edge",
+        "accountId": "checking",
+        "date": "2026-06-03",
+        "payee": "Exactly 2^63 cents",
+        "amount": 92233720368547758.08,
+        "categoryId": "food",
+        "source": "manual"
+      },
+      {
+        "id": "t-large-ok",
+        "accountId": "brokerage",
+        "date": "2026-06-04",
+        "payee": "Large but representable",
+        "amount": 5e16,
+        "source": "manual"
+      }
+    ],
+    "groups": [
+      {
+        "id": "g:bills",
+        "name": "Bills",
+        "order": 0
+      }
+    ],
+    "categories": [
+      {
+        "id": "food",
+        "groupId": "g:bills",
+        "name": "Food",
+        "order": 0,
+        "monthlyTarget": 1e17
+      }
+    ],
+    "assignments": {
+      "2026-06": {
+        "food": 1e17
+      }
+    }
+  },
+  "shownCelebrations": [],
+  "earnedMedals": []
+}

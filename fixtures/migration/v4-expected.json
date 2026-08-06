@@ -31,6 +31,34 @@
         "2026-05": true
       }
     },
+    "Food": {
+      "completed": false,
+      "notes": ""
+    },
+    "Essential": {
+      "completed": false,
+      "notes": ""
+    },
+    "Income": {
+      "completed": false,
+      "notes": ""
+    },
+    "Health": {
+      "completed": false,
+      "notes": ""
+    },
+    "MinDebt": {
+      "completed": false,
+      "notes": ""
+    },
+    "SmallEF": {
+      "completed": false,
+      "notes": ""
+    },
+    "NonEssential": {
+      "completed": false,
+      "notes": ""
+    },
     "BigEF": {
       "completed": false,
       "notes": "",
@@ -38,13 +66,33 @@
         "targetMonths": 6
       }
     },
-    "College": {
+    "Q_Match": {
+      "completed": false,
+      "notes": ""
+    },
+    "Match": {
       "completed": false,
       "notes": "",
       "data": {
-        "monthlyContribution": 10001,
-        "targetAge": 18
+        "matchPct": 4.5,
+        "currentContribPct": 3.25
       }
+    },
+    "Q_HighDebt": {
+      "completed": false,
+      "notes": ""
+    },
+    "HighDebt": {
+      "completed": false,
+      "notes": ""
+    },
+    "Q_ModDebt": {
+      "completed": false,
+      "notes": ""
+    },
+    "ModDebt": {
+      "completed": false,
+      "notes": ""
     },
     "IRA": {
       "completed": false,
@@ -57,6 +105,38 @@
         },
         "annualLimit": 700000
       }
+    },
+    "Q_Purchase": {
+      "completed": false,
+      "notes": ""
+    },
+    "SavePurchase": {
+      "completed": false,
+      "notes": ""
+    },
+    "Q_15pct": {
+      "completed": false,
+      "notes": ""
+    },
+    "Q_401k": {
+      "completed": false,
+      "notes": ""
+    },
+    "Increase401k": {
+      "completed": false,
+      "notes": "",
+      "data": {
+        "currentPct": 6.5,
+        "targetPct": 15
+      }
+    },
+    "SelfEmp": {
+      "completed": false,
+      "notes": ""
+    },
+    "Q_HSA": {
+      "completed": false,
+      "notes": ""
     },
     "HSA": {
       "completed": false,
@@ -71,21 +151,37 @@
         "annualLimit": 430000
       }
     },
-    "Match": {
+    "Q_College": {
+      "completed": false,
+      "notes": ""
+    },
+    "College": {
       "completed": false,
       "notes": "",
       "data": {
-        "matchPct": 4.5,
-        "currentContribPct": 3.25
+        "monthlyContribution": 10001,
+        "targetAge": 18
       }
     },
-    "Increase401k": {
+    "Options": {
       "completed": false,
-      "notes": "",
-      "data": {
-        "currentPct": 6.5,
-        "targetPct": 15
-      }
+      "notes": ""
+    },
+    "Q_Early": {
+      "completed": false,
+      "notes": ""
+    },
+    "Early": {
+      "completed": false,
+      "notes": ""
+    },
+    "Q_Goals": {
+      "completed": false,
+      "notes": ""
+    },
+    "Goals": {
+      "completed": false,
+      "notes": ""
     }
   },
   "budget": {

@@ -478,6 +478,37 @@ struct LegacySettings: Codable, Equatable, Sendable {
     )
 }
 
+extension LegacySettings {
+    /// Synthesized decoding treats the three contribution limits as required —
+    /// a property default does NOT fill in a missing key in Swift — so a
+    /// hand-edited v3 document with no `iraAnnualLimit` threw `keyNotFound`,
+    /// which `quarantineAndReset` answered by replacing the user's entire book
+    /// with empty state over one absent scalar. The web mirror
+    /// (`io.ts`'s `requiredCents`) substitutes the v4 default and migrates the
+    /// book, and the same bytes must not produce a book on one platform and a
+    /// blank slate on the other. These limits are IRS figures the app already
+    /// ships a default for; defaulting is lossless and the ledger is not.
+    ///
+    /// `monthlyExpenses` and `preTaxIncome` are genuinely optional (absent
+    /// stays absent) and keep `decodeIfPresent`'s meaning. A limit that is
+    /// present but the wrong *type* still throws — that is corruption, not an
+    /// omission, and both platforms reject it.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let fallback = LegacySettings.default
+        self.init(
+            monthlyExpenses: try c.decodeIfPresent(LegacyDollars.self, forKey: .monthlyExpenses),
+            preTaxIncome: try c.decodeIfPresent(LegacyDollars.self, forKey: .preTaxIncome),
+            iraAnnualLimit: try c.decodeIfPresent(LegacyDollars.self, forKey: .iraAnnualLimit)
+                ?? fallback.iraAnnualLimit,
+            hsaSelfLimit: try c.decodeIfPresent(LegacyDollars.self, forKey: .hsaSelfLimit)
+                ?? fallback.hsaSelfLimit,
+            hsaFamilyLimit: try c.decodeIfPresent(LegacyDollars.self, forKey: .hsaFamilyLimit)
+                ?? fallback.hsaFamilyLimit
+        )
+    }
+}
+
 // MARK: The document
 
 /// A v1, v2 or v3 document. Decoding mirrors `AppState`'s custom coding
