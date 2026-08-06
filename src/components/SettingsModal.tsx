@@ -1,12 +1,161 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useStore } from "../state/store";
 import { useUI } from "../state/uiStore";
 import { bookIntegrity } from "../budget/ledger";
 import { ymKey } from "../state/recurring";
+import { downloadJson, importJson } from "../state/io";
 import { GlassCard } from "./glass/GlassCard";
 import { FieldLabel } from "./glass/GlassInput";
 import { NumberField } from "./glass/NumberField";
+
+const RESET_PHRASE = "RESET";
+
+/**
+ * Off-device backup — the entire backup story until Wave 3's rolling backup
+ * key lands, so it's the first item in Settings (reachable in two taps:
+ * Settings gear, then Export) rather than sitting under theme options.
+ */
+function BackupSection() {
+  const state = useStore();
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const onImport = async (file: File) => {
+    const text = await file.text();
+    try {
+      useStore.getState().replaceAll(importJson(text));
+    } catch {
+      alert("Could not parse that file as FinanceFlow JSON.");
+    }
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <FieldLabel>Backup</FieldLabel>
+      <div className="flex gap-2">
+        <button
+          onClick={() => downloadJson(state)}
+          className="flex-1 rounded-full px-3 py-2 text-[12px] font-medium text-white/80 hover:text-white/95"
+          style={{
+            background: "rgba(255,255,255,0.08)",
+            border: "1px solid rgba(255,255,255,0.14)",
+          }}
+        >
+          Export
+        </button>
+        <button
+          onClick={() => fileRef.current?.click()}
+          className="flex-1 rounded-full px-3 py-2 text-[12px] font-medium text-white/70 hover:text-white/95"
+          style={{
+            background: "rgba(255,255,255,0.05)",
+            border: "1px solid rgba(255,255,255,0.10)",
+          }}
+        >
+          Import
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/json"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void onImport(f);
+            e.target.value = "";
+          }}
+        />
+      </div>
+      <span className="text-[11px] text-white/45">
+        Your data lives only on this device.
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Destructive reset, moved out of the header (w2-cleanup) and behind a
+ * typed confirmation rather than a bare confirm() — harder to fire by
+ * reflex than the OS-native dialog most people click through.
+ */
+function DangerZone() {
+  const [confirming, setConfirming] = useState(false);
+  const [phrase, setPhrase] = useState("");
+  const canReset = phrase.trim().toUpperCase() === RESET_PHRASE;
+
+  return (
+    <div className="space-y-2 border-t border-white/10 pt-4">
+      <div className="text-[11px] uppercase tracking-[0.2em] text-red-300/60">
+        Danger zone
+      </div>
+      {!confirming ? (
+        <button
+          onClick={() => setConfirming(true)}
+          className="w-full rounded-full px-3 py-2 text-[12px] font-medium text-red-300/80 hover:text-red-200"
+          style={{
+            background: "rgba(248,113,113,0.06)",
+            border: "1px solid rgba(248,113,113,0.18)",
+          }}
+        >
+          Reset all progress
+        </button>
+      ) : (
+        <div
+          className="space-y-2 rounded-2xl p-3"
+          style={{
+            background: "rgba(248,113,113,0.06)",
+            border: "1px solid rgba(248,113,113,0.18)",
+          }}
+        >
+          <p className="text-[11px] text-red-200/80">
+            This clears all progress and data on this device. Export a backup
+            first if you want to keep it. Type {RESET_PHRASE} to confirm.
+          </p>
+          <input
+            value={phrase}
+            onChange={(e) => setPhrase(e.target.value)}
+            placeholder={RESET_PHRASE}
+            autoFocus
+            className="w-full rounded-lg px-3 py-1.5 text-[12px] text-white/90 outline-none"
+            style={{
+              background: "rgba(0,0,0,0.25)",
+              border: "1px solid rgba(248,113,113,0.3)",
+            }}
+          />
+          <div className="flex gap-2">
+            <button
+              disabled={!canReset}
+              onClick={() => {
+                useStore.getState().reset();
+                setConfirming(false);
+                setPhrase("");
+              }}
+              className="flex-1 rounded-full px-3 py-1.5 text-[12px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+              style={{
+                background: "rgba(248,113,113,0.35)",
+                border: "1px solid rgba(248,113,113,0.6)",
+              }}
+            >
+              Reset everything
+            </button>
+            <button
+              onClick={() => {
+                setConfirming(false);
+                setPhrase("");
+              }}
+              className="rounded-full px-3 py-1.5 text-[12px] text-white/60 hover:text-white/90"
+              style={{
+                background: "rgba(255,255,255,0.05)",
+                border: "1px solid rgba(255,255,255,0.10)",
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 const money = (n: number) =>
   n.toLocaleString("en-US", { style: "currency", currency: "USD" });
@@ -129,6 +278,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                 </button>
               </div>
               <div className="space-y-4">
+                <BackupSection />
                 <label className="block space-y-1.5">
                   <FieldLabel>Monthly expenses ($)</FieldLabel>
                   <NumberField
@@ -191,6 +341,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                 </div>
                 <IntegrityCheck />
                 <LastSaved />
+                <DangerZone />
               </div>
             </GlassCard>
           </motion.div>

@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { AmbientBackground } from "./components/AmbientBackground";
 import { TopBar } from "./components/TopBar";
-import { PhaseTrail } from "./components/PhaseTrail";
 import { SettingsModal } from "./components/SettingsModal";
 import { OverviewSheet } from "./components/OverviewSheet";
 import { CelebrationLayer } from "./components/CelebrationLayer";
@@ -122,9 +121,6 @@ function AppShell() {
       </main>
 
       <OverviewSheet />
-      <AnimatePresence>
-        {view === "focus" && <PhaseTrail key="trail" activePhase={activePhase} />}
-      </AnimatePresence>
       <CelebrationLayer />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <StaleTabBanner />

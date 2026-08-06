@@ -1,9 +1,16 @@
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import { PHASE_COLORS } from "../theme/phaseColors";
 import type { Phase } from "../graph/flowchart";
+import { useUI } from "../state/uiStore";
 
 export function AmbientBackground({ phase }: { phase: Phase }) {
   const c = PHASE_COLORS[phase];
+  const view = useUI((s) => s.view);
+  const reduceMotion = useReducedMotion();
+  // Invisible under the Budget cards but still cost the compositor
+  // continuously on a phone, so pause them there; reduced-motion users
+  // never get them moving at all.
+  const blobsAnimate = !reduceMotion && view !== "budget";
   return (
     <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
       <div
@@ -22,15 +29,15 @@ export function AmbientBackground({ phase }: { phase: Phase }) {
       />
       <motion.div
         aria-hidden
-        animate={{ x: [0, 40, 0], y: [0, 24, 0] }}
-        transition={{ duration: 18, repeat: Infinity, ease: "easeInOut" }}
+        animate={blobsAnimate ? { x: [0, 40, 0], y: [0, 24, 0] } : { x: 0, y: 0 }}
+        transition={{ duration: 18, repeat: blobsAnimate ? Infinity : 0, ease: "easeInOut" }}
         className="absolute -left-32 top-10 h-[520px] w-[520px] rounded-full blur-3xl"
         style={{ background: c.glow, opacity: 0.32 }}
       />
       <motion.div
         aria-hidden
-        animate={{ x: [0, -50, 0], y: [0, -30, 0] }}
-        transition={{ duration: 22, repeat: Infinity, ease: "easeInOut" }}
+        animate={blobsAnimate ? { x: [0, -50, 0], y: [0, -30, 0] } : { x: 0, y: 0 }}
+        transition={{ duration: 22, repeat: blobsAnimate ? Infinity : 0, ease: "easeInOut" }}
         className="absolute -right-40 bottom-0 h-[620px] w-[620px] rounded-full blur-3xl"
         style={{ background: c.tint, opacity: 0.4 }}
       />

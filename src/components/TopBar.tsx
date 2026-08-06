@@ -1,7 +1,6 @@
-import { useRef } from "react";
 import { useStore } from "../state/store";
 import { applyPwaUpdate, useUI } from "../state/uiStore";
-import { downloadJson, importJson } from "../state/io";
+import { downloadJson } from "../state/io";
 import { overallProgress } from "../graph/derive";
 
 export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
@@ -11,17 +10,7 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
   const saveError = useUI((s) => s.saveError);
   const clearSaveError = useUI((s) => s.clearSaveError);
   const needRefresh = useUI((s) => s.needRefresh);
-  const fileRef = useRef<HTMLInputElement>(null);
   const progress = overallProgress(state);
-
-  const onImport = async (file: File) => {
-    const text = await file.text();
-    try {
-      useStore.getState().replaceAll(importJson(text));
-    } catch {
-      alert("Could not parse that file as FinanceFlow JSON.");
-    }
-  };
 
   return (
     // Header and banner share one fixed wrapper so the banner is pinned
@@ -80,58 +69,19 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
         )}
         <button
           onClick={onOpenSettings}
-          className="rounded-full px-3 py-1.5 text-[11px] font-medium text-white/70 hover:text-white/95"
+          aria-label="Settings"
+          className="flex h-8 w-8 items-center justify-center rounded-full text-white/70 hover:text-white/95"
           style={{
             background: "rgba(255,255,255,0.05)",
             border: "1px solid rgba(255,255,255,0.10)",
           }}
         >
-          Settings
-        </button>
-        <button
-          onClick={() => downloadJson(state)}
-          className="rounded-full px-3 py-1.5 text-[11px] font-medium text-white/70 hover:text-white/95"
-          style={{
-            background: "rgba(255,255,255,0.05)",
-            border: "1px solid rgba(255,255,255,0.10)",
-          }}
-        >
-          Export
-        </button>
-        <button
-          onClick={() => fileRef.current?.click()}
-          className="rounded-full px-3 py-1.5 text-[11px] font-medium text-white/70 hover:text-white/95"
-          style={{
-            background: "rgba(255,255,255,0.05)",
-            border: "1px solid rgba(255,255,255,0.10)",
-          }}
-        >
-          Import
-        </button>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="application/json"
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) void onImport(f);
-            e.target.value = "";
-          }}
-        />
-        <button
-          onClick={() => {
-            if (confirm("Reset all progress? This cannot be undone.")) {
-              useStore.getState().reset();
-            }
-          }}
-          className="rounded-full px-3 py-1.5 text-[11px] font-medium text-red-300/80 hover:text-red-200"
-          style={{
-            background: "rgba(248,113,113,0.06)",
-            border: "1px solid rgba(248,113,113,0.18)",
-          }}
-        >
-          Reset
+          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="3" />
+            <path
+              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+            />
+          </svg>
         </button>
       </div>
       </header>
