@@ -66,7 +66,11 @@ export function migrate(input: unknown, now: Date = new Date()): AppState {
       version: 4,
       settings: v4.settings,
       decisions: v4.decisions,
-      nodes: v4.nodes,
+      // Backfill missing nodes exactly like the v3 path (and like Swift's v4
+      // decoder): pre-fix builds wrote sparse node maps, and `deriveStatus`
+      // walks every NODE_ID unguarded — a sparse map boots "successfully"
+      // and then white-screens (Wave 3 recheck, F6).
+      nodes: backfillV4Nodes(v4.nodes),
       budget: v4.budget,
       shownCelebrations: v4.shownCelebrations ?? [],
       earnedMedals: v4.earnedMedals ?? [],
@@ -232,6 +236,23 @@ function migrateV3(v3: V3State): AppState {
  * document iOS rendered fine. Unknown ids are dropped for the same reason
  * Swift drops them (it only walks `NodeId.allCases`).
  */
+/**
+ * v4-passthrough counterpart of `migrateNodesToV4`'s backfill: amounts are
+ * already cents, so present nodes pass through verbatim — but every absent
+ * `NODE_ID` still gets an empty state, and unknown ids are still dropped,
+ * matching Swift's v4 decoder (`AppState.swift` backfills unconditionally).
+ */
+function backfillV4Nodes(
+  v4Nodes: Record<NodeId, NodeState> | undefined,
+): Record<NodeId, NodeState> {
+  const nodes = {} as Record<NodeId, NodeState>;
+  for (const id of NODE_IDS) {
+    const node = (v4Nodes ?? ({} as Record<NodeId, NodeState>))[id];
+    nodes[id] = node && typeof node === "object" ? node : emptyNodeState();
+  }
+  return nodes;
+}
+
 function migrateNodesToV4(
   v3Nodes: Record<NodeId, V3NodeState>,
 ): Record<NodeId, NodeState> {

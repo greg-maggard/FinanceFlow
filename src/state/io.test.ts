@@ -800,3 +800,28 @@ describe("v4 passthrough projects only the seven known fields (F7)", () => {
     expect(out.earnedMedals).toEqual([]);
   });
 });
+
+describe("v4 passthrough backfills sparse nodes (F6)", () => {
+  it("expands a sparse node map to every NODE_ID, like the v3 path and Swift", () => {
+    // Pre-fix web builds wrote v4 documents carrying only the nodes the v3
+    // source had; deriveStatus walks every NODE_ID unguarded, so such a
+    // document booted "successfully" and then white-screened. Swift's v4
+    // decoder always backfilled — this pins the platforms in agreement.
+    const doc = makeInitialState() as any;
+    const sparse: any = {};
+    for (const id of ["Start", "Rent", "Food"]) sparse[id] = doc.nodes[id];
+    doc.nodes = sparse;
+
+    const out = migrate(doc);
+
+    expect(Object.keys(out.nodes).length).toBe(NODE_IDS.length);
+    for (const id of NODE_IDS) expect(out.nodes[id]).toBeDefined();
+    // Present nodes pass through verbatim; absent ones are empty, not undefined.
+    expect(out.nodes.Rent).toEqual(doc.nodes.Rent);
+    expect(out.nodes.BigEF).toEqual(emptyNodeState());
+    // Unknown ids are dropped, matching Swift walking NodeId.allCases only.
+    const withGarbage = { ...makeInitialState() } as any;
+    withGarbage.nodes = { ...withGarbage.nodes, NotARealNode: { completed: true } };
+    expect((migrate(withGarbage).nodes as any).NotARealNode).toBeUndefined();
+  });
+});
