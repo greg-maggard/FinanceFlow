@@ -15,8 +15,9 @@ import { makeInitialState, newId } from "./schema";
 import { pairTransfer } from "../budget/ledger";
 import type { BookOps } from "../budget/nodeLedger";
 import { migrate } from "./io";
-import { LocalStorageAdapter } from "./storage";
+import { LocalStorageAdapter, StorageError } from "./storage";
 import type { StorageAdapter } from "./storage";
+import { useUI } from "./uiStore";
 
 type Store = AppState & {
   setDecision: (id: DecisionId, value: Decision) => void;
@@ -308,6 +309,12 @@ function slicesEqual(a: PersistedSlice, b: PersistedSlice): boolean {
   );
 }
 
+/** Banner/UI copy for a failed persistence write, kept in one place so the
+ *  message the user sees always matches what TopBar renders. */
+const SAVE_ERROR_MESSAGE = "Couldn't save your changes. Export a backup now.";
+const SAVE_ERROR_MESSAGE_QUOTA =
+  "Couldn't save your changes — storage is full. Export a backup now.";
+
 function writeNow(slice: PersistedSlice): void {
   lastSaved = slice;
   pending = null;
@@ -319,10 +326,19 @@ function writeNow(slice: PersistedSlice): void {
   // dedupe in `scheduleSave` stays synchronous. If the write actually fails
   // (quota exceeded, Safari private mode), clear the marker so the next
   // mutation retries instead of being skipped as already-durable.
-  void adapter.save(slice).catch((err) => {
-    lastSaved = null;
-    console.error("[financeflow] persist failed", err);
-  });
+  void adapter.save(slice).then(
+    () => {
+      useUI.getState().setLastSaved(Date.now());
+      // Cheap no-op guard: avoid a redundant set() on the common all-good path.
+      if (useUI.getState().saveError) useUI.getState().clearSaveError();
+    },
+    (err) => {
+      lastSaved = null;
+      console.error("[financeflow] persist failed", err);
+      const quotaExceeded = err instanceof StorageError && err.quotaExceeded;
+      useUI.getState().setSaveError(quotaExceeded ? SAVE_ERROR_MESSAGE_QUOTA : SAVE_ERROR_MESSAGE);
+    },
+  );
 }
 
 /** Force any pending debounced save to write immediately, synchronously. */
