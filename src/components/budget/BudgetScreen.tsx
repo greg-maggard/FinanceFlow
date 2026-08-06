@@ -3,7 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useStore } from "../../state/store";
 import { useUI } from "../../state/uiStore";
 import type { MonthKey } from "../../state/schema";
-import { assignedAfter, snapshot } from "../../budget/ledger";
+import { UNCATEGORIZED_CATEGORY_ID } from "../../state/schema";
+import { assignedAfter, fromCents, snapshot, toCents } from "../../budget/ledger";
 import { planFundMonth } from "../../budget/nodeLedger";
 import { ymKey } from "../../state/recurring";
 import { M } from "../../theme/motion";
@@ -11,7 +12,7 @@ import { GlassCard } from "../glass/GlassCard";
 import { FundMonthButton, dollars } from "./bits";
 import { CategoryGroups, FUND_GLOW } from "./CategoryGroups";
 import { AccountsSection } from "./AccountsSection";
-import { TransactionsSection } from "./TransactionsSection";
+import { TransactionsSection, categoryLabel } from "./TransactionsSection";
 
 /** Step a "YYYY-MM" key by whole months; Date handles the year rollover. */
 function stepYm(key: MonthKey, delta: number): MonthKey {
@@ -83,15 +84,93 @@ function RtaPill({ amount }: { amount: number }) {
   );
 }
 
+/**
+ * The compact "how much can I spend right now" row (w2-today-strip): Ready
+ * to Assign, total on-budget cash, and the balance of whichever envelope
+ * was last used, so the answer costs zero taps on cold open. `onBudgetCash`
+ * and `categoryAvailable` are both derived from the `snap` the caller
+ * already computed — no second `snapshot()` call. Grid, not flex-wrap, so
+ * labels truncate instead of wrapping to a second line on a phone.
+ */
+function TodayStrip({
+  readyToAssign,
+  onBudgetCash,
+  categoryName,
+  categoryAvailable,
+  ahead,
+}: {
+  readyToAssign: number;
+  onBudgetCash: number;
+  categoryName: string;
+  categoryAvailable: number;
+  ahead: number;
+}) {
+  return (
+    <GlassCard intensity="subtle" className="px-4 py-3">
+      <div className="grid grid-cols-3 gap-3">
+        <StripStat label="Ready to Assign" value={readyToAssign} />
+        <StripStat label="On-budget cash" value={onBudgetCash} />
+        <StripStat label={categoryName} value={categoryAvailable} />
+      </div>
+      {Math.round(ahead * 100) !== 0 && (
+        <div className="mt-2 truncate border-t border-white/5 pt-2 text-[11px] tabular-nums text-white/50">
+          {dollars(ahead)} assigned in future months
+        </div>
+      )}
+    </GlassCard>
+  );
+}
+
+function StripStat({ label, value }: { label: string; value: number }) {
+  const negative = Math.round(value * 100) < 0;
+  return (
+    <div className="min-w-0">
+      <div className="truncate text-[10px] font-medium uppercase tracking-[0.14em] text-white/50">
+        {label}
+      </div>
+      <div
+        className={`truncate text-sm font-semibold tabular-nums ${
+          negative ? "text-rose-300" : "text-white/90"
+        }`}
+      >
+        {dollars(value)}
+      </div>
+    </div>
+  );
+}
+
 export function BudgetScreen() {
   const budget = useStore((s) => s.budget);
   const budgetFocus = useUI((s) => s.budgetFocus);
+  const lastUsedTxn = useUI((s) => s.lastUsedTxn);
   const [month, setMonth] = useState<MonthKey>(() => ymKey());
   // Live-derived: any edit to the book lands here on the next render.
   const snap = useMemo(() => snapshot(budget, month), [budget, month]);
   // Ready-to-Assign stops at the viewed month, so dollars parked further out
   // are invisible to it — call them out rather than let them look unspent.
   const ahead = useMemo(() => assignedAfter(budget, month), [budget, month]);
+
+  // Same fallback the fast-entry FAB uses (w2-fastentry): the last category
+  // used for the last-used account, or Uncategorized if that pointer is
+  // stale/missing/hidden — never blank. Both figures below come from `snap`,
+  // already computed above, so this adds no snapshot() call.
+  const stripCategoryId = useMemo(() => {
+    const remembered = lastUsedTxn?.categoryByAccount[lastUsedTxn.accountId];
+    if (remembered && budget.categories.some((c) => c.id === remembered && !c.hidden)) {
+      return remembered;
+    }
+    return UNCATEGORIZED_CATEGORY_ID;
+  }, [lastUsedTxn, budget.categories]);
+  const stripCategoryName = categoryLabel(budget.categories, stripCategoryId);
+  const stripCategoryAvailable = snap.categories[stripCategoryId]?.available ?? 0;
+  // "Cash on budget" = every dollar still sitting in an envelope plus what's
+  // unassigned — the two terms `snap` already carries, summed in cents to
+  // stay exact.
+  const onBudgetCash = useMemo(() => {
+    let cents = toCents(snap.readyToAssign);
+    for (const c of Object.values(snap.categories)) cents += toCents(c.available);
+    return fromCents(cents);
+  }, [snap]);
 
   // Assignments are keyed per month, so every month opens with every envelope
   // back at zero. The plan is re-derived on each edit purely to answer "is
@@ -172,11 +251,6 @@ export function BudgetScreen() {
             </div>
             <div className="flex flex-col items-end gap-1">
               <RtaPill amount={snap.readyToAssign} />
-              {Math.round(ahead * 100) !== 0 && (
-                <span className="pr-1 text-[11px] tabular-nums text-white/50">
-                  {dollars(ahead)} assigned in future months
-                </span>
-              )}
             </div>
           </div>
           {/* Both retire the moment every target is met — a button that would
@@ -191,6 +265,17 @@ export function BudgetScreen() {
           )}
         </GlassCard>
       </motion.div>
+
+      {/* Zero-tap "can I afford this" strip (w2-today-strip): static, no
+          motion wrapper — this is read on every open and must render
+          instantly, not fade in. */}
+      <TodayStrip
+        readyToAssign={snap.readyToAssign}
+        onBudgetCash={onBudgetCash}
+        categoryName={stripCategoryName}
+        categoryAvailable={stripCategoryAvailable}
+        ahead={ahead}
+      />
 
       <motion.section
         initial={{ opacity: 0, y: 14 }}
