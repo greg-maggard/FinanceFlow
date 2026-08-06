@@ -179,4 +179,66 @@ public enum Ledger {
             categories: categories
         )
     }
+
+    public struct BookIntegrity: Equatable, Sendable {
+        public var onBudgetCash: Decimal
+        public var sumAvailable: Decimal
+        public var readyToAssign: Decimal
+        public var unbudgetedSpending: Decimal
+        public var drift: Decimal
+
+        public init(
+            onBudgetCash: Decimal,
+            sumAvailable: Decimal,
+            readyToAssign: Decimal,
+            unbudgetedSpending: Decimal,
+            drift: Decimal
+        ) {
+            self.onBudgetCash = onBudgetCash
+            self.sumAvailable = sumAvailable
+            self.readyToAssign = readyToAssign
+            self.unbudgetedSpending = unbudgetedSpending
+            self.drift = drift
+        }
+    }
+
+    /// The conservation-of-money invariant, made machine-checkable.
+    ///
+    /// `snapshot` builds each category's `available` from assignments plus
+    /// categorized activity, and Ready-to-Assign from inflows minus everything
+    /// assigned minus swept overspending. Summing those definitions across all
+    /// categories collapses to:
+    ///
+    ///     Sigma available + readyToAssign + unbudgetedSpending == Sigma on-budget cash
+    ///
+    /// where `unbudgetedSpending` is the on-budget, non-transfer money that
+    /// never entered an envelope (no `categoryId`, and not an RTA inflow).
+    /// Every dollar in an on-budget account is therefore accounted for exactly
+    /// once, and any non-zero `drift` is money the book conjured or destroyed.
+    /// Mirrors `bookIntegrity` in `src/budget/ledger.ts`.
+    public static func bookIntegrity(_ book: BudgetBook, month: String) -> BookIntegrity {
+        let onBudget = Set(book.accounts.filter { isOnBudget($0.kind) }.map(\.id))
+
+        var onBudgetCash: Decimal = 0
+        var unbudgetedSpending: Decimal = 0
+        for t in book.transactions where onBudget.contains(t.accountId) {
+            onBudgetCash += t.amount
+            if t.transferAccountId != nil { continue }
+            if t.categoryId != nil { continue }   // categorized (incl. RTA) money is already counted
+            if monthOf(date: t.date) > month { continue }
+            unbudgetedSpending += t.amount
+        }
+
+        let snap = snapshot(book, month: month)
+        var sumAvailable: Decimal = 0
+        for c in snap.categories.values { sumAvailable += c.available }
+
+        return BookIntegrity(
+            onBudgetCash: onBudgetCash,
+            sumAvailable: sumAvailable,
+            readyToAssign: snap.readyToAssign,
+            unbudgetedSpending: unbudgetedSpending,
+            drift: onBudgetCash - (sumAvailable + snap.readyToAssign + unbudgetedSpending)
+        )
+    }
 }

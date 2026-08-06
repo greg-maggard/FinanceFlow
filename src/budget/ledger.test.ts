@@ -4,6 +4,7 @@ import { RTA_CATEGORY_ID, emptyBudgetBook } from "../state/schema";
 import {
   accountBalance,
   accountBalances,
+  bookIntegrity,
   isOnBudget,
   monthOf,
   pairTransfer,
@@ -237,5 +238,60 @@ describe("snapshot", () => {
       assignments: Object.fromEntries(months.map((m) => [m, { food: 100 }])),
     });
     expect(snapshot(b, "2026-06").categories.food.available).toBe(30);
+  });
+});
+
+describe("bookIntegrity", () => {
+  it("reports zero drift on a fully budgeted book", () => {
+    const b = book({
+      transactions: [
+        txn({ accountId: "checking", date: "2026-06-01", amount: 1000, categoryId: RTA_CATEGORY_ID }),
+        txn({ accountId: "checking", date: "2026-06-05", amount: -120, categoryId: "food" }),
+      ],
+      assignments: { "2026-06": { food: 300 } },
+    });
+    const i = bookIntegrity(b, "2026-06");
+    expect(i.onBudgetCash).toBe(880);
+    expect(i.sumAvailable).toBe(180);
+    expect(i.readyToAssign).toBe(700);
+    expect(i.unbudgetedSpending).toBe(0);
+    expect(i.drift).toBe(0);
+  });
+
+  it("books an uncategorized on-budget expense as unbudgetedSpending, not drift", () => {
+    const b = book({
+      transactions: [
+        txn({ accountId: "checking", date: "2026-06-01", amount: 1000, categoryId: RTA_CATEGORY_ID }),
+        txn({ accountId: "checking", date: "2026-06-07", amount: -45.55 }),
+      ],
+    });
+    const i = bookIntegrity(b, "2026-06");
+    expect(i.unbudgetedSpending).toBe(-45.55);
+    // The residual is named, so conservation still holds exactly.
+    expect(i.drift).toBe(0);
+  });
+
+  it("ignores off-budget accounts on both sides of the identity", () => {
+    const b = book({
+      transactions: [
+        txn({ accountId: "ira", date: "2026-06-02", amount: 5000 }),
+        txn({ accountId: "checking", date: "2026-06-02", amount: 200, categoryId: RTA_CATEGORY_ID }),
+      ],
+    });
+    const i = bookIntegrity(b, "2026-06");
+    expect(i.onBudgetCash).toBe(200);
+    expect(i.drift).toBe(0);
+  });
+
+  it("stays exact on cent-level amounts that would drift as floats", () => {
+    const b = book({
+      transactions: [
+        txn({ accountId: "checking", date: "2026-06-01", amount: 0.1, categoryId: RTA_CATEGORY_ID }),
+        txn({ accountId: "checking", date: "2026-06-02", amount: 0.2, categoryId: RTA_CATEGORY_ID }),
+        txn({ accountId: "checking", date: "2026-06-03", amount: -0.3, categoryId: "food" }),
+      ],
+      assignments: { "2026-06": { food: 0.3 } },
+    });
+    expect(bookIntegrity(b, "2026-06").drift).toBe(0);
   });
 });

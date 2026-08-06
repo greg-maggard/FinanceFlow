@@ -20,6 +20,7 @@ struct SettingsScreen: View {
             ScrollView {
                 VStack(spacing: theme.spacing.xl) {
                     settingsCard
+                    integrityCard
                     backupCard
                     appearanceCard
                     dangerCard
@@ -80,6 +81,41 @@ struct SettingsScreen: View {
                 }
             }
         }
+    }
+
+    /// Conservation-of-money read-out. Every dollar in an on-budget account
+    /// must be sitting in an envelope, waiting in Ready-to-Assign, or spent
+    /// outside the budget — a non-zero drift means the book invented or lost
+    /// money. Mirrors the web Settings row.
+    private var integrityCard: some View {
+        let integrity = Ledger.bookIntegrity(store.state.budget, month: Recurring.ymKey())
+        let ok = integrity.drift == 0
+        return GlassCard {
+            VStack(alignment: .leading, spacing: theme.spacing.md) {
+                Text("Check integrity").font(theme.typography.headline).foregroundStyle(theme.colors.textPrimary)
+                integrityRow("On-budget cash", integrity.onBudgetCash)
+                integrityRow("Sum of available", integrity.sumAvailable)
+                integrityRow("Ready to assign", integrity.readyToAssign)
+                integrityRow("Unbudgeted spending", integrity.unbudgetedSpending)
+                integrityRow(ok ? "Balanced" : "Drift", integrity.drift,
+                             tint: ok ? theme.colors.success : theme.colors.danger)
+                Text(ok
+                     ? "Every dollar is accounted for."
+                     : "The books don't balance — this is a bug, not your data.")
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.textSecondary)
+            }
+        }
+    }
+
+    private func integrityRow(_ label: String, _ value: Decimal, tint: Color? = nil) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Text(value, format: .currency(code: "USD")).monospacedDigit()
+        }
+        .font(theme.typography.callout)
+        .foregroundStyle(tint ?? theme.colors.textSecondary)
     }
 
     private var backupCard: some View {

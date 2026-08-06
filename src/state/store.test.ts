@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { adapter, flushSave, useStore } from "./store";
-import { snapshot } from "../budget/ledger";
+import { bookIntegrity, snapshot } from "../budget/ledger";
 import { ADJUST_ACCOUNT_ID, planBalanceEdit } from "../budget/nodeLedger";
 import { ymKey } from "./recurring";
 
@@ -55,6 +55,7 @@ describe("persistence debounce", () => {
     useStore.getState().deleteTxn("does-not-exist");
     vi.advanceTimersByTime(1000);
     expect(spy).not.toHaveBeenCalled();
+    expect(bookIntegrity(useStore.getState().budget, "2026-06").drift).toBe(0);
   });
 });
 
@@ -94,6 +95,11 @@ describe("deleteCategory", () => {
     expect(budget.assignments).toEqual({});
     // The deleted envelope's dollars are back in the pool — nothing vanished.
     expect(snapshot(budget, "2026-06").readyToAssign).toBe(1000);
+    // FIXME(w1-bug3): drift stays 0 here only because the $40 spend, orphaned
+    // by the delete, lands in the unbudgetedSpending residual — cash is
+    // conserved but the dollars left the envelope system unnoticed. The
+    // invariant holds; tightening what happens to orphaned activity is bug 3.
+    expect(bookIntegrity(budget, "2026-06").drift).toBe(0);
   });
 });
 
@@ -119,5 +125,6 @@ describe("applyBookOps", () => {
     expect(adjustments[0].amount).toBe(-25);
     expect(after.accounts.some((a) => a.id === ADJUST_ACCOUNT_ID)).toBe(true);
     expect(snapshot(after, month).categories[catId].available).toBe(-25);
+    expect(bookIntegrity(after, month).drift).toBe(0);
   });
 });
