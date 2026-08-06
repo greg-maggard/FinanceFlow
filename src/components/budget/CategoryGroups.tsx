@@ -278,13 +278,24 @@ export function ConfirmDelete({ cat, name }: { cat: Category; name?: string }) {
         ))}
       <button
         type="button"
-        onClick={() =>
-          armed
-            ? useStore
-                .getState()
-                .deleteCategory(cat.id, hasTxns ? target : UNCATEGORIZED_CATEGORY_ID)
-            : setArmed(true)
-        }
+        onClick={() => {
+          if (!armed) {
+            setArmed(true);
+            return;
+          }
+          const reassignTo = hasTxns ? target : UNCATEGORIZED_CATEGORY_ID;
+          // w3-search-undo: deleteCategory reassigns transactions and merges
+          // monthly assignments, so nothing short of the whole pre-delete
+          // book slice round-trips byte-for-byte on undo — capture it before
+          // the delete runs, not after.
+          const preDeleteBudget = useStore.getState().budget;
+          useStore.getState().deleteCategory(cat.id, reassignTo);
+          useUI.getState().setPendingUndo({
+            kind: "category",
+            message: `Deleted ${label}`,
+            budget: preDeleteBudget,
+          });
+        }}
         className="w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-red-300 hover:bg-red-500/10"
       >
         {armed ? (hasTxns ? `Move & delete ${label}` : "Tap again to confirm") : `Delete ${label}`}

@@ -96,6 +96,7 @@ export function CategorySelect({
   className,
   ariaLabel,
   hideNoCategory,
+  allLabel = "— No category —",
 }: {
   value: string;
   onChange: (id: string) => void;
@@ -105,6 +106,10 @@ export function CategorySelect({
    *  inline picker) where every row must land in a real envelope, never a
    *  blank one. */
   hideNoCategory?: boolean;
+  /** Overrides the blank-value option's label — the assignment form reads
+   *  "— No category —" (it's still an unset choice), while a list filter
+   *  (w3-search-undo) reads "All categories" for the identical blank value. */
+  allLabel?: string;
 }) {
   const budget = useStore((s) => s.budget);
   const groups = [...budget.groups].sort((a, b) => a.order - b.order);
@@ -119,7 +124,7 @@ export function CategorySelect({
       className={className}
       aria-label={ariaLabel}
     >
-      {!hideNoCategory && <option value="">— No category —</option>}
+      {!hideNoCategory && <option value="">{allLabel}</option>}
       {!knowsUncategorized && (
         <option value={UNCATEGORIZED_CATEGORY_ID}>Uncategorized</option>
       )}
@@ -402,6 +407,7 @@ const TxnRow = memo(function TxnRow({
   categoryNames,
   onEdit,
   onCategorize,
+  onDelete,
 }: {
   txn: Txn;
   accountNames: Map<string, string>;
@@ -413,6 +419,11 @@ const TxnRow = memo(function TxnRow({
   /** Fires when the inline review-queue picker below lands a category — one
    *  tap to open the native select, one tap to choose (w3-plaid-ui). */
   onCategorize: (txn: Txn, categoryId: string) => void;
+  /** Fires on the kebab's delete action — a single tap, no arming step
+   *  (w3-search-undo: the five-second undo toast is the safety net now, not
+   *  a second confirming tap). The parent deletes and parks the removed
+   *  row(s) for undo; this row decides nothing about recoverability. */
+  onDelete: (txn: Txn) => void;
 }) {
   const isTransfer = Boolean(txn.transferAccountId);
   const isUncategorized = txn.categoryId === UNCATEGORIZED_CATEGORY_ID;
@@ -482,7 +493,7 @@ const TxnRow = memo(function TxnRow({
           )}
           <button
             type="button"
-            onClick={() => useStore.getState().deleteTxn(txn.id)}
+            onClick={() => onDelete(txn)}
             className="w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-red-300 hover:bg-red-500/10"
           >
             Delete {isTransfer ? "transfer" : "transaction"}
@@ -621,17 +632,31 @@ export function TransactionsSection() {
     () => allTransactions.filter((t) => t.categoryId === UNCATEGORIZED_CATEGORY_ID).length,
     [allTransactions],
   );
-  const [reviewOnly, setReviewOnly] = useState(false);
-  // The toggle only exists while there's something to review — once the
-  // count hits zero there's nothing left to filter down to, and leaving it
-  // on would strand the user looking at an empty list with no way back.
+
+  // w3-search-undo: a payee text filter and a category filter, applied
+  // together and BEFORE paging — at 50 rows a page the list is unusable by
+  // month two without a way to narrow the full history, not just what's
+  // currently rendered. The review-queue badge below is this same
+  // categoryFilter aimed at the catch-all envelope, so the two share one
+  // piece of state instead of stacking a second, competing filter.
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const reviewOnly = categoryFilter === UNCATEGORIZED_CATEGORY_ID;
+  // The badge only exists while there's something to review — once the
+  // count hits zero there's nothing left to filter down to, and leaving the
+  // filter on would strand the user looking at an empty list with no way
+  // back to it (the badge itself would already be gone).
   useEffect(() => {
-    if (uncategorizedCount === 0) setReviewOnly(false);
-  }, [uncategorizedCount]);
-  const filteredTxns = useMemo(
-    () => (reviewOnly ? txns.filter((t) => t.categoryId === UNCATEGORIZED_CATEGORY_ID) : txns),
-    [txns, reviewOnly],
-  );
+    if (uncategorizedCount === 0 && reviewOnly) setCategoryFilter("");
+  }, [uncategorizedCount, reviewOnly]);
+  const filteredTxns = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return txns.filter((t) => {
+      if (categoryFilter && t.categoryId !== categoryFilter) return false;
+      if (term && !(t.payee ?? "").toLowerCase().includes(term)) return false;
+      return true;
+    });
+  }, [txns, categoryFilter, search]);
 
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   // Keep the user's place. `filteredTxns` gets a fresh identity on every add,
@@ -652,6 +677,22 @@ export function TransactionsSection() {
     useStore.getState().updateTxn({ ...txn, categoryId: categoryId || UNCATEGORIZED_CATEGORY_ID });
   };
 
+  // w3-search-undo: a single tap deletes — no arming step — with a
+  // five-second undo toast as the safety net instead. Captures exactly what
+  // deleteTxn removed (the row, or a transfer's two paired legs) and parks
+  // it on uiStore for UndoToast to restore verbatim, id included, if the
+  // user takes it back.
+  const deleteTxnWithUndo = (txn: Txn) => {
+    const removed = useStore.getState().deleteTxn(txn.id);
+    if (removed.length === 0) return;
+    const isTransfer = Boolean(txn.transferAccountId);
+    useUI.getState().setPendingUndo({
+      kind: "txn",
+      message: isTransfer ? "Transfer deleted" : `Deleted "${txn.payee?.trim() || "transaction"}"`,
+      txns: removed,
+    });
+  };
+
   return (
     <GlassCard className="px-5 py-4">
       <div className="space-y-3">
@@ -660,7 +701,9 @@ export function TransactionsSection() {
           {uncategorizedCount > 0 && (
             <button
               type="button"
-              onClick={() => setReviewOnly((v) => !v)}
+              onClick={() =>
+                setCategoryFilter((c) => (c === UNCATEGORIZED_CATEGORY_ID ? "" : UNCATEGORIZED_CATEGORY_ID))
+              }
               aria-pressed={reviewOnly}
               className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium"
               style={{
@@ -689,6 +732,22 @@ export function TransactionsSection() {
             {/* Remounts when the first account arrives, so defaults pick it up. */}
             <AddTxnForm key={accounts[0].id} accounts={accounts} />
             <div className="h-px bg-gradient-to-r from-transparent via-white/12 to-transparent" />
+            <div className="flex flex-wrap items-center gap-2">
+              <GlassInput
+                placeholder="Search payee"
+                aria-label="Search transactions by payee"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="min-w-0 flex-1"
+              />
+              <CategorySelect
+                value={categoryFilter}
+                onChange={setCategoryFilter}
+                ariaLabel="Filter by category"
+                allLabel="All categories"
+                className="w-40 shrink-0"
+              />
+            </div>
             <div className="divide-y divide-white/5">
               {visibleTxns.map((t) => (
                 <TxnRow
@@ -698,13 +757,16 @@ export function TransactionsSection() {
                   categoryNames={categoryNames}
                   onEdit={setEditingTxn}
                   onCategorize={categorize}
+                  onDelete={deleteTxnWithUndo}
                 />
               ))}
               {filteredTxns.length === 0 && (
                 <p className="py-1 text-xs text-white/40">
                   {reviewOnly
                     ? "Nothing to review — every transaction is categorized."
-                    : "No transactions yet — income lands in Ready to Assign."}
+                    : search || categoryFilter
+                      ? "No transactions match your search."
+                      : "No transactions yet — income lands in Ready to Assign."}
                 </p>
               )}
             </div>
