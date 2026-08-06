@@ -177,3 +177,38 @@ public struct BudgetBook: Codable, Equatable, Sendable {
         self.assignments = assignments
     }
 }
+
+// MARK: - The system catch-all envelope (mirrors schema.ts)
+
+extension BudgetBook {
+    /// The group that holds envelopes the app owns rather than the user.
+    public static let systemGroupID = "g:system"
+    /// The catch-all envelope. Every on-budget outflow has to land somewhere:
+    /// money with no envelope leaves the accounts without leaving any category,
+    /// which is exactly the leak `Ledger.bookIntegrity`'s `unbudgetedSpending`
+    /// residual measures. This is a real, visible, assignable category — it
+    /// just carries no `nodeId`, so `NodeLedger.linkedCategories` keeps it out
+    /// of every flowchart node's math.
+    public static let uncategorizedCategoryID = "cat:uncategorized"
+    /// Sorts the system group and its envelope after anything the user makes.
+    public static let systemOrder = 999_999
+
+    /// Materialize the system group + Uncategorized envelope if they aren't
+    /// there yet, leaving the book alone when they are. Created lazily on first
+    /// need (a delete that reassigns into it, a transaction saved into it) so an
+    /// untouched book stays free of rows the user never asked for — which is
+    /// also why this needs no schema version bump or migration.
+    public mutating func ensureUncategorized() {
+        if !groups.contains(where: { $0.id == Self.systemGroupID }) {
+            groups.append(CategoryGroup(id: Self.systemGroupID, name: "System", order: Self.systemOrder))
+        }
+        if !categories.contains(where: { $0.id == Self.uncategorizedCategoryID }) {
+            categories.append(BudgetCategory(
+                id: Self.uncategorizedCategoryID,
+                groupId: Self.systemGroupID,
+                name: "Uncategorized",
+                order: Self.systemOrder
+            ))
+        }
+    }
+}

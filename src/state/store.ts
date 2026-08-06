@@ -11,8 +11,8 @@ import type {
   Settings,
   Txn,
 } from "./schema";
-import { makeInitialState, newId } from "./schema";
-import { pairTransfer } from "../budget/ledger";
+import { UNCATEGORIZED_CATEGORY_ID, ensureUncategorized, makeInitialState, newId } from "./schema";
+import { fromCents, pairTransfer, toCents } from "../budget/ledger";
 import type { BookOps } from "../budget/nodeLedger";
 import { migrate } from "./io";
 import { LocalStorageAdapter, StorageError } from "./storage";
@@ -43,7 +43,7 @@ type Store = AppState & {
   addGroup: (name: string) => void;
   addCategory: (groupId: string, name: string) => void;
   updateCategory: (category: Category) => void;
-  deleteCategory: (id: string) => void;
+  deleteCategory: (id: string, reassignTo: string) => void;
   applyBookOps: (ops: BookOps) => void;
   reset: () => void;
   replaceAll: (state: AppState) => void;
@@ -155,7 +155,12 @@ export const useStore = create<Store>((set) => ({
       },
     })),
   addTxn: (txn) =>
-    set((s) => ({ budget: { ...s.budget, transactions: [...s.budget.transactions, txn] } })),
+    set((s) => {
+      // First spend with no envelope of its own brings the catch-all into being.
+      const book =
+        txn.categoryId === UNCATEGORIZED_CATEGORY_ID ? ensureUncategorized(s.budget) : s.budget;
+      return { budget: { ...book, transactions: [...book.transactions, txn] } };
+    }),
   updateTxn: (txn) =>
     set((s) => ({
       budget: {
@@ -242,24 +247,44 @@ export const useStore = create<Store>((set) => ({
       }
       return { budget: { ...b, groups, accounts, categories, transactions, assignments } };
     }),
-  // Deleting never loses money: the category's transactions stay (uncategorized)
-  // and its assignments vanish, so those dollars flow back to Ready-to-Assign.
-  deleteCategory: (id) =>
+  // Both of a deleted envelope's terms move together: its transactions and
+  // every month's assigned dollars land on `reassignTo`. Because activity and
+  // funding arrive at the same envelope, assigned-through and activity-through
+  // are invariant, so Sigma available and Ready-to-Assign are invariant and
+  // bookIntegrity().drift stays 0 by construction. (Dropping the assignments —
+  // "returning them to Ready-to-Assign" — conjured the spent dollars instead.)
+  // An envelope no transaction ever touched has no activity to carry, so there
+  // is nothing to keep together: its assignments are simply released back to
+  // Ready-to-Assign, which is money-preserving precisely because activity is 0.
+  deleteCategory: (id, reassignTo) =>
     set((s) => {
+      // The catch-all itself is not deletable — there would be nowhere to put
+      // what it holds.
+      if (id === UNCATEGORIZED_CATEGORY_ID || id === reassignTo) return {};
+      const carriesActivity = s.budget.transactions.some((t) => t.categoryId === id);
+      const book =
+        carriesActivity && reassignTo === UNCATEGORIZED_CATEGORY_ID
+          ? ensureUncategorized(s.budget)
+          : s.budget;
+
       const assignments: AppState["budget"]["assignments"] = {};
-      for (const [month, table] of Object.entries(s.budget.assignments)) {
-        const { [id]: _gone, ...rest } = table;
+      for (const [month, table] of Object.entries(book.assignments)) {
+        const { [id]: moved, ...rest } = table;
+        if (moved !== undefined && carriesActivity) {
+          const merged = toCents(rest[reassignTo] ?? 0) + toCents(moved);
+          if (merged !== 0) rest[reassignTo] = fromCents(merged);
+          else delete rest[reassignTo];
+        }
         if (Object.keys(rest).length > 0) assignments[month] = rest;
       }
+
       return {
         budget: {
-          ...s.budget,
-          categories: s.budget.categories.filter((c) => c.id !== id),
-          transactions: s.budget.transactions.map((t) => {
-            if (t.categoryId !== id) return t;
-            const { categoryId: _cleared, ...rest } = t;
-            return rest;
-          }),
+          ...book,
+          categories: book.categories.filter((c) => c.id !== id),
+          transactions: book.transactions.map((t) =>
+            t.categoryId === id ? { ...t, categoryId: reassignTo } : t,
+          ),
           assignments,
         },
       };

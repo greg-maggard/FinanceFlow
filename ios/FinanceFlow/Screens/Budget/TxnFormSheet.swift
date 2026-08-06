@@ -29,18 +29,27 @@ struct TxnFormSheet: View {
     private var book: BudgetBook { store.state.budget }
     private var accounts: [Account] { book.accounts.filter { $0.closed != true } }
 
-    /// Visible categories in display order (group order, then category order).
+    /// Visible categories in display order (group order, then category order),
+    /// always including the catch-all — it is created lazily, so it has to be
+    /// offered before it exists in the book. It sorts last by construction.
     private var categories: [BudgetCategory] {
         let groupOrder = Dictionary(
             book.groups.map { ($0.id, $0.order) },
             uniquingKeysWith: { first, _ in first }
         )
-        return book.categories
-            .filter { $0.hidden != true }
-            .sorted {
-                (groupOrder[$0.groupId] ?? 0, $0.order, $0.name)
-                    < (groupOrder[$1.groupId] ?? 0, $1.order, $1.name)
-            }
+        var list = book.categories.filter { $0.hidden != true }
+        if !list.contains(where: { $0.id == BudgetBook.uncategorizedCategoryID }) {
+            list.append(BudgetCategory(
+                id: BudgetBook.uncategorizedCategoryID,
+                groupId: BudgetBook.systemGroupID,
+                name: "Uncategorized",
+                order: BudgetBook.systemOrder
+            ))
+        }
+        return list.sorted {
+            (groupOrder[$0.groupId] ?? BudgetBook.systemOrder, $0.order, $0.name)
+                < (groupOrder[$1.groupId] ?? BudgetBook.systemOrder, $1.order, $1.name)
+        }
     }
 
     var body: some View {
@@ -236,7 +245,9 @@ struct TxnFormSheet: View {
                 date: day,
                 payee: payeeOrNil,
                 amount: -amount,
-                categoryId: categoryID
+                // Money that leaves an account with no category leaves the
+                // envelope system entirely — the catch-all catches it.
+                categoryId: categoryID ?? BudgetBook.uncategorizedCategoryID
             ))
         case .income:
             guard let acct = accountID else { return }
@@ -264,6 +275,7 @@ struct TxnFormSheet: View {
         if accountID == nil { accountID = accounts.first?.id }
         if fromID == nil { fromID = accounts.first?.id }
         if toID == nil { toID = accounts.dropFirst().first?.id ?? accounts.first?.id }
-        if categoryID == nil { categoryID = categories.first?.id }
+        // Pre-selected so an expense can never be saved with no envelope at all.
+        if categoryID == nil { categoryID = BudgetBook.uncategorizedCategoryID }
     }
 }
