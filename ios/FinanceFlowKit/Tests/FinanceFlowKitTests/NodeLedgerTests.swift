@@ -261,6 +261,29 @@ struct NodeLedgerTests {
         #expect(Ledger.bookIntegrity(book, month: month).drift == 0)
     }
 
+    @Test("does not treat a sub-half-cent row as an outstanding write-off")
+    func subCentRowIsNotAWriteOff() {
+        // Both engines select unwind candidates on the CENTS-rounded amount, so
+        // a row that rounds to zero is invisible to both. Pinned on each
+        // platform: if the two disagree here, an imported book unwinds a
+        // different row. Mirrors `src/budget/nodeLedger.test.ts`.
+        var book = efBook()
+        book.accounts.append(
+            Account(id: NodeLedger.adjustAccountID, name: "Adjustments", kind: .cash)
+        )
+        book.transactions.append(
+            txn(
+                NodeLedger.adjustAccountID, "\(month)-09", Decimal(string: "-0.004")!,
+                category: "BigEF:b1", id: "txn:adjust:BigEF:b1:\(month)-09"
+            )
+        )
+        let ops = NodeLedger.planBalanceEdit(book, month: month, categoryID: "BigEF:b1", newAvailable: 1500, today: today)
+        #expect(ops.deleteTxnIDs.isEmpty)
+        #expect(ops.updateTxns.isEmpty)
+        #expect(ops.setAssignments.count == 1)
+        #expect(ops.setAssignments.first?.categoryID == "BigEF:b1")
+    }
+
     // MARK: - Account planners
 
     @Test("debt balance edits upsert one adjustment and delete it at net zero")

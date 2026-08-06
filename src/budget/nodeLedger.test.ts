@@ -252,6 +252,32 @@ describe("planBalanceEdit", () => {
     expect(snapshot(book, MONTH).categories["BigEF:b1"].available).toBe(-600);
     expect(bookIntegrity(book, MONTH).drift).toBe(0);
   });
+
+  it("does not treat a sub-half-cent row as an outstanding write-off", () => {
+    // Both engines select unwind candidates on the CENTS-rounded amount, so a
+    // row that rounds to zero is invisible to both. Pinned on each platform:
+    // if the two disagree here, an imported book unwinds a different row.
+    const book: BudgetBook = {
+      ...efBook(),
+      accounts: [...efBook().accounts, acct({ id: ADJUST_ACCOUNT_ID, kind: "cash", name: "Adjustments" })],
+      transactions: [
+        ...efBook().transactions,
+        {
+          ...txn({
+            accountId: ADJUST_ACCOUNT_ID,
+            date: `${MONTH}-09`,
+            amount: -0.004,
+            categoryId: "BigEF:b1",
+          }),
+          id: `txn:adjust:BigEF:b1:${MONTH}-09`,
+        },
+      ],
+    };
+    const ops = planBalanceEdit(book, MONTH, "BigEF:b1", 1500, TODAY);
+    expect(ops.deleteTxnIds).toBeUndefined();
+    expect(ops.updateTxns).toBeUndefined();
+    expect(ops.setAssignments).toEqual([{ month: MONTH, categoryId: "BigEF:b1", amount: 1500 }]);
+  });
 });
 
 describe("account planners", () => {

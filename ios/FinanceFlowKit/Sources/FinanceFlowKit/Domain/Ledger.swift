@@ -13,6 +13,18 @@ public enum Ledger {
         String(date.prefix(7))
     }
 
+    /// A dollar amount in whole cents, rounded exactly as `toCents` in
+    /// `src/budget/ledger.ts` does it: `Math.round(n * 100)`, which is
+    /// `floor(n * 100 + 0.5)` — a half cent goes toward +infinity, so −0.005
+    /// rounds to 0, not −1. iOS keeps `Decimal` end to end and needs this only
+    /// where a comparison has to select the same rows as the web engine.
+    public static func toCents(_ amount: Decimal) -> Decimal {
+        var scaled = amount * 100 + Decimal(string: "0.5")!
+        var rounded = Decimal()
+        NSDecimalRound(&rounded, &scaled, 0, .down)   // .down is floor, not truncation
+        return rounded
+    }
+
     /// On-budget dollars are assignable; loan/tracking accounts only report.
     public static func isOnBudget(_ kind: AccountKind) -> Bool {
         switch kind {
@@ -223,10 +235,13 @@ public enum Ledger {
     /// the viewed month. Summing those definitions across all
     /// categories collapses to:
     ///
-    ///     Sigma available + readyToAssign + unbudgetedSpending == Sigma on-budget cash
+    ///     Sigma available + readyToAssign + unbudgetedSpending == Sigma
+    ///     on-budget cash through the viewed month
     ///
-    /// where `unbudgetedSpending` is the on-budget, non-transfer money that
-    /// never entered an envelope (no `categoryId`, and not an RTA inflow).
+    /// where `unbudgetedSpending` is the on-budget money that never entered an
+    /// envelope (no `categoryId`, and not an RTA inflow), including the
+    /// on-budget leg of a transfer OUT of the budget — only
+    /// on-budget-to-on-budget pairs cancel in the cash total and are skipped.
     /// Every dollar in an on-budget account is therefore accounted for exactly
     /// once, and any non-zero `drift` is money the book conjured or destroyed.
     /// Mirrors `bookIntegrity` in `src/budget/ledger.ts`.
@@ -236,10 +251,17 @@ public enum Ledger {
         var onBudgetCash: Decimal = 0
         var unbudgetedSpending: Decimal = 0
         for t in book.transactions where onBudget.contains(t.accountId) {
-            onBudgetCash += t.amount
-            if t.transferAccountId != nil { continue }
-            if t.categoryId != nil { continue }   // categorized (incl. RTA) money is already counted
+            // Every term of the identity is cumulative THROUGH the viewed
+            // month, so the cash side must be too — a future-dated transaction
+            // is not yet in the book the user is looking at.
             if monthOf(date: t.date) > month { continue }
+            onBudgetCash += t.amount
+            // Only an on-budget -> on-budget pair cancels inside
+            // `onBudgetCash`; skip just that leg. An on-budget -> off-budget
+            // transfer really does leave the budget, so it has to land
+            // somewhere in the identity.
+            if let other = t.transferAccountId, onBudget.contains(other) { continue }
+            if t.categoryId != nil { continue }   // categorized (incl. RTA) money is already counted
             unbudgetedSpending += t.amount
         }
 

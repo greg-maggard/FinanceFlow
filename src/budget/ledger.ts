@@ -224,11 +224,14 @@ export type BookIntegrity = {
  * Summing those definitions across all
  * categories collapses to:
  *
- *   Sigma available + readyToAssign + unbudgetedSpending === Sigma on-budget cash
+ *   Sigma available + readyToAssign + unbudgetedSpending === Sigma on-budget
+ *   cash through the viewed month
  *
- * where `unbudgetedSpending` is the on-budget, non-transfer money that never
- * entered an envelope (no `categoryId`, and not an RTA inflow). Every dollar
- * in an on-budget account is therefore accounted for exactly once, and any
+ * where `unbudgetedSpending` is the on-budget money that never entered an
+ * envelope (no `categoryId`, and not an RTA inflow), including the on-budget
+ * leg of a transfer OUT of the budget — only on-budget-to-on-budget pairs
+ * cancel in the cash total and are skipped. Every dollar in an on-budget
+ * account is therefore accounted for exactly once, and any
  * non-zero `drift` is money the book conjured or destroyed — a bug, not a
  * rounding artifact: the whole computation runs in integer cents, so a healthy
  * book reports exactly 0 rather than 1e-13.
@@ -242,10 +245,16 @@ export function bookIntegrity(book: BudgetBook, month: MonthKey): BookIntegrity 
   let unbudgetedSpendingC = 0;
   for (const t of book.transactions) {
     if (!onBudget.has(t.accountId)) continue;
-    onBudgetCashC += toCents(t.amount);
-    if (t.transferAccountId) continue;
-    if (t.categoryId) continue; // categorized (incl. RTA) money is already counted
+    // Every term of the identity is cumulative THROUGH the viewed month, so the
+    // cash side must be too — a future-dated transaction is not yet in the book
+    // the user is looking at.
     if (monthOf(t.date) > month) continue;
+    onBudgetCashC += toCents(t.amount);
+    // Only an on-budget -> on-budget pair cancels inside `onBudgetCash`; skip
+    // just that leg. An on-budget -> off-budget transfer really does leave the
+    // budget, so it has to land somewhere in the identity.
+    if (t.transferAccountId && onBudget.has(t.transferAccountId)) continue;
+    if (t.categoryId) continue; // categorized (incl. RTA) money is already counted
     unbudgetedSpendingC += toCents(t.amount);
   }
 

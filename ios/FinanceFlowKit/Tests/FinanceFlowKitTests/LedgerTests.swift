@@ -318,6 +318,108 @@ struct LedgerTests {
         #expect(Ledger.bookIntegrity(b, month: "2026-06").drift == 0)
     }
 
+    /// The six-month fixture above funds itself exactly every month, so
+    /// cumulative cash is $0 at every boundary and drift reads 0 whether or not
+    /// the cash side is filtered to the viewed month — it cannot see a
+    /// month-filter bug. This book deliberately carries cash forward (income
+    /// $3,000/mo, rent $1,200, uneven food leaving June overspent, one $80 ATM
+    /// withdrawal that never gets a category) so any drift between the cash
+    /// side and the envelope side shows up the moment you view an older month.
+    /// Mirrors `carryForwardBook` in `src/budget/ledger.test.ts`.
+    private func carryForwardBook(extra: [Txn] = []) -> BudgetBook {
+        makeBook(
+            transactions: [
+                txn("checking", "2026-06-01", 3000, category: Ledger.rtaCategoryID),
+                txn("checking", "2026-06-03", -1200, category: "rent"),
+                txn("checking", "2026-06-20", -550, category: "food"),
+                txn("checking", "2026-07-01", 3000, category: Ledger.rtaCategoryID),
+                txn("checking", "2026-07-03", -1200, category: "rent"),
+                txn("checking", "2026-07-15", -300, category: "food"),
+                txn("checking", "2026-07-25", -80),   // ATM cash, never categorized
+                txn("checking", "2026-08-01", 3000, category: Ledger.rtaCategoryID),
+                txn("checking", "2026-08-03", -1200, category: "rent"),
+            ] + extra,
+            assignments: [
+                "2026-06": ["rent": 1200, "food": 400],
+                "2026-07": ["rent": 1200, "food": 500],
+                "2026-08": ["rent": 1200],
+            ]
+        )
+    }
+
+    @Test("bookIntegrity holds at every month boundary of a book that carries cash forward")
+    func integrityCarriesCashForward() {
+        let b = carryForwardBook()
+        // Hand-derived: cash is cumulative THROUGH the viewed month, like every
+        // other term. June ends $150 overspent on food, which sweeps in July.
+        #expect(Ledger.bookIntegrity(b, month: "2026-06") == Ledger.BookIntegrity(
+            onBudgetCash: 1250, sumAvailable: -150, readyToAssign: 1400,
+            unbudgetedSpending: 0, drift: 0
+        ))
+        #expect(Ledger.bookIntegrity(b, month: "2026-07") == Ledger.BookIntegrity(
+            onBudgetCash: 2670, sumAvailable: 200, readyToAssign: 2550,
+            unbudgetedSpending: -80, drift: 0
+        ))
+        #expect(Ledger.bookIntegrity(b, month: "2026-08") == Ledger.BookIntegrity(
+            onBudgetCash: 4470, sumAvailable: 200, readyToAssign: 4350,
+            unbudgetedSpending: -80, drift: 0
+        ))
+    }
+
+    @Test("bookIntegrity leaves a future-dated transaction out of the viewed month's cash")
+    func integrityIgnoresFutureDatedCash() {
+        // A post-dated bill must not make the books "not balance" in August —
+        // it isn't part of August's cash yet.
+        let b = carryForwardBook(extra: [txn("checking", "2026-09-01", -250, category: "rent")])
+        let aug = Ledger.bookIntegrity(b, month: "2026-08")
+        #expect(aug.onBudgetCash == 4470)
+        #expect(aug.drift == 0)
+        // Once September is the viewed month it counts, on both sides.
+        let sep = Ledger.bookIntegrity(b, month: "2026-09")
+        #expect(sep.onBudgetCash == 4220)
+        #expect(sep.drift == 0)
+    }
+
+    @Test("bookIntegrity books the on-budget leg of an on->off transfer as unbudgetedSpending")
+    func integrityOnToOffTransferLeg() {
+        // Checking -> tracking with no category: the counterpart lives off
+        // budget and is never summed, so this leg has to land in the identity.
+        let pair = Ledger.pairTransfer(
+            accounts: makeBook().accounts,
+            from: "checking", to: "ira", amount: 500, date: "2026-08-10"
+        )
+        let b = carryForwardBook(extra: [pair.out, pair.inflow])
+        let i = Ledger.bookIntegrity(b, month: "2026-08")
+        #expect(i.onBudgetCash == 3970)
+        #expect(i.unbudgetedSpending == -580)
+        #expect(i.drift == 0)
+    }
+
+    @Test("bookIntegrity keeps an on->on transfer pair out of unbudgetedSpending entirely")
+    func integrityOnToOnTransferPair() {
+        // Control: both legs are on budget, so they cancel in cash and must not
+        // be counted as spending on either side.
+        let pair = Ledger.pairTransfer(
+            accounts: makeBook().accounts,
+            from: "checking", to: "savings", amount: 500, date: "2026-08-10"
+        )
+        let b = carryForwardBook(extra: [pair.out, pair.inflow])
+        let i = Ledger.bookIntegrity(b, month: "2026-08")
+        #expect(i.onBudgetCash == 4470)
+        #expect(i.unbudgetedSpending == -80)
+        #expect(i.drift == 0)
+    }
+
+    @Test("toCents rounds a half cent toward +infinity, like JavaScript's Math.round")
+    func toCentsMatchesJSRounding() {
+        #expect(Ledger.toCents(Decimal(string: "-0.005")!) == 0)
+        #expect(Ledger.toCents(Decimal(string: "-0.004")!) == 0)
+        #expect(Ledger.toCents(Decimal(string: "-0.015")!) == -1)
+        #expect(Ledger.toCents(Decimal(string: "0.005")!) == 1)
+        #expect(Ledger.toCents(Decimal(string: "-45.55")!) == -4555)
+        #expect(Ledger.toCents(Decimal(string: "1650.37")!) == 165037)
+    }
+
     @Test("bookIntegrity stays exact on cent-level amounts that would drift as floats")
     func integrityCentExact() {
         let b = makeBook(
