@@ -153,20 +153,31 @@ export type DebtRow = {
 
 /** The node's open (non-closed) linked debt accounts. */
 export function debtRows(book: BudgetBook, nodeId: "HighDebt" | "ModDebt"): DebtRow[] {
-  return linkedAccounts(book, nodeId)
-    .filter((a) => a.closed !== true)
-    .map((account) => {
-      const balanceC = toCents(accountBalance(book, account.id));
-      const start = book.transactions.find((t) => t.id === startingTxnId(account.id));
-      const outstandingC = Math.max(0, -balanceC);
-      const principalC = start ? Math.max(0, -toCents(start.amount)) : outstandingC;
-      return {
-        account,
-        outstanding: fromCents(outstandingC),
-        principal: fromCents(principalC),
-        paid: balanceC >= 0,
-      };
-    });
+  const accounts = linkedAccounts(book, nodeId).filter((a) => a.closed !== true);
+  // Having no linked debt accounts is the common case, and `debtTotals` calls
+  // this for both HighDebt and ModDebt on every node-graph render. Bail before
+  // the scan below rather than walking the whole book to build an empty list.
+  if (accounts.length === 0) return [];
+  const wanted = new Set(accounts.map((a) => a.id));
+  const balancesC = new Map<string, number>();
+  const startingTxns = new Map<string, Txn>();
+  for (const t of book.transactions) {
+    if (!wanted.has(t.accountId)) continue;
+    balancesC.set(t.accountId, (balancesC.get(t.accountId) ?? 0) + toCents(t.amount));
+    if (t.id === startingTxnId(t.accountId)) startingTxns.set(t.accountId, t);
+  }
+  return accounts.map((account) => {
+    const balanceC = balancesC.get(account.id) ?? 0;
+    const start = startingTxns.get(account.id);
+    const outstandingC = Math.max(0, -balanceC);
+    const principalC = start ? Math.max(0, -toCents(start.amount)) : outstandingC;
+    return {
+      account,
+      outstanding: fromCents(outstandingC),
+      principal: fromCents(principalC),
+      paid: balanceC >= 0,
+    };
+  });
 }
 
 /**
