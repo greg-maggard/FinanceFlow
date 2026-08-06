@@ -318,10 +318,44 @@ export const useStore = create<Store>((set) => ({
 const SAVE_DEBOUNCE_MS = 300;
 
 /** The seven fields that make it into the persisted document, by reference. */
-type PersistedSlice = Pick<
+type PersistedFields = Pick<
   AppState,
   "version" | "settings" | "decisions" | "nodes" | "budget" | "shownCelebrations" | "earnedMedals"
 >;
+
+/**
+ * What actually gets written to localStorage: the seven persisted fields
+ * plus a monotonic write counter (F12). `writeSeq` is deliberately outside
+ * `slicesEqual`'s comparison below — it changes on every call to
+ * `toPersistedSlice` (see `writeSeq` var), so if equality checked it, the
+ * no-redundant-write dedupe in `scheduleSave`/`flushSave` would never fire
+ * and every keystroke would hit localStorage again. `migrate()` tolerates
+ * its absence (older documents, or a v3 document written before this
+ * field existed), so no version bump is needed — see io.ts.
+ */
+type PersistedSlice = PersistedFields & { writeSeq: number };
+
+/**
+ * Monotonic counter for this tab, seeded from whatever `writeSeq` (if any)
+ * was already on disk at boot so a fresh tab's own first write still sorts
+ * after anything a previous session wrote. Bumped once per actual write in
+ * `writeNow` — not per mutation — so the value on disk always matches the
+ * value this tab believes it last wrote (compared against in the `storage`
+ * listener below).
+ */
+function readStoredWriteSeq(): number {
+  if (typeof localStorage === "undefined") return 0;
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (!raw) return 0;
+  try {
+    const parsed = JSON.parse(raw) as { writeSeq?: unknown };
+    return typeof parsed.writeSeq === "number" ? parsed.writeSeq : 0;
+  } catch {
+    return 0;
+  }
+}
+
+let writeSeq = readStoredWriteSeq();
 
 function toPersistedSlice(s: AppState): PersistedSlice {
   return {
@@ -332,6 +366,7 @@ function toPersistedSlice(s: AppState): PersistedSlice {
     budget: s.budget,
     shownCelebrations: s.shownCelebrations,
     earnedMedals: s.earnedMedals,
+    writeSeq,
   };
 }
 
@@ -339,6 +374,7 @@ let lastSaved: PersistedSlice | null = null;
 let pending: PersistedSlice | null = null;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
+// Intentionally does not compare `writeSeq` — see PersistedSlice above.
 function slicesEqual(a: PersistedSlice, b: PersistedSlice): boolean {
   return (
     a.version === b.version &&
@@ -357,7 +393,18 @@ const SAVE_ERROR_MESSAGE = "Couldn't save your changes. Export a backup now.";
 const SAVE_ERROR_MESSAGE_QUOTA =
   "Couldn't save your changes — storage is full. Export a backup now.";
 
-function writeNow(slice: PersistedSlice): void {
+/** F12: shown by TopBar's blocking overlay when the `storage` listener below
+ *  sees another tab/window has written a newer document. */
+const STALE_TAB_MESSAGE = "Another window updated your budget — reload to continue";
+
+function writeNow(pendingSlice: PersistedSlice): void {
+  // The counter only advances here, at the one place an actual write
+  // happens — not in toPersistedSlice, which runs on every mutation whether
+  // or not it ends up debounced away. Re-stamp so the bytes on disk (and
+  // `lastSaved`, for future dedupe checks) carry the value that was just
+  // claimed, regardless of what `pendingSlice.writeSeq` happened to be.
+  writeSeq += 1;
+  const slice: PersistedSlice = { ...pendingSlice, writeSeq };
   lastSaved = slice;
   pending = null;
   if (saveTimer !== null) {
@@ -419,6 +466,30 @@ if (typeof window !== "undefined" && !bootRecovery) {
   });
   window.addEventListener("pagehide", () => {
     flushSave();
+  });
+
+  // F12: multi-tab last-writer-wins. The browser only ever dispatches
+  // `storage` to *other* windows/tabs than the one that wrote — so this
+  // fires exactly when some other surface (another tab, or the installed
+  // PWA) has persisted a document, never for this tab's own writes. If that
+  // document's writeSeq is ahead of the one this tab last wrote, some other
+  // surface has a newer document than what's in this tab's memory; suspend
+  // before this tab's own (possibly stale) in-memory state can debounce its
+  // way over it, and surface a blocking, non-dismissable banner — the only
+  // safe way out is the reload it asks for.
+  window.addEventListener("storage", (e) => {
+    if (e.key !== STORAGE_KEY || !e.newValue) return;
+    let parsed: { writeSeq?: unknown } | null = null;
+    try {
+      parsed = JSON.parse(e.newValue);
+    } catch {
+      return;
+    }
+    const storedSeq = typeof parsed?.writeSeq === "number" ? parsed.writeSeq : 0;
+    if (storedSeq > writeSeq) {
+      suspendPersistence();
+      useUI.getState().setStaleTab(STALE_TAB_MESSAGE);
+    }
   });
 }
 

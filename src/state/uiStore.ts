@@ -29,6 +29,15 @@ type UIStore = {
   /** Epoch ms of the most recent successful persistence write, for the
    *  "Last saved" read-out in SettingsModal. */
   lastSavedAt: number | null;
+  /**
+   * Non-null once this tab's `storage` listener (see store.ts, F12) sees a
+   * persisted document with a higher write-seq than this tab has ever
+   * written — i.e. another tab or the installed PWA saved something newer.
+   * Unlike saveError this is blocking and has no dismiss action: store.ts
+   * has already suspended the persistence subscription for the rest of the
+   * session, so the only way out is the reload this message asks for.
+   */
+  staleTab: string | null;
   /** True once the PWA service worker reports a new version is waiting.
    *  Drives the non-blocking update banner in TopBar; see setPwaUpdateHandler
    *  below for how the reload itself is triggered. */
@@ -46,6 +55,7 @@ type UIStore = {
   clearSaveError: () => void;
   setLastSaved: (at: number) => void;
   setNeedRefresh: (v: boolean) => void;
+  setStaleTab: (message: string) => void;
 };
 
 export const useUI = create<UIStore>((set) => ({
@@ -58,6 +68,7 @@ export const useUI = create<UIStore>((set) => ({
   budgetFocus: null,
   saveError: null,
   lastSavedAt: null,
+  staleTab: null,
   needRefresh: false,
   setView: (v) => set({ view: v }),
   setFocus: (id, direction = "none") => set({ focusedId: id, direction, view: "focus" }),
@@ -72,6 +83,9 @@ export const useUI = create<UIStore>((set) => ({
   clearSaveError: () => set({ saveError: null }),
   setLastSaved: (at) => set({ lastSavedAt: at }),
   setNeedRefresh: (v) => set({ needRefresh: v }),
+  // Once set, this never gets cleared by anything short of a fresh module
+  // load (i.e. a reload) — see the `staleTab` doc comment above.
+  setStaleTab: (message) => set({ staleTab: message }),
 }));
 
 // The Workbox-provided reload trigger (from virtual:pwa-register's
