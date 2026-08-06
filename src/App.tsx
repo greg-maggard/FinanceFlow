@@ -6,14 +6,27 @@ import { PhaseTrail } from "./components/PhaseTrail";
 import { SettingsModal } from "./components/SettingsModal";
 import { OverviewSheet } from "./components/OverviewSheet";
 import { CelebrationLayer } from "./components/CelebrationLayer";
+import { RecoveryScreen } from "./components/RecoveryScreen";
 import { FocusStage } from "./components/focus/FocusStage";
 import { BudgetScreen } from "./components/budget/BudgetScreen";
 import { findCurrentNode } from "./components/focus/advance";
 import { useUI } from "./state/uiStore";
+import { getBootRecovery } from "./state/store";
 import { GRAPH_BY_ID } from "./graph/flowchart";
 import { M } from "./theme/motion";
 
 export default function App() {
+  // Checked once at module init (see src/state/store.ts loadInitial()) and
+  // never toggles within a session, so branching before any hooks run here
+  // is safe: this component either always takes this path or never does.
+  const bootRecovery = getBootRecovery();
+  if (bootRecovery) {
+    return <RecoveryScreen message={bootRecovery.message} raw={bootRecovery.raw} />;
+  }
+  return <AppShell />;
+}
+
+function AppShell() {
   const focusedId = useUI((s) => s.focusedId);
   const setFocus = useUI((s) => s.setFocus);
   const view = useUI((s) => s.view);
