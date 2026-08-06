@@ -108,6 +108,14 @@ struct NodeDetailSheet: View {
             if case let .goal(value, max, ready) = progress, max > 0 {
                 VStack(alignment: .leading, spacing: theme.spacing.xs) {
                     GoalBar(value: value, max: max, color: phase.base)
+                    if recurringNodes.contains(nodeId) {
+                        Text(
+                            "Funded \(CurrencyFormat.string(value)) of \(CurrencyFormat.string(max))"
+                                + " · \(CurrencyFormat.string(leftThisMonth)) left this month"
+                        )
+                        .font(theme.typography.caption)
+                        .foregroundStyle(theme.colors.textSecondary)
+                    }
                     if ready {
                         Text("Goal reached — ready to mark complete.")
                             .font(theme.typography.caption)
@@ -125,6 +133,16 @@ struct NodeDetailSheet: View {
             notesEditor
             completeButton(phase: phase)
         }
+    }
+
+    /// What's still sitting in the node's envelopes. `funded` answers "is this
+    /// month covered?" and counts money that has already gone out the door, so
+    /// after any spending it disagrees with the Budget screen's available —
+    /// showing both saves the user from reconciling the two.
+    private var leftThisMonth: Decimal {
+        let book = store.state.budget
+        let snap = Ledger.snapshot(book, month: Recurring.ymKey())
+        return NodeLedger.nodeRows(book, snap, nodeId).reduce(Decimal(0)) { $0 + $1.available }
     }
 
     private func completeButton(phase: PhaseColor) -> some View {

@@ -54,14 +54,14 @@ struct ProgressTests {
 
     @Test("exact decimal sums meet the target with no floating-point drift")
     func exactSumsAreReady() {
-        // As `Double`, assigned 0.7 + 0.1 == 0.7999999999999999, a hair below
-        // the target 0.4 + 0.4 == 0.8 — so `ready` would need a tolerance to
-        // not get stuck false. The ledger sums exact `Decimal`s, so both sides
-        // are exactly 0.8 and plain `>=` is enough.
+        // As `Double`, 0.7 + 0.1 == 0.7999999999999999 — a hair below 0.8 on
+        // both sides of the comparison, so `ready` would need a tolerance to
+        // not get stuck false. The ledger sums exact `Decimal`s, so target and
+        // funded are both exactly 0.8 and plain `>=` is enough.
         let s = seeded {
             $0.budget.categories = [
-                cat("Food:a", .Food, monthlyTarget: Decimal(string: "0.4")!),
-                cat("Food:b", .Food, monthlyTarget: Decimal(string: "0.4")!),
+                cat("Food:a", .Food, monthlyTarget: Decimal(string: "0.7")!),
+                cat("Food:b", .Food, monthlyTarget: Decimal(string: "0.1")!),
             ]
             $0.budget.assignments = [month: ["Food:a": Decimal(string: "0.7")!, "Food:b": Decimal(string: "0.1")!]]
         }
@@ -71,6 +71,41 @@ struct ProgressTests {
         #expect(max == 0.8)
         #expect(value == 0.8)
         #expect(ready == true)
+    }
+
+    @Test("a target met entirely by carryover reads ready with nothing assigned")
+    func carryoverIsReady() {
+        // Month-ahead budgeting: May's assignment carries into June untouched.
+        let s = seeded {
+            $0.budget.transactions = [
+                Txn(id: "t:rta", accountId: "checking", date: "2026-05-01", amount: 100000, categoryId: Ledger.rtaCategoryID),
+            ]
+            $0.budget.categories = [cat("Rent:base", .Rent, monthlyTarget: 1800)]
+            $0.budget.assignments = ["2026-05": ["Rent:base": 1800]]
+        }
+        guard case let .goal(value, max, ready) = progressOf(s, .Rent, month: month) else {
+            Issue.record("expected .goal"); return
+        }
+        #expect(max == 1800)
+        #expect(value == 1800)
+        #expect(ready == true)
+    }
+
+    @Test("one over-stuffed envelope cannot cover an empty sibling in the same node")
+    func clampStopsSiblingMasking() {
+        let s = seeded {
+            $0.budget.categories = [
+                cat("Rent:base", .Rent, monthlyTarget: 1500),
+                cat("Rent:parking", .Rent, monthlyTarget: 200),
+            ]
+            $0.budget.assignments = [month: ["Rent:base": 1700]]
+        }
+        guard case let .goal(value, max, ready) = progressOf(s, .Rent, month: month) else {
+            Issue.record("expected .goal"); return
+        }
+        #expect(max == 1700)
+        #expect(value == 1500)
+        #expect(ready == false)
     }
 
     @Test("recurring without targets keeps the zero-target behavior: none, ready")

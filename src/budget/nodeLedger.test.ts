@@ -74,7 +74,7 @@ function fundedBook(): BudgetBook {
 }
 
 describe("node reads", () => {
-  it("recurring totals: Σ monthly targets vs Σ assigned this month", () => {
+  it("recurring totals: Σ monthly targets vs Σ funded, each envelope capped at its target", () => {
     const book: BudgetBook = {
       ...fundedBook(),
       categories: [
@@ -85,9 +85,42 @@ describe("node reads", () => {
       assignments: { [MONTH]: { "Rent:r1": 1800, "Rent:r2": 0.2, Food: 450 } },
     };
     const snap = snapshot(book, MONTH);
-    expect(recurringTotals(book, snap, "Rent")).toEqual({ target: 1800.1, funded: 1800.2 });
+    // Rent:r2 holds 0.20 against a 0.10 target; the per-category clamp keeps
+    // the surplus from covering a sibling, so the node reads 1800.10, not .20.
+    expect(recurringTotals(book, snap, "Rent")).toEqual({ target: 1800.1, funded: 1800.1 });
     expect(recurringTotals(book, snap, "Food")).toEqual({ target: 600, funded: 450 });
     expect(recurringTotals(book, snap, "Essential")).toEqual({ target: 0, funded: 0 });
+  });
+
+  it("a target met entirely by carryover is funded, before and after the bill is paid", () => {
+    // Month-ahead budgeting: assigned in May, zero assigned in June. The
+    // envelope is full, so the node must read fully funded either way.
+    const base: BudgetBook = {
+      ...emptyBudgetBook(),
+      accounts: [acct({ id: "checking", kind: "checking" })],
+      categories: [cat({ id: "Rent:r1", nodeId: "Rent", monthlyTarget: 1800 })],
+      transactions: [
+        txn({ accountId: "checking", date: "2026-05-01", amount: 5000, categoryId: RTA_CATEGORY_ID }),
+      ],
+      assignments: { "2026-05": { "Rent:r1": 1800 } },
+    };
+    const carried = snapshot(base, MONTH);
+    expect(carried.categories["Rent:r1"]).toMatchObject({ assigned: 0, activity: 0, available: 1800 });
+    expect(recurringTotals(base, carried, "Rent")).toEqual({ target: 1800, funded: 1800 });
+
+    // Paying June's rent out of the carried balance empties the envelope but
+    // does not un-fund the month: the money was there and did its job.
+    const paid: BudgetBook = {
+      ...base,
+      transactions: [
+        ...base.transactions,
+        txn({ accountId: "checking", date: `${MONTH}-03`, amount: -1800, categoryId: "Rent:r1" }),
+      ],
+    };
+    const spent = snapshot(paid, MONTH);
+    expect(spent.categories["Rent:r1"]).toMatchObject({ assigned: 0, activity: -1800, available: 0 });
+    expect(recurringTotals(paid, spent, "Rent")).toEqual({ target: 1800, funded: 1800 });
+    expect(bookIntegrity(paid, MONTH).drift).toBe(0);
   });
 
   it("EF balance is the SmallEF/BigEF union; only BigEF's target grows with buckets", () => {

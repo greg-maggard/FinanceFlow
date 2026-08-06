@@ -18,6 +18,9 @@ import { StreakChip } from "./StreakBadge";
 import { advance, findCurrentNode } from "./advance";
 import { KebabMenu } from "../glass/KebabMenu";
 import { isCheckedThisMonth, ymKey } from "../../state/recurring";
+import { fromCents, snapshot, toCents } from "../../budget/ledger";
+import { nodeRows } from "../../budget/nodeLedger";
+import { dollars } from "../budget/bits";
 
 function monthNameFor(key: string): string {
   const [y, m] = key.split("-").map(Number);
@@ -40,6 +43,18 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
   const progress = progressOf(state, nodeId);
   const recurring = RECURRING.has(nodeId);
   const identity = IDENTITY[nodeId];
+
+  /**
+   * What's still sitting in the node's envelopes. `funded` answers "is this
+   * month covered?" and counts money that has already gone out the door, so
+   * after any spending it disagrees with the Budget screen's available —
+   * showing both saves the user from reconciling the two.
+   */
+  const leftThisMonth = useMemo(() => {
+    if (!recurring) return 0;
+    const rows = nodeRows(state.budget, snapshot(state.budget, ymKey()), nodeId);
+    return fromCents(rows.reduce((c, r) => c + toCents(r.available), 0));
+  }, [recurring, nodeId, state.budget]);
 
   const status = useMemo(() => deriveStatus(state), [state]);
   const isOnPath = status[nodeId] === "current";
@@ -215,13 +230,21 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
         ) : (
           <div className="space-y-5">
             {progress.kind === "goal" && (
-              <GoalBar
-                value={progress.value}
-                max={progress.max}
-                tint={phaseColor.base}
-                glow={phaseColor.glow}
-                caption={nodeState.completed ? "Done" : "Toward target"}
-              />
+              <div className="space-y-2">
+                <GoalBar
+                  value={progress.value}
+                  max={progress.max}
+                  tint={phaseColor.base}
+                  glow={phaseColor.glow}
+                  caption={nodeState.completed ? "Done" : "Toward target"}
+                />
+                {recurring && (
+                  <p className="text-[11px] tabular-nums text-white/55">
+                    Funded {dollars(progress.value)} of {dollars(progress.max)} ·{" "}
+                    {dollars(leftThisMonth)} left this month
+                  </p>
+                )}
+              </div>
             )}
 
             {Form && recurring && (

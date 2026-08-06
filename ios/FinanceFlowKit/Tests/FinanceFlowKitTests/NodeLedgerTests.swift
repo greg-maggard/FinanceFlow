@@ -62,7 +62,7 @@ struct NodeLedgerTests {
 
     // MARK: - Reads
 
-    @Test("recurring totals: Σ monthly targets vs Σ assigned this month")
+    @Test("recurring totals: Σ monthly targets vs Σ funded, each envelope capped at its target")
     func recurringTotals() {
         var book = fundedBook()
         book.categories = [
@@ -74,13 +74,46 @@ struct NodeLedgerTests {
         let snap = Ledger.snapshot(book, month: month)
         let rent = NodeLedger.recurringTotals(book, snap, .Rent)
         #expect(rent.target == Decimal(string: "1800.1")!)
-        #expect(rent.funded == Decimal(string: "1800.2")!)
+        // Rent:r2 holds 0.20 against a 0.10 target; the per-category clamp keeps
+        // the surplus from covering a sibling, so the node reads 1800.10.
+        #expect(rent.funded == Decimal(string: "1800.1")!)
         let food = NodeLedger.recurringTotals(book, snap, .Food)
         #expect(food.target == 600)
         #expect(food.funded == 450)
         let essential = NodeLedger.recurringTotals(book, snap, .Essential)
         #expect(essential.target == 0)
         #expect(essential.funded == 0)
+    }
+
+    @Test("a target met entirely by carryover is funded, before and after the bill is paid")
+    func carryoverCountsAsFunded() {
+        // Month-ahead budgeting: assigned in May, zero assigned in June. The
+        // envelope is full, so the node must read fully funded either way.
+        var base = BudgetBook()
+        base.accounts = [Account(id: "checking", name: "checking", kind: .checking)]
+        base.categories = [cat("Rent:r1", .Rent, monthlyTarget: 1800)]
+        base.transactions = [txn("checking", "2026-05-01", 5000, category: Ledger.rtaCategoryID)]
+        base.assignments = ["2026-05": ["Rent:r1": 1800]]
+
+        let carried = Ledger.snapshot(base, month: month)
+        #expect(carried.categories["Rent:r1"]?.assigned == 0)
+        #expect(carried.categories["Rent:r1"]?.activity == 0)
+        #expect(carried.categories["Rent:r1"]?.available == 1800)
+        let before = NodeLedger.recurringTotals(base, carried, .Rent)
+        #expect(before.target == 1800)
+        #expect(before.funded == 1800)
+
+        // Paying June's rent out of the carried balance empties the envelope
+        // but does not un-fund the month: the money was there and did its job.
+        var paid = base
+        paid.transactions.append(txn("checking", "\(month)-03", -1800, category: "Rent:r1"))
+        let spent = Ledger.snapshot(paid, month: month)
+        #expect(spent.categories["Rent:r1"]?.activity == -1800)
+        #expect(spent.categories["Rent:r1"]?.available == 0)
+        let after = NodeLedger.recurringTotals(paid, spent, .Rent)
+        #expect(after.target == 1800)
+        #expect(after.funded == 1800)
+        #expect(Ledger.bookIntegrity(paid, month: month).drift == 0)
     }
 
     @Test("EF balance is the SmallEF/BigEF union; only BigEF's target grows with buckets")
