@@ -20,7 +20,10 @@ const RESET_PHRASE = "RESET";
  * Settings gear, then Export) rather than sitting under theme options.
  */
 function BackupSection() {
-  const state = useStore();
+  // No reactive subscription needed: the export only reads the store at
+  // click time (a bare `useStore()` here would re-render on every store
+  // mutation while Settings is open for no benefit — Export always wants
+  // the freshest state regardless).
   const fileRef = useRef<HTMLInputElement>(null);
 
   const onImport = async (file: File) => {
@@ -37,7 +40,7 @@ function BackupSection() {
       <FieldLabel>Backup</FieldLabel>
       <div className="flex gap-2">
         <button
-          onClick={() => downloadJson(state)}
+          onClick={() => downloadJson(useStore.getState())}
           className="flex-1 rounded-full px-3 py-2 text-[12px] font-medium text-white/80 hover:text-white/95"
           style={{
             background: "rgba(255,255,255,0.08)",

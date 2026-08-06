@@ -30,7 +30,14 @@ function monthNameFor(key: string): string {
 
 export function FocusCard({ nodeId }: { nodeId: NodeId }) {
   const node = GRAPH_BY_ID[nodeId];
-  const state = useStore();
+  // Selector-scoped rather than a bare `useStore()`: the focus card is on
+  // screen for the whole time the user is editing it, so a whole-store
+  // subscription would re-render it (and re-run `progressOf`/`snapshot`) on
+  // every store mutation anywhere, not just edits that touch this node.
+  const budget = useStore((s) => s.budget);
+  const settings = useStore((s) => s.settings);
+  const nodes = useStore((s) => s.nodes);
+  const decisions = useStore((s) => s.decisions);
   const triggerCelebration = useUI((s) => s.triggerCelebration);
   const setFocus = useUI((s) => s.setFocus);
   const pendingCelebration = useUI((s) => s.pendingCelebration);
@@ -38,10 +45,15 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
   const [showForm, setShowForm] = useState(true);
   const [showNotes, setShowNotes] = useState(false);
 
-  const nodeState = state.nodes[nodeId];
+  const nodeState = nodes[nodeId];
   const Form = FORM_BY_NODE[nodeId];
   const Menu = MENU_BY_NODE[nodeId];
-  const progress = progressOf(state, nodeId);
+  const month = ymKey();
+  // Computed once per render and threaded through both `progressOf` and
+  // `leftThisMonth` below, instead of each calling `snapshot()` on its own —
+  // the whole point of this pass (w3-perf finding 2).
+  const snap = useMemo(() => snapshot(budget, month), [budget, month]);
+  const progress = progressOf({ budget, settings, nodes }, nodeId, month, snap);
   const recurring = RECURRING.has(nodeId);
   const identity = IDENTITY[nodeId];
 
@@ -53,11 +65,11 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
    */
   const leftThisMonth = useMemo(() => {
     if (!recurring) return cents(0);
-    const rows = nodeRows(state.budget, snapshot(state.budget, ymKey()), nodeId);
+    const rows = nodeRows(budget, snap, nodeId);
     return cents(rows.reduce((sum, r) => sum + r.available, 0));
-  }, [recurring, nodeId, state.budget]);
+  }, [recurring, nodeId, budget, snap]);
 
-  const status = useMemo(() => deriveStatus(state), [state]);
+  const status = useMemo(() => deriveStatus({ nodes, decisions }), [nodes, decisions]);
   const isOnPath = status[nodeId] === "current";
   const isFreshCelebration = pendingCelebration?.id === nodeId;
   const fullCelebration = isFreshCelebration && (pendingCelebration?.onPath ?? false);
@@ -218,11 +230,11 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
                 No
               </GlassButton>
             </div>
-            {state.decisions[node.decisionId!] && (
+            {decisions[node.decisionId!] && (
               <p className="text-center text-xs text-white/45">
                 Currently:{" "}
                 <span className="font-semibold uppercase">
-                  {state.decisions[node.decisionId!]}
+                  {decisions[node.decisionId!]}
                 </span>
                 . Re-answer to change route.
               </p>

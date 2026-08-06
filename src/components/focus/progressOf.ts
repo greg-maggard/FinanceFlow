@@ -2,6 +2,7 @@ import type { AppState, Cents, MonthKey, NodeId } from "../../state/schema";
 import { bigEmergencyFundTarget, cents, emergencyFundTarget } from "../../state/schema";
 import { RECURRING } from "../../theme/identity";
 import { GRAPH_BY_ID } from "../../graph/flowchart";
+import type { MonthSnapshot } from "../../budget/ledger";
 import { snapshot } from "../../budget/ledger";
 import { ymKey } from "../../state/recurring";
 import {
@@ -48,12 +49,22 @@ const goalPercent = (value: number, max: number, ready: boolean): ProgressInfo =
  * (the same book the Budget screen shows — see `src/budget/nodeLedger.ts`);
  * the rest still read their node payloads. Mirrors `progressOf` in
  * `Domain/Progress.swift`.
+ *
+ * `state` only needs to be `budget`/`settings`/`nodes` — narrowed (rather
+ * than the full `AppState`) so a caller subscribing to store slices can pass
+ * exactly what it selected, with no cast. `snap` is an optional precomputed
+ * `snapshot(state.budget, month)` — a caller that already has one (FocusCard
+ * needs it a second time for `leftThisMonth`) passes it through to skip a
+ * second full ledger pass; omitted, this computes it exactly as before.
  */
-export function progressOf(state: AppState, id: NodeId, month: MonthKey = ymKey()): ProgressInfo {
+export function progressOf(
+  state: Pick<AppState, "budget" | "settings" | "nodes">,
+  id: NodeId,
+  month: MonthKey = ymKey(),
+  snap: MonthSnapshot = snapshot(state.budget, month),
+): ProgressInfo {
   const node = GRAPH_BY_ID[id];
   if (node.kind === "decision") return { kind: "none", ready: false };
-
-  const snap = snapshot(state.budget, month);
 
   if (RECURRING.has(id)) {
     const { target, funded } = recurringTotals(state.budget, snap, id);

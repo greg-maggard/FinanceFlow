@@ -46,11 +46,16 @@ export function OverviewSheet() {
   const setView = useUI((s) => s.setView);
   const setFocus = useUI((s) => s.setFocus);
   const triggerCelebration = useUI((s) => s.triggerCelebration);
-  const state = useStore();
-  const status = useMemo(() => deriveStatus(state), [state]);
+  // Selector-scoped: this sheet is always mounted (gated only by CSS/motion,
+  // not by unmounting), so a bare `useStore()` would re-render it — and
+  // recompute `deriveStatus` — on every store mutation anywhere, budget
+  // edits included.
+  const nodes = useStore((s) => s.nodes);
+  const decisions = useStore((s) => s.decisions);
+  const status = useMemo(() => deriveStatus({ nodes, decisions }), [nodes, decisions]);
 
   const toggle = (id: NodeId) => {
-    const wasComplete = state.nodes[id].completed;
+    const wasComplete = nodes[id].completed;
     const wasOnPath = status[id] === "current";
     useStore.getState().toggleComplete(id);
     if (!wasComplete) triggerCelebration(id, wasOnPath);
@@ -123,7 +128,7 @@ export function OverviewSheet() {
                     <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                       {phaseNodes.map((n) => {
                         const s = status[n.id];
-                        const completed = state.nodes[n.id].completed;
+                        const completed = nodes[n.id].completed;
                         const style = statusStyle(s, c.base, c.glow, c.tint);
                         const isCheckable = n.kind === "task";
                         return (

@@ -28,9 +28,12 @@ export function FocusStage({ activeId }: { activeId: NodeId }) {
   const setView = useUI((s) => s.setView);
   const view = useUI((s) => s.view);
   const direction = useUI((s) => s.direction);
-  const state = useStore();
+  // `neighbors` only reads `decisions` — a bare `useStore()` here would
+  // re-render the stage (and re-walk the graph) on every store mutation
+  // anywhere, budget edits included.
+  const decisions = useStore((s) => s.decisions);
 
-  const { prev, next } = useMemo(() => neighbors(state, activeId), [state, activeId]);
+  const { prev, next } = useMemo(() => neighbors({ decisions }, activeId), [decisions, activeId]);
 
   const goPrev = useCallback(() => {
     if (prev) setFocus(prev, "backward");

@@ -12,7 +12,10 @@ export function CelebrationLayer() {
   const clearCelebration = useUI((s) => s.clearCelebration);
   const pendingMedal = useUI((s) => s.pendingMedal);
   const clearMedal = useUI((s) => s.clearMedal);
-  const state = useStore();
+  // Only `nodes` is read below (for the bloom's `completedAt` key) — a bare
+  // `useStore()` here would re-render this always-mounted layer on every
+  // store mutation anywhere, budget edits included.
+  const nodes = useStore((s) => s.nodes);
 
   useEffect(() => {
     if (!pendingCelebration) return;
@@ -33,7 +36,7 @@ export function CelebrationLayer() {
       <AnimatePresence>
         {pendingCelebration && phaseColor && isOnPath && (
           <motion.div
-            key={`bloom-${pendingCelebration.id}-${state.nodes[pendingCelebration.id].completedAt ?? ""}`}
+            key={`bloom-${pendingCelebration.id}-${nodes[pendingCelebration.id].completedAt ?? ""}`}
             aria-hidden
             className="pointer-events-none fixed inset-0 z-10"
             initial={{ opacity: 0 }}
