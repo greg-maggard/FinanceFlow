@@ -317,6 +317,132 @@ struct NodeLedgerTests {
         #expect(ops.setAssignments.first?.categoryID == "BigEF:b1")
     }
 
+    // MARK: - planFundMonth
+
+    private var utilities: Decimal { Decimal(string: "33.33")! }
+
+    /// Three monthly targets in declared order, plus a save-a-total envelope.
+    private func targetBook(income: Decimal) -> BudgetBook {
+        var book = BudgetBook()
+        book.accounts = [Account(id: "checking", name: "checking", kind: .checking)]
+        book.transactions = [txn("checking", "\(month)-01", income, category: Ledger.rtaCategoryID)]
+        book.categories = [
+            cat("Rent", .Rent, monthlyTarget: 1800),
+            cat("Food", .Food, monthlyTarget: 600),
+            cat("Utilities", .Essential, monthlyTarget: utilities),
+            // No monthly target: a save-a-total goal is not this month's business.
+            cat("BigEF:b1", .BigEF, group: "g:ef", balanceTarget: 9000),
+        ]
+        return book
+    }
+
+    @Test("funds every targeted envelope, matching hand-assigned figures to the cent")
+    func fundsEveryTarget() {
+        let book = targetBook(income: 5000)
+        let plan = NodeLedger.planFundMonth(book, month: month)
+        #expect(plan.targeted == 3)
+        #expect(plan.funded == 3)
+        #expect(plan.underfunded.isEmpty)
+        #expect(plan.shortfall == 0)
+
+        let next = apply(book, plan.ops)
+        var byHand = book
+        byHand.assignments = [month: ["Rent": 1800, "Food": 600, "Utilities": utilities]]
+        #expect(next.assignments == byHand.assignments)
+        #expect(Ledger.snapshot(next, month: month) == Ledger.snapshot(byHand, month: month))
+        #expect(Ledger.snapshot(next, month: month).readyToAssign == Decimal(string: "2566.67")!)
+        #expect(Ledger.bookIntegrity(next, month: month).drift == 0)
+    }
+
+    @Test("never drives Ready to Assign negative, and is a no-op run twice")
+    func fundTwiceIsNoOp() {
+        let book = targetBook(income: 5000)
+        let once = apply(book, NodeLedger.planFundMonth(book, month: month).ops)
+        let twice = NodeLedger.planFundMonth(once, month: month)
+        #expect(twice.ops == NodeLedger.BookOps())
+        #expect(twice.targeted == 3)
+        #expect(twice.funded == 3)
+        #expect(twice.shortfall == 0)
+        #expect(apply(once, twice.ops) == once)
+        #expect(Ledger.snapshot(once, month: month).readyToAssign >= 0)
+        #expect(Ledger.bookIntegrity(once, month: month).drift == 0)
+    }
+
+    @Test("with too little to assign, earlier envelopes fill and the rest are reported short")
+    func fundRunsOut() {
+        let book = targetBook(income: 2000)
+        let plan = NodeLedger.planFundMonth(book, month: month)
+        // Rent takes its full 1800; Food gets the remaining 200 of its 600;
+        // Utilities never sees a dollar — and says so rather than failing quietly.
+        #expect(plan.ops.setAssignments == [
+            NodeLedger.AssignmentSet(month: month, categoryID: "Rent", amount: 1800),
+            NodeLedger.AssignmentSet(month: month, categoryID: "Food", amount: 200),
+        ])
+        #expect(plan.underfunded == [
+            NodeLedger.FundShortfall(categoryID: "Food", name: "Food", short: 400),
+            NodeLedger.FundShortfall(categoryID: "Utilities", name: "Utilities", short: utilities),
+        ])
+        #expect(plan.targeted == 3)
+        #expect(plan.funded == 1)
+        #expect(plan.shortfall == Decimal(string: "433.33")!)
+
+        let next = apply(book, plan.ops)
+        #expect(Ledger.snapshot(next, month: month).readyToAssign == 0)
+        #expect(Ledger.bookIntegrity(next, month: month).drift == 0)
+    }
+
+    @Test("an envelope already at target — by assignment or by carryover — gets no op")
+    func fundSkipsMetTargets() {
+        var book = targetBook(income: 5000)
+        book.transactions.append(txn("checking", "2026-05-01", 1800, category: Ledger.rtaCategoryID))
+        // Rent was funded last month and carried in full; Food is half full now.
+        book.assignments = ["2026-05": ["Rent": 1800], month: ["Food": 300]]
+
+        let plan = NodeLedger.planFundMonth(book, month: month)
+        #expect(plan.ops.setAssignments == [
+            // Food tops up to 600 total assigned, not 600 more.
+            NodeLedger.AssignmentSet(month: month, categoryID: "Food", amount: 600),
+            NodeLedger.AssignmentSet(month: month, categoryID: "Utilities", amount: utilities),
+        ])
+        #expect(plan.targeted == 3)
+        #expect(plan.funded == 3)
+        #expect(plan.shortfall == 0)
+
+        let next = apply(book, plan.ops)
+        let snap = Ledger.snapshot(next, month: month)
+        #expect(snap.categories["Rent"]?.available == 1800)
+        #expect(snap.categories["Rent"]?.assigned == 0)
+        #expect(snap.categories["Food"]?.available == 600)
+        #expect(snap.readyToAssign >= 0)
+        #expect(Ledger.bookIntegrity(next, month: month).drift == 0)
+    }
+
+    @Test("with nothing to assign it plans nothing and reports the whole gap")
+    func fundWithNoMoney() {
+        let book = targetBook(income: 0)
+        let plan = NodeLedger.planFundMonth(book, month: month)
+        #expect(plan.ops == NodeLedger.BookOps())
+        #expect(plan.targeted == 3)
+        #expect(plan.funded == 0)
+        #expect(plan.shortfall == Decimal(string: "2433.33")!)
+        #expect(Ledger.snapshot(apply(book, plan.ops), month: month).readyToAssign == 0)
+    }
+
+    @Test("an overspent book hands out nothing rather than digging deeper")
+    func fundNeverGoesNegative() {
+        var book = targetBook(income: 500)
+        // 900 assigned against 500 of income: Ready to Assign is already under.
+        book.assignments = [month: ["Rent": 900]]
+        #expect(Ledger.snapshot(book, month: month).readyToAssign == -400)
+
+        let plan = NodeLedger.planFundMonth(book, month: month)
+        #expect(plan.ops == NodeLedger.BookOps())
+        #expect(plan.targeted == 3)
+        #expect(plan.funded == 0)
+        #expect(plan.shortfall == Decimal(string: "1533.33")!)
+        #expect(Ledger.snapshot(book, month: month).readyToAssign == -400)
+    }
+
     // MARK: - Account planners
 
     @Test("debt balance edits upsert one adjustment and delete it at net zero")

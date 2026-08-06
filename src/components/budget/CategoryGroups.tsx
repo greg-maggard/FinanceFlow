@@ -11,7 +11,7 @@ import { GlassInput, GlassSelect } from "../glass/GlassInput";
 import { NumberField } from "../glass/NumberField";
 import { GoalBar } from "../glass/GoalBar";
 import { KebabMenu } from "../glass/KebabMenu";
-import { Field, InlineAdd, SectionTitle, dollars } from "./bits";
+import { Field, FundMonthButton, InlineAdd, SectionTitle, dollars } from "./bits";
 
 // Funding green — envelopes glow when money lands in them, not when it leaves.
 const FUND_TINT = "#34d399";
@@ -76,11 +76,14 @@ function CategoryRow({
   month,
   snap,
   menuDrop,
+  hideMonthlyBar,
 }: {
   cat: Category;
   month: MonthKey;
   snap: MonthSnapshot;
   menuDrop: "down" | "up";
+  /** An untouched month: every monthly bar would read $0 of its target. */
+  hideMonthlyBar?: boolean;
 }) {
   const m = snap.categories[cat.id] ?? { assigned: 0, activity: 0, available: 0 };
   const [editing, setEditing] = useState(false);
@@ -205,7 +208,7 @@ function CategoryRow({
           </div>
         </KebabMenu>
       </div>
-      {target !== undefined && target > 0 && (
+      {target !== undefined && target > 0 && !(hideMonthlyBar && cat.monthlyTarget !== undefined) && (
         <GoalBar
           value={m.available}
           max={target}
@@ -296,11 +299,13 @@ function GroupCard({
   categories,
   month,
   snap,
+  hideMonthlyBars,
 }: {
   group: CategoryGroup;
   categories: Category[];
   month: MonthKey;
   snap: MonthSnapshot;
+  hideMonthlyBars?: boolean;
 }) {
   return (
     <GlassCard className="px-5 py-4">
@@ -321,6 +326,7 @@ function GroupCard({
               month={month}
               snap={snap}
               menuDrop={i === 0 ? "down" : "up"}
+              hideMonthlyBar={hideMonthlyBars}
             />
           ))}
           {categories.length === 0 && (
@@ -337,7 +343,18 @@ function GroupCard({
   );
 }
 
-export function CategoryGroups({ month, snap }: { month: MonthKey; snap: MonthSnapshot }) {
+export function CategoryGroups({
+  month,
+  snap,
+  untouched,
+  onFundMonth,
+}: {
+  month: MonthKey;
+  snap: MonthSnapshot;
+  /** Nothing assigned yet this month, and monthly targets still unmet. */
+  untouched?: boolean;
+  onFundMonth?: () => void;
+}) {
   const budget = useStore((s) => s.budget);
   const groups = [...budget.groups].sort((a, b) => a.order - b.order);
   const addGroup = (name: string) => useStore.getState().addGroup(name);
@@ -357,8 +374,19 @@ export function CategoryGroups({ month, snap }: { month: MonthKey; snap: MonthSn
     );
   }
 
+  // A new month starts with every assignment at zero, so its monthly bars all
+  // read $0 of their target — fifteen empty bars that look like fifteen
+  // failures. Say what actually happened and offer the one tap that fixes it.
   return (
     <div className="space-y-4">
+      {untouched && onFundMonth && (
+        <GlassCard className="px-5 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-white/70">Nothing assigned yet this month</p>
+            <FundMonthButton onClick={onFundMonth} />
+          </div>
+        </GlassCard>
+      )}
       {groups.map((g) => (
         <GroupCard
           key={g.id}
@@ -368,6 +396,7 @@ export function CategoryGroups({ month, snap }: { month: MonthKey; snap: MonthSn
             .sort((a, b) => a.order - b.order)}
           month={month}
           snap={snap}
+          hideMonthlyBars={untouched}
         />
       ))}
       <InlineAdd label="Add group" placeholder="Group name" onAdd={addGroup} />

@@ -356,6 +356,90 @@ export function planBalanceEdit(
   return ops;
 }
 
+/** One targeted envelope the month's Ready to Assign could not fill. */
+export type FundShortfall = {
+  categoryId: string;
+  name: string;
+  /** Dollars still needed to reach the monthly target. */
+  short: number;
+};
+
+export type FundMonthPlan = {
+  ops: BookOps;
+  /** Envelopes carrying a positive monthly target. */
+  targeted: number;
+  /** Of those, how many stand at or above target once `ops` are applied. */
+  funded: number;
+  /** The rest, in book order — what the UI reports. */
+  underfunded: FundShortfall[];
+  /** Σ of `underfunded[].short`. */
+  shortfall: number;
+};
+
+/**
+ * Fill this month's monthly targets from Ready to Assign, in one batch.
+ *
+ * Assignments are keyed per month, so a new month starts with every Assigned
+ * field at zero — without this, funding ~15 envelopes is ~15 manual number
+ * entries on the 1st of every month, forever.
+ *
+ * The need is measured against AVAILABLE, not assigned: money carried over
+ * from last month already covers the target, so a month-ahead user is never
+ * asked to fund the same envelope twice, and an envelope holding half its
+ * target is topped up by exactly the difference.
+ *
+ * Categories are walked in the book's declared order — `book.categories` as
+ * stored, which is a deterministic total order on both platforms — each taking
+ * `min(need, what's left)`. Ready to Assign is the hard ceiling: it starts at
+ * the month's figure (clamped at zero, since a book already overspent has
+ * nothing to hand out) and this action can never drive it negative. Whatever
+ * the money ran out before reaching is reported, not silently skipped.
+ *
+ * Idempotent: once an envelope's available equals its target its need is 0 and
+ * it emits no op, so running this twice in a row does nothing the second time.
+ */
+export function planFundMonth(book: BudgetBook, month: MonthKey): FundMonthPlan {
+  const snap = snapshot(book, month);
+  let remainingC = Math.max(0, toCents(snap.readyToAssign));
+
+  const setAssignments: { month: MonthKey; categoryId: string; amount: number }[] = [];
+  const underfunded: FundShortfall[] = [];
+  let targeted = 0;
+  let shortfallC = 0;
+
+  for (const cat of book.categories) {
+    const targetC = toCents(cat.monthlyTarget ?? 0);
+    if (targetC <= 0) continue;
+    targeted += 1;
+    const m = snap.categories[cat.id] ?? { assigned: 0, activity: 0, available: 0 };
+    const needC = Math.max(0, targetC - toCents(m.available));
+    if (needC === 0) continue;
+    const giveC = Math.min(needC, remainingC);
+    if (giveC > 0) {
+      setAssignments.push({
+        month,
+        categoryId: cat.id,
+        amount: fromCents(toCents(m.assigned) + giveC),
+      });
+      remainingC -= giveC;
+    }
+    if (giveC < needC) {
+      underfunded.push({ categoryId: cat.id, name: cat.name, short: fromCents(needC - giveC) });
+      shortfallC += needC - giveC;
+    }
+  }
+
+  const ops: BookOps = {};
+  if (setAssignments.length > 0) ops.setAssignments = setAssignments;
+  return {
+    ops,
+    targeted,
+    funded: targeted - underfunded.length,
+    underfunded,
+    shortfall: fromCents(shortfallC),
+  };
+}
+
 /** Drive an account's derived balance to `target` via a coalesced same-day adjustment. */
 function planAccountBalanceTo(
   book: BudgetBook,

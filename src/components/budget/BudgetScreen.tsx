@@ -4,10 +4,11 @@ import { useStore } from "../../state/store";
 import { useUI } from "../../state/uiStore";
 import type { MonthKey } from "../../state/schema";
 import { assignedAfter, snapshot } from "../../budget/ledger";
+import { planFundMonth } from "../../budget/nodeLedger";
 import { ymKey } from "../../state/recurring";
 import { M } from "../../theme/motion";
 import { GlassCard } from "../glass/GlassCard";
-import { dollars } from "./bits";
+import { FundMonthButton, dollars } from "./bits";
 import { CategoryGroups, FUND_GLOW } from "./CategoryGroups";
 import { AccountsSection } from "./AccountsSection";
 import { TransactionsSection } from "./TransactionsSection";
@@ -92,6 +93,31 @@ export function BudgetScreen() {
   // are invisible to it — call them out rather than let them look unspent.
   const ahead = useMemo(() => assignedAfter(budget, month), [budget, month]);
 
+  // Assignments are keyed per month, so every month opens with every envelope
+  // back at zero. The plan is re-derived on each edit purely to answer "is
+  // anything still short of its monthly target?" — the tap itself re-plans
+  // against the freshest book.
+  const plan = useMemo(() => planFundMonth(budget, month), [budget, month]);
+  const unmet = plan.underfunded.length > 0 || (plan.ops.setAssignments?.length ?? 0) > 0;
+  // An untouched month is the real cliff: not a wall of failed goal bars, just
+  // a month nobody has funded yet.
+  const untouched = Object.keys(budget.assignments[month] ?? {}).length === 0;
+  const [report, setReport] = useState<{ month: MonthKey; text: string } | null>(null);
+
+  const fundMonth = () => {
+    const s = useStore.getState();
+    const fresh = planFundMonth(s.budget, month);
+    if (fresh.ops.setAssignments?.length) s.applyBookOps(fresh.ops);
+    setReport(
+      fresh.underfunded.length > 0
+        ? {
+            month,
+            text: `Funded ${fresh.funded} of ${fresh.targeted} envelopes — ${dollars(fresh.shortfall)} short`,
+          }
+        : null,
+    );
+  };
+
   // Cross-navigation landing: scroll the requested row into view and pulse it
   // in the funding green for ~2s. The request is consumed up front so the
   // re-run this triggers (and any later visit) is a no-op; the pulse is plain
@@ -153,6 +179,16 @@ export function BudgetScreen() {
               )}
             </div>
           </div>
+          {/* Both retire the moment every target is met — a button that would
+              do nothing, and a shortfall line that is no longer true. */}
+          {unmet && (
+            <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-white/5 pt-3">
+              <FundMonthButton onClick={fundMonth} />
+              {report && report.month === month && (
+                <span className="text-xs tabular-nums text-white/55">{report.text}</span>
+              )}
+            </div>
+          )}
         </GlassCard>
       </motion.div>
 
@@ -161,7 +197,12 @@ export function BudgetScreen() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ ...M.fade, delay: 0.1 }}
       >
-        <CategoryGroups month={month} snap={snap} />
+        <CategoryGroups
+          month={month}
+          snap={snap}
+          untouched={untouched && unmet}
+          onFundMonth={fundMonth}
+        />
       </motion.section>
 
       <motion.section

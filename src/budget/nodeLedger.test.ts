@@ -13,6 +13,7 @@ import {
   efTarget,
   planBalanceEdit,
   planCollegeBalanceEdit,
+  planFundMonth,
   planCreateDebtAccount,
   planCreateLinkedCategory,
   planDebtBalanceEdit,
@@ -310,6 +311,123 @@ describe("planBalanceEdit", () => {
     expect(ops.deleteTxnIds).toBeUndefined();
     expect(ops.updateTxns).toBeUndefined();
     expect(ops.setAssignments).toEqual([{ month: MONTH, categoryId: "BigEF:b1", amount: 1500 }]);
+  });
+});
+
+describe("planFundMonth", () => {
+  /** Three monthly targets in declared order, plus a save-a-total envelope. */
+  function targetBook(income: number): BudgetBook {
+    return {
+      ...emptyBudgetBook(),
+      accounts: [acct({ id: "checking", kind: "checking" })],
+      transactions: [
+        txn({ accountId: "checking", date: `${MONTH}-01`, amount: income, categoryId: RTA_CATEGORY_ID }),
+      ],
+      categories: [
+        cat({ id: "Rent", nodeId: "Rent", monthlyTarget: 1800 }),
+        cat({ id: "Food", nodeId: "Food", monthlyTarget: 600 }),
+        cat({ id: "Utilities", nodeId: "Essential", monthlyTarget: 33.33 }),
+        // No monthly target: a save-a-total goal is not this month's business.
+        cat({ id: "BigEF:b1", nodeId: "BigEF", groupId: "g:ef", balanceTarget: 9000 }),
+      ],
+    };
+  }
+
+  it("funds every targeted envelope, matching hand-assigned figures to the cent", () => {
+    const book = targetBook(5000);
+    const plan = planFundMonth(book, MONTH);
+    expect(plan).toMatchObject({ targeted: 3, funded: 3, underfunded: [], shortfall: 0 });
+
+    const next = apply(book, plan.ops);
+    const byHand = {
+      ...book,
+      assignments: { [MONTH]: { Rent: 1800, Food: 600, Utilities: 33.33 } },
+    };
+    expect(next.assignments).toEqual(byHand.assignments);
+    expect(snapshot(next, MONTH)).toEqual(snapshot(byHand, MONTH));
+    expect(snapshot(next, MONTH).readyToAssign).toBe(2566.67);
+    expect(bookIntegrity(next, MONTH).drift).toBe(0);
+  });
+
+  it("never drives Ready to Assign negative, and is a no-op run twice", () => {
+    const book = targetBook(5000);
+    const once = apply(book, planFundMonth(book, MONTH).ops);
+    const twice = planFundMonth(once, MONTH);
+    expect(twice.ops).toEqual({});
+    expect(twice).toMatchObject({ targeted: 3, funded: 3, shortfall: 0 });
+    expect(apply(once, twice.ops)).toEqual(once);
+    expect(snapshot(once, MONTH).readyToAssign).toBeGreaterThanOrEqual(0);
+    expect(bookIntegrity(once, MONTH).drift).toBe(0);
+  });
+
+  it("with too little to assign, earlier envelopes fill and the rest are reported short", () => {
+    const book = targetBook(2000);
+    const plan = planFundMonth(book, MONTH);
+    // Rent takes its full 1800; Food gets the remaining 200 of its 600;
+    // Utilities never sees a dollar — and says so rather than failing quietly.
+    expect(plan.ops.setAssignments).toEqual([
+      { month: MONTH, categoryId: "Rent", amount: 1800 },
+      { month: MONTH, categoryId: "Food", amount: 200 },
+    ]);
+    expect(plan.underfunded).toEqual([
+      { categoryId: "Food", name: "Food", short: 400 },
+      { categoryId: "Utilities", name: "Utilities", short: 33.33 },
+    ]);
+    expect(plan).toMatchObject({ targeted: 3, funded: 1, shortfall: 433.33 });
+
+    const next = apply(book, plan.ops);
+    expect(snapshot(next, MONTH).readyToAssign).toBe(0);
+    expect(bookIntegrity(next, MONTH).drift).toBe(0);
+  });
+
+  it("an envelope already at target — by assignment or by carryover — gets no op", () => {
+    const base = targetBook(5000);
+    const book: BudgetBook = {
+      ...base,
+      transactions: [
+        ...base.transactions,
+        txn({ accountId: "checking", date: "2026-05-01", amount: 1800, categoryId: RTA_CATEGORY_ID }),
+      ],
+      // Rent was funded last month and carried in full; Food is half full now.
+      assignments: { "2026-05": { Rent: 1800 }, [MONTH]: { Food: 300 } },
+    };
+    const plan = planFundMonth(book, MONTH);
+    expect(plan.ops.setAssignments).toEqual([
+      // Food tops up to 600 total assigned, not 600 more.
+      { month: MONTH, categoryId: "Food", amount: 600 },
+      { month: MONTH, categoryId: "Utilities", amount: 33.33 },
+    ]);
+    expect(plan).toMatchObject({ targeted: 3, funded: 3, shortfall: 0 });
+
+    const next = apply(book, plan.ops);
+    const snap = snapshot(next, MONTH);
+    expect(snap.categories.Rent.available).toBe(1800);
+    expect(snap.categories.Rent.assigned).toBe(0);
+    expect(snap.categories.Food.available).toBe(600);
+    expect(snap.readyToAssign).toBeGreaterThanOrEqual(0);
+    expect(bookIntegrity(next, MONTH).drift).toBe(0);
+  });
+
+  it("with nothing to assign it plans nothing and reports the whole gap", () => {
+    const book = targetBook(0);
+    const plan = planFundMonth(book, MONTH);
+    expect(plan.ops).toEqual({});
+    expect(plan).toMatchObject({ targeted: 3, funded: 0, shortfall: 2433.33 });
+    expect(snapshot(apply(book, plan.ops), MONTH).readyToAssign).toBe(0);
+  });
+
+  it("an overspent book hands out nothing rather than digging deeper", () => {
+    const base = targetBook(500);
+    const book: BudgetBook = {
+      ...base,
+      // Uncategorized-free overspend: 900 assigned against 500 of income.
+      assignments: { [MONTH]: { Rent: 900 } },
+    };
+    expect(snapshot(book, MONTH).readyToAssign).toBe(-400);
+    const plan = planFundMonth(book, MONTH);
+    expect(plan.ops).toEqual({});
+    expect(plan).toMatchObject({ targeted: 3, funded: 0, shortfall: 1533.33 });
+    expect(snapshot(book, MONTH).readyToAssign).toBe(-400);
   });
 });
 

@@ -25,6 +25,28 @@ export const Field = ({ label, children }: { label: string; children: React.Reac
   </label>
 );
 
+/**
+ * One tap that fills this month's monthly targets from Ready to Assign. Wears
+ * the funding green because it is money landing in envelopes; lives both on
+ * the month header and inside the untouched-month prompt.
+ */
+export function FundMonthButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="shrink-0 rounded-xl px-3 py-1.5 text-xs font-medium hover:brightness-110"
+      style={{
+        background: "rgba(52, 211, 153, 0.14)",
+        border: "1px solid rgba(52, 211, 153, 0.38)",
+        color: "#a7f3d0",
+      }}
+    >
+      Fund this month
+    </button>
+  );
+}
+
 /** Section heading, matching the Overview sheet's phase captions. */
 export function SectionTitle({ children }: { children: React.ReactNode }) {
   return (

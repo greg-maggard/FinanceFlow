@@ -350,6 +350,95 @@ public enum NodeLedger {
         return ops
     }
 
+    /// One targeted envelope the month's Ready to Assign could not fill.
+    public struct FundShortfall: Equatable, Sendable {
+        public var categoryID: String
+        public var name: String
+        /// Dollars still needed to reach the monthly target.
+        public var short: Decimal
+
+        public init(categoryID: String, name: String, short: Decimal) {
+            self.categoryID = categoryID
+            self.name = name
+            self.short = short
+        }
+    }
+
+    public struct FundMonthPlan: Equatable, Sendable {
+        public var ops: BookOps
+        /// Envelopes carrying a positive monthly target.
+        public var targeted: Int
+        /// Of those, how many stand at or above target once `ops` are applied.
+        public var funded: Int
+        /// The rest, in book order — what the UI reports.
+        public var underfunded: [FundShortfall]
+        /// Σ of `underfunded[].short`.
+        public var shortfall: Decimal
+    }
+
+    /// Fill this month's monthly targets from Ready to Assign, in one batch.
+    ///
+    /// Assignments are keyed per month, so a new month starts with every
+    /// Assigned field at zero — without this, funding ~15 envelopes is ~15
+    /// manual number entries on the 1st of every month, forever.
+    ///
+    /// The need is measured against AVAILABLE, not assigned: money carried
+    /// over from last month already covers the target, so a month-ahead user
+    /// is never asked to fund the same envelope twice, and an envelope holding
+    /// half its target is topped up by exactly the difference.
+    ///
+    /// Categories are walked in the book's declared order — `book.categories`
+    /// as stored, which is a deterministic total order on both platforms —
+    /// each taking `min(need, what's left)`. Ready to Assign is the hard
+    /// ceiling: it starts at the month's figure (clamped at zero, since a book
+    /// already overspent has nothing to hand out) and this action can never
+    /// drive it negative. Whatever the money ran out before reaching is
+    /// reported, not silently skipped.
+    ///
+    /// Idempotent: once an envelope's available equals its target its need is
+    /// 0 and it emits no op, so running this twice does nothing the second
+    /// time.
+    public static func planFundMonth(_ book: BudgetBook, month: String) -> FundMonthPlan {
+        let snap = Ledger.snapshot(book, month: month)
+        var remaining = max(0, snap.readyToAssign)
+
+        var ops = BookOps()
+        var underfunded: [FundShortfall] = []
+        var targeted = 0
+        var shortfall: Decimal = 0
+
+        for cat in book.categories {
+            let target = cat.monthlyTarget ?? 0
+            guard target > 0 else { continue }
+            targeted += 1
+            let m = snap.categories[cat.id]
+                ?? Ledger.CategoryMonth(assigned: 0, activity: 0, available: 0)
+            let need = max(0, target - m.available)
+            if need == 0 { continue }
+            let give = min(need, remaining)
+            if give > 0 {
+                ops.setAssignments.append(
+                    AssignmentSet(month: month, categoryID: cat.id, amount: m.assigned + give)
+                )
+                remaining -= give
+            }
+            if give < need {
+                underfunded.append(
+                    FundShortfall(categoryID: cat.id, name: cat.name, short: need - give)
+                )
+                shortfall += need - give
+            }
+        }
+
+        return FundMonthPlan(
+            ops: ops,
+            targeted: targeted,
+            funded: targeted - underfunded.count,
+            underfunded: underfunded,
+            shortfall: shortfall
+        )
+    }
+
     /// Drive an account's derived balance to `target` via a coalesced
     /// same-day adjustment.
     private static func planAccountBalance(
