@@ -134,6 +134,39 @@ export function maybePromoteBackup(liveRaw: string | null, now: number = Date.no
 }
 
 /**
+ * The one-shot backup taken at the moment a document is migrated to a new
+ * schema version (money-migration-v4.md D7 / §5 step 8), given the RAW
+ * pre-migration bytes exactly as they were read from storage.
+ *
+ * `maybePromoteBackup` above is a *rolling* 24h snapshot and is not enough on
+ * its own for this: if it happened to promote a v3 envelope earlier the same
+ * day, the throttle would skip the promotion on the first v4 write and the
+ * bytes that existed at the instant of migration would be gone. Migration is a
+ * once-ever event for a given document, so it gets its own unthrottled write.
+ *
+ * Never clobbers: an existing envelope under that version key is already a
+ * pre-migration document of the same schema, and overwriting it would trade a
+ * known-good backup for a newer one at exactly the moment the user is most
+ * likely to need the older. Writes only into an empty slot.
+ */
+export function backupPreMigration(
+  version: number,
+  liveRaw: string,
+  now: number = Date.now(),
+): void {
+  if (typeof localStorage === "undefined") return;
+  const key = `${BACKUP_PREFIX}${version}`;
+  if (localStorage.getItem(key)) return;
+  try {
+    const envelope: BackupEnvelope = { at: now, raw: liveRaw };
+    localStorage.setItem(key, JSON.stringify(envelope));
+  } catch {
+    // Best-effort, same reasoning as maybePromoteBackup: a failed backup must
+    // never throw into the boot path.
+  }
+}
+
+/**
  * The most recently promoted backup across every version key present, for
  * RecoveryScreen's restore option and SettingsModal's "Last backup" line.
  * Deliberately version-agnostic: io.ts's migrate() already accepts v1/v2/v3

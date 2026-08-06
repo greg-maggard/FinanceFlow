@@ -86,7 +86,7 @@ struct AccountsSection: View {
             Spacer()
             Text(CurrencyFormat.string(balance))
                 .font(theme.typography.callout)
-                .foregroundStyle(balance < 0 ? theme.colors.danger : theme.colors.textPrimary)
+                .foregroundStyle(balance < .zero ? theme.colors.danger : theme.colors.textPrimary)
         }
         // Keep rows one VoiceOver element unless they carry the node chip,
         // which must stay independently tappable.

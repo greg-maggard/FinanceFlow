@@ -39,13 +39,29 @@ public final class AppStore {
     /// for the session so the existing file is left intact.
     public func bootstrap() async {
         do {
-            if let loaded = try await storage.load() {
-                state = try IO.migrate(loaded)
+            if let data = try await storage.load() {
+                // Read the version BEFORE decoding: v3 and v4 spell the same
+                // fields in different units, so the document can't be
+                // interpreted until we know which it is.
+                let storedVersion = IO.documentVersion(data)
+                state = try IO.importJSON(data)
+                // D7: the debounced save below is about to replace the file with
+                // the v4 image. Park the original bytes under their own version
+                // first, so a bad migration stays recoverable.
+                if let storedVersion, storedVersion < state.version {
+                    await storage.backupPreMigration(version: storedVersion)
+                }
             }
             // No file → first run: keep the initial state and allow autosave.
         } catch let StorageError.unreadableContents(underlying) {
             await quarantineAndReset(reason: underlying)
         } catch let error as IO.ImportError {
+            await quarantineAndReset(reason: error)
+        } catch let error as DecodingError {
+            // The bytes are genuinely unusable (not a transient I/O hiccup), so
+            // the file is safe to set aside rather than overwrite. Decoding
+            // moved here from the adapter when `load()` started returning raw
+            // bytes, so this is where that judgement now lives.
             await quarantineAndReset(reason: error)
         } catch {
             // Possibly transient (e.g. the file was temporarily protected at
@@ -128,10 +144,10 @@ public final class AppStore {
     // MARK: - Budget mutations (mirror the budget actions in store.ts)
 
     /// Set (or clear, with `amount <= 0`) a category's assignment for a month.
-    public func assign(month: String, categoryID: String, amount: Decimal) {
+    public func assign(month: String, categoryID: String, amount: Money) {
         mutate { state in
             var table = state.budget.assignments[month] ?? [:]
-            if amount > 0 { table[categoryID] = amount } else { table[categoryID] = nil }
+            if amount > .zero { table[categoryID] = amount } else { table[categoryID] = nil }
             state.budget.assignments[month] = table.isEmpty ? nil : table
         }
     }
@@ -179,7 +195,7 @@ public final class AppStore {
     public func addTransfer(
         from: String,
         to: String,
-        amount: Decimal,
+        amount: Money,
         date: String,
         payee: String? = nil,
         categoryID: String? = nil
@@ -255,7 +271,7 @@ public final class AppStore {
             }
             for assignment in ops.setAssignments {
                 var table = state.budget.assignments[assignment.month] ?? [:]
-                if assignment.amount > 0 {
+                if assignment.amount > .zero {
                     table[assignment.categoryID] = assignment.amount
                 } else {
                     table[assignment.categoryID] = nil
@@ -294,8 +310,8 @@ public final class AppStore {
                       let moved = table[id] else { continue }
                 table[id] = nil
                 if carriesActivity {
-                    let merged = (table[reassignTo] ?? 0) + moved
-                    table[reassignTo] = merged == 0 ? nil : merged
+                    let merged = (table[reassignTo] ?? .zero) + moved
+                    table[reassignTo] = merged == .zero ? nil : merged
                 }
                 state.budget.assignments[month] = table.isEmpty ? nil : table
             }

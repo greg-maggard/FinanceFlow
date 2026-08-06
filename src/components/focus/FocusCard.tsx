@@ -5,6 +5,7 @@ import { PHASE_COLORS } from "../../theme/phaseColors";
 import { IDENTITY, RECURRING } from "../../theme/identity";
 import { EASE_FLOW, M } from "../../theme/motion";
 import type { NodeId } from "../../state/schema";
+import { cents } from "../../state/schema";
 import { useStore } from "../../state/store";
 import { useUI } from "../../state/uiStore";
 import { deriveStatus } from "../../graph/derive";
@@ -18,7 +19,7 @@ import { StreakChip } from "./StreakBadge";
 import { advance, findCurrentNode } from "./advance";
 import { KebabMenu } from "../glass/KebabMenu";
 import { isCheckedThisMonth, ymKey } from "../../state/recurring";
-import { fromCents, snapshot, toCents } from "../../budget/ledger";
+import { snapshot } from "../../budget/ledger";
 import { nodeRows } from "../../budget/nodeLedger";
 import { dollars } from "../budget/bits";
 
@@ -51,9 +52,9 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
    * showing both saves the user from reconciling the two.
    */
   const leftThisMonth = useMemo(() => {
-    if (!recurring) return 0;
+    if (!recurring) return cents(0);
     const rows = nodeRows(state.budget, snapshot(state.budget, ymKey()), nodeId);
-    return fromCents(rows.reduce((c, r) => c + toCents(r.available), 0));
+    return cents(rows.reduce((sum, r) => sum + r.available, 0));
   }, [recurring, nodeId, state.budget]);
 
   const status = useMemo(() => deriveStatus(state), [state]);
@@ -234,13 +235,14 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
                 <GoalBar
                   value={progress.value}
                   max={progress.max}
+                  unit={progress.unit}
                   tint={phaseColor.base}
                   glow={phaseColor.glow}
                   caption={nodeState.completed ? "Done" : "Toward target"}
                 />
                 {recurring && (
                   <p className="text-[11px] tabular-nums text-white/55">
-                    Funded {dollars(progress.value)} of {dollars(progress.max)} ·{" "}
+                    Funded {dollars(cents(progress.value))} of {dollars(cents(progress.max))} ·{" "}
                     {dollars(leftThisMonth)} left this month
                   </p>
                 )}

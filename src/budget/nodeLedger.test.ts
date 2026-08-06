@@ -287,10 +287,14 @@ describe("planBalanceEdit", () => {
     expect(bookIntegrity(book, MONTH).drift).toBe(0);
   });
 
-  it("does not treat a sub-half-cent row as an outstanding write-off", () => {
-    // Both engines select unwind candidates on the CENTS-rounded amount, so a
-    // row that rounds to zero is invisible to both. Pinned on each platform:
-    // if the two disagree here, an imported book unwinds a different row.
+  it("does not treat a zero-amount row as an outstanding write-off", () => {
+    // Both engines select unwind candidates with `amount < 0` on an integer, so
+    // a zero row is invisible to both. Pinned on each platform: if the two
+    // disagree here, an imported book unwinds a different row.
+    //
+    // Before v4 this case was a SUB-HALF-CENT row (-0.004 dollars), which each
+    // engine had to remember to round before comparing. In integer cents no
+    // such amount can be stored, so zero is the whole boundary.
     const book: BudgetBook = {
       ...efBook(),
       accounts: [...efBook().accounts, acct({ id: ADJUST_ACCOUNT_ID, kind: "cash", name: "Adjustments" })],
@@ -300,7 +304,7 @@ describe("planBalanceEdit", () => {
           ...txn({
             accountId: ADJUST_ACCOUNT_ID,
             date: `${MONTH}-09`,
-            amount: -0.004,
+            amount: 0,
             categoryId: "BigEF:b1",
           }),
           id: `txn:adjust:BigEF:b1:${MONTH}-09`,

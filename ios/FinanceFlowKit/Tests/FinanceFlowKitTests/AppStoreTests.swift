@@ -69,7 +69,7 @@ struct AppStoreTests {
             try await Task.sleep(for: .milliseconds(10))
         }
         #expect(await memory.saveCount == 1)        // collapsed into a single write
-        let loaded = try? await memory.load()
+        let loaded = try? await memory.loadState()
         #expect(loaded?.node(.Start).notes == "ab")
 
         // …and stays collapsed: no second write arrives afterwards.

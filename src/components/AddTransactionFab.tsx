@@ -59,7 +59,7 @@ function FastExpenseForm({
   const [amount, setAmount] = useState(0);
 
   const magnitude = Math.abs(amount);
-  const canSubmit = Math.round(magnitude * 100) > 0 && Boolean(accountId);
+  const canSubmit = magnitude > 0 && Boolean(accountId);
 
   const submit = () => {
     if (!canSubmit) return;

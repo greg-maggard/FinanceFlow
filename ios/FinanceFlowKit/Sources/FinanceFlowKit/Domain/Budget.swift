@@ -2,13 +2,13 @@ import Foundation
 
 // MARK: - Monthly budget rollup
 
-/// Dollar-denominated rollup of the monthly budget across the seven recurring
-/// nodes. Mirrors `monthlyBudgetSummary` in `src/graph/derive.ts`.
+/// Rollup of the monthly budget across the seven recurring nodes, in cents.
+/// Mirrors `monthlyBudgetSummary` in `src/graph/derive.ts`.
 public struct BudgetSummary: Equatable, Sendable {
-    public let target: Decimal
-    public let funded: Decimal
+    public let target: Money
+    public let funded: Money
 
-    public init(target: Decimal, funded: Decimal) {
+    public init(target: Money, funded: Money) {
         self.target = target
         self.funded = funded
     }
@@ -20,8 +20,8 @@ public extension Derive {
     /// targets, funded = Σ assigned this month.
     static func monthlyBudgetSummary(_ state: AppState, month: String = Recurring.ymKey()) -> BudgetSummary {
         let snap = Ledger.snapshot(state.budget, month: month)
-        var target: Decimal = 0
-        var funded: Decimal = 0
+        var target = Money.zero
+        var funded = Money.zero
         for id in recurringNodes {
             let totals = NodeLedger.recurringTotals(state.budget, snap, id)
             target += totals.target

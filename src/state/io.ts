@@ -3,22 +3,24 @@ import type {
   AppState,
   BudgetBook,
   Category,
+  CategoryGroup,
+  Cents,
   Decisions,
   NodeDataMap,
   NodeId,
   NodeState,
-  Settings,
-  SourcedNumber,
+  Source,
   Txn,
 } from "./schema";
 import {
+  DEFAULT_SETTINGS,
   RTA_CATEGORY_ID,
-  bigEmergencyFundTarget,
-  emergencyFundTarget,
-  emptyBudgetBook,
+  UNCATEGORIZED_CATEGORY_ID,
+  centsFromDollars,
+  ensureUncategorized,
 } from "./schema";
 import { ymKey } from "./recurring";
-import { accountBalance, fromCents, isoDay, toCents } from "../budget/ledger";
+import { isoDay, isOnBudget } from "../budget/ledger";
 import {
   COLLEGE_ACCOUNT_ID,
   GROUP_BILLS,
@@ -41,19 +43,28 @@ export function migrate(input: unknown, now: Date = new Date()): AppState {
     throw new Error("Not a FinanceFlow document.");
   }
   const obj = input as { version?: number };
-  if (obj.version === 3) {
-    // A `version: 3` tag alone proves nothing about the payload behind it —
+  if (obj.version === 4) {
+    // A `version: 4` tag alone proves nothing about the payload behind it —
     // see F10 in the wave-1 review: casting here unvalidated let a bare
-    // `{"version":3}` boot with an active (and immediately overwriting)
+    // `{"version":4}` boot with an active (and immediately overwriting)
     // persistence subscription, and a doc missing `budget.assignments`
     // white-screened with no recovery route. Validate structurally and
     // throw so loadInitial()'s catch routes to RecoveryScreen instead.
-    const err = invalidV3Reason(obj);
+    const err = invalidBookReason(obj);
     if (err) throw new Error(`Stored document isn't a valid FinanceFlow document: ${err}`);
     return obj as AppState;
   }
-  if (obj.version === 2) return migrateV2(obj as unknown as V2State, now);
-  if (obj.version === 1) return migrateV2(migrateV1(obj as unknown as V1State, now), now);
+  // v3 and v4 are structurally identical — only the units differ — so the same
+  // shallow validation guards the v3 document before it is walked.
+  if (obj.version === 3) {
+    const err = invalidBookReason(obj);
+    if (err) throw new Error(`Stored document isn't a valid FinanceFlow document: ${err}`);
+    return migrateV3(obj as unknown as V3State);
+  }
+  if (obj.version === 2) return migrateV3(migrateV2(obj as unknown as V2State, now));
+  if (obj.version === 1) {
+    return migrateV3(migrateV2(migrateV1(obj as unknown as V1State, now), now));
+  }
   // Never silently reset: a document from a newer (or unknown) version must
   // surface as an error the caller can show, not vanish into a fresh state.
   throw new Error(`Unsupported FinanceFlow version: ${String(obj.version)}.`);
@@ -64,13 +75,13 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 }
 
 /**
- * Structural check for a `{version: 3}` document, run before it's cast to
- * `AppState`. Returns a human-readable reason it's invalid, or `null` when
- * it's shaped correctly enough to trust. Intentionally shallow (container
- * types, not every field of every row) — deep enough to catch the failure
- * modes a hand-edited or truncated document actually produces.
+ * Structural check for a v3/v4 document, run before it's cast or walked.
+ * Returns a human-readable reason it's invalid, or `null` when it's shaped
+ * correctly enough to trust. Intentionally shallow (container types, not every
+ * field of every row) — deep enough to catch the failure modes a hand-edited
+ * or truncated document actually produces.
  */
-function invalidV3Reason(obj: Record<string, unknown>): string | null {
+function invalidBookReason(obj: Record<string, unknown>): string | null {
   if (!isPlainObject(obj.settings)) return "missing settings.";
   if (!isPlainObject(obj.decisions)) return "missing decisions.";
   if (!isPlainObject(obj.nodes)) return "missing nodes.";
@@ -85,8 +96,265 @@ function invalidV3Reason(obj: Record<string, unknown>): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// Legacy payload shapes (v1/v2 documents) — decode/migration-only. The live
-// schema no longer carries these; see `NodeDataMap` in schema.ts.
+// v3 -> v4: dollars-as-float become integer cents, everywhere at once.
+//
+// One pure function over a v3 document (money-migration-v4.md §5 step 2). Every
+// money field goes through `centsFromDollars` — the §4 rule, evaluated in
+// IEEE-754 double so the Swift mirror produces bit-identical output. Percentages
+// and rates (`apr`, `matchPct`, `currentContribPct`, `currentPct`, `targetPct`),
+// counts (`targetMonths`, `targetAge`, `order`), dates, ids and enums are NOT
+// money and are copied through untouched.
+
+/** Optional money: `undefined` stays `undefined` rather than becoming 0. */
+function optCents(d: number | undefined): Cents | undefined {
+  return d === undefined ? undefined : centsFromDollars(d);
+}
+
+/**
+ * Required money with a fallback: a hand-edited v3 document missing one of the
+ * annual limits used to carry `undefined` through untouched. Converting that
+ * would produce `NaN`, which serializes as `null` and quietly destroys the
+ * field, so fall back to the v4 default instead.
+ */
+function requiredCents(d: number | undefined, fallback: Cents): Cents {
+  return d === undefined ? fallback : centsFromDollars(d);
+}
+
+function migrateV3(v3: V3State): AppState {
+  const book = v3.budget;
+
+  const accounts: Account[] = book.accounts.map((a) => ({
+    ...a,
+    // `apr` is a rate, not money (D8) — it rides through unconverted.
+    minPayment: optCents(a.minPayment),
+  }));
+
+  const categories: Category[] = book.categories.map((c) => ({
+    ...c,
+    monthlyTarget: optCents(c.monthlyTarget),
+    balanceTarget: optCents(c.balanceTarget),
+  }));
+
+  const transactions: Txn[] = book.transactions.map((t) => ({
+    ...t,
+    amount: centsFromDollars(t.amount),
+  }));
+
+  const assignments: Record<string, Record<string, Cents>> = {};
+  for (const [month, table] of Object.entries(book.assignments)) {
+    const converted: Record<string, Cents> = {};
+    for (const [categoryId, amount] of Object.entries(table)) {
+      converted[categoryId] = centsFromDollars(amount);
+    }
+    assignments[month] = converted;
+  }
+
+  const groups: CategoryGroup[] = [...book.groups];
+
+  const migrated: BudgetBook = { accounts, transactions, groups, categories, assignments };
+  backfillUncategorized(migrated);
+
+  return {
+    version: 4,
+    settings: {
+      monthlyExpenses: optCents(v3.settings.monthlyExpenses),
+      preTaxIncome: optCents(v3.settings.preTaxIncome),
+      iraAnnualLimit: requiredCents(v3.settings.iraAnnualLimit, DEFAULT_SETTINGS.iraAnnualLimit),
+      hsaSelfLimit: requiredCents(v3.settings.hsaSelfLimit, DEFAULT_SETTINGS.hsaSelfLimit),
+      hsaFamilyLimit: requiredCents(v3.settings.hsaFamilyLimit, DEFAULT_SETTINGS.hsaFamilyLimit),
+    },
+    decisions: v3.decisions,
+    nodes: migrateNodesToV4(v3.nodes),
+    budget: migrated,
+    shownCelebrations: v3.shownCelebrations ?? [],
+    earnedMedals: v3.earnedMedals ?? [],
+  };
+}
+
+/**
+ * The three node payloads that carry money (IRA, HSA, College). `Match` and
+ * `Increase401k` are percentages only (D8) and `BigEF` is a month count, so
+ * those ride through untouched; `College.targetAge` is an age, not money.
+ */
+function migrateNodesToV4(
+  v3Nodes: Record<NodeId, V3NodeState>,
+): Record<NodeId, NodeState> {
+  const nodes = {} as Record<NodeId, NodeState>;
+  for (const [id, legacy] of Object.entries(v3Nodes) as [NodeId, V3NodeState][]) {
+    const { data, ...rest } = legacy;
+    const node: NodeState = { ...rest };
+    if (data !== undefined) {
+      if (id === "IRA" || id === "HSA") {
+        const d = data as V3ContributionData;
+        node.data = {
+          ...d,
+          ytdContribution: {
+            ...d.ytdContribution,
+            value: centsFromDollars(d.ytdContribution.value),
+          },
+          annualLimit: centsFromDollars(d.annualLimit),
+        } as NodeDataMap["IRA"] | NodeDataMap["HSA"];
+      } else if (id === "College") {
+        const d = data as { monthlyContribution: number; targetAge?: number };
+        node.data = {
+          ...d,
+          monthlyContribution: centsFromDollars(d.monthlyContribution),
+        } satisfies NodeDataMap["College"];
+      } else if (id === "BigEF" || id === "Match" || id === "Increase401k") {
+        // Counts and percentages — no money to convert.
+        node.data = data as NodeState["data"];
+      }
+      // Anything else is ledger-owned (v2 -> v3 already stripped it) or a shape
+      // this version doesn't know; it does not survive into v4. The Swift
+      // mirror drops the same set, so a document round-tripping between the
+      // platforms can't gain or lose a payload.
+    }
+    nodes[id] = node;
+  }
+  return nodes;
+}
+
+/**
+ * The one extra rewrite v4 rides along with: every on-budget row that never
+ * entered an envelope lands on `cat:uncategorized`, materializing the system
+ * group and the envelope in the same pass.
+ *
+ * The rows selected here are exactly the rows `bookIntegrity` counts in its
+ * `unbudgetedSpending` residual: on an on-budget account, carrying no
+ * `categoryId`, and not one leg of an on-budget -> on-budget transfer (that
+ * pair cancels inside the cash total, so giving it an envelope would invent
+ * activity that never happened). An on-budget -> off-budget leg IS included:
+ * that money really does leave the budget, and every live write path already
+ * makes the user categorize it.
+ *
+ * Consequence, stated plainly: an uncategorized outflow that used to sit
+ * outside the envelope system now shows as overspending in Uncategorized, and
+ * a *past* month's overspend sweeps into Ready-to-Assign. That is the
+ * correction, not a side effect — the money always left, the book just wasn't
+ * saying where from. After this pass `unbudgetedSpending` is 0 and stays 0,
+ * which is what makes `drift === 0` an unconditional invariant from v4 forward.
+ *
+ * Mutates `book` in place. Does nothing (and creates nothing) when the document
+ * has no such rows, so a clean book gains no rows the user never asked for.
+ */
+function backfillUncategorized(book: BudgetBook): void {
+  const onBudget = new Set(
+    book.accounts.filter((a) => isOnBudget(a.kind)).map((a) => a.id),
+  );
+
+  let touched = false;
+  book.transactions = book.transactions.map((t) => {
+    if (t.categoryId !== undefined) return t;
+    if (!onBudget.has(t.accountId)) return t;
+    if (t.transferAccountId && onBudget.has(t.transferAccountId)) return t;
+    touched = true;
+    return { ...t, categoryId: UNCATEGORIZED_CATEGORY_ID };
+  });
+  if (!touched) return;
+
+  // One definition of the system group + envelope, shared with every live
+  // write path (store.addTxn, store.deleteCategory, ...).
+  const ensured = ensureUncategorized(book);
+  book.groups = ensured.groups;
+  book.categories = ensured.categories;
+}
+
+// ---------------------------------------------------------------------------
+// Legacy document shapes (v1/v2/v3) — decode/migration-only. The live schema no
+// longer carries these; see `NodeDataMap` in schema.ts.
+//
+// EVERY money value below is DOLLARS-as-float. The v1 and v2 migrations are
+// deliberately left running in dollars (D6): they are pinned by tests against
+// documents that no longer exist anywhere else, and re-deriving them in cents
+// would change their output for no gain. The chain is v1 -> v2 -> v3 -> v4, and
+// `migrateV3` is the single place units change.
+
+/** Dollars, as they appear in a v1/v2/v3 document. Never `Cents`. */
+type Dollars = number;
+
+/**
+ * The cents-exact helpers the v1/v2 migrations used to import from the ledger.
+ * They moved here when `ledger.ts` went all-integer: the legacy path is the
+ * only remaining caller, and keeping them private stops new code reaching for
+ * a rounding step that no longer exists anywhere else.
+ */
+function toCents(n: Dollars): number {
+  return Math.round(n * 100);
+}
+
+function fromCents(c: number): Dollars {
+  return c / 100;
+}
+
+/** `accountBalance` in dollars, for the v2 migration's paid-debt check. */
+function dollarAccountBalance(book: V3BudgetBook, accountId: string): Dollars {
+  let c = 0;
+  for (const t of book.transactions) {
+    if (t.accountId === accountId) c += toCents(t.amount);
+  }
+  return fromCents(c);
+}
+
+/** The pre-v4 (dollar) emergency-fund targets, frozen for the legacy path. */
+function emergencyFundTargetDollars(monthlyExpenses?: Dollars): Dollars {
+  if (!monthlyExpenses || monthlyExpenses <= 0) return 1000;
+  return Math.max(1000, monthlyExpenses);
+}
+
+function bigEmergencyFundTargetDollars(months: number, monthlyExpenses?: Dollars): Dollars {
+  if (!monthlyExpenses || monthlyExpenses <= 0) return 0;
+  return months * monthlyExpenses;
+}
+
+function emptyV3Book(): V3BudgetBook {
+  return { accounts: [], transactions: [], groups: [], categories: [], assignments: {} };
+}
+
+// The v3 document: structurally identical to `AppState`, but every money field
+// is dollars. `migrateV3` consumes exactly this and produces `AppState`.
+
+type SourcedNumber = { value: Dollars; source: Source; lastSyncedAt?: string };
+
+type V3Account = Omit<Account, "minPayment"> & { minPayment?: Dollars };
+type V3Txn = Omit<Txn, "amount"> & { amount: Dollars };
+type V3Category = Omit<Category, "monthlyTarget" | "balanceTarget"> & {
+  monthlyTarget?: Dollars;
+  balanceTarget?: Dollars;
+};
+
+type V3BudgetBook = {
+  accounts: V3Account[];
+  transactions: V3Txn[];
+  groups: CategoryGroup[];
+  categories: V3Category[];
+  assignments: Record<string, Record<string, Dollars>>;
+};
+
+type V3Settings = {
+  monthlyExpenses?: Dollars;
+  preTaxIncome?: Dollars;
+  iraAnnualLimit: Dollars;
+  hsaSelfLimit: Dollars;
+  hsaFamilyLimit: Dollars;
+};
+
+/** The two node payloads whose money survived into v3: IRA and HSA. */
+type V3ContributionData = {
+  ytdContribution: SourcedNumber;
+  annualLimit: Dollars;
+};
+
+type V3NodeState = Omit<NodeState, "data"> & { data?: unknown };
+
+type V3State = {
+  version: 3;
+  settings: V3Settings;
+  decisions: Decisions;
+  nodes: Record<NodeId, V3NodeState>;
+  budget: V3BudgetBook;
+  shownCelebrations?: NodeId[];
+  earnedMedals?: number[];
+};
 
 type V2RecurringItem = { id: string; name: string; target: SourcedNumber; funded?: SourcedNumber };
 type V2RecurringData = { target: SourcedNumber; funded?: SourcedNumber; items?: V2RecurringItem[] };
@@ -107,7 +375,7 @@ type V2Debts = { debts?: V2Debt[] };
 type V2Debt = { id: string; name: string; balance: number; apr: number; minPayment: number; paid: boolean };
 type V2College = { monthlyContribution: number; balance?: SourcedNumber; targetAge?: number };
 
-type LegacyNodeState = Omit<NodeState, "data"> & { data?: unknown };
+type LegacyNodeState = V3NodeState;
 
 /**
  * Which EF payload node supersedes the other. SmallEF grows into BigEF — one
@@ -125,14 +393,14 @@ function efPayloadNode(big: V2BigEF | undefined, small: V2SmallEF | undefined): 
 
 type V1State = {
   version: 1;
-  settings: Settings;
+  settings: V3Settings;
   decisions: Decisions;
   nodes: Record<NodeId, LegacyNodeState>;
   shownCelebrations?: NodeId[];
   earnedMedals?: number[];
 };
 
-type V2State = Omit<V1State, "version"> & { version: 2; budget?: BudgetBook };
+type V2State = Omit<V1State, "version"> & { version: 2; budget?: V3BudgetBook };
 
 const RECURRING_NODES = [
   "Rent",
@@ -155,12 +423,12 @@ const RECURRING_NODES = [
 // bar exactly and Ready-to-Assign lands at exactly zero.
 
 function migrateV1(v1: V1State, now: Date): V2State {
-  const book = emptyBudgetBook();
+  const book = emptyV3Book();
   const month = ymKey(now);
   const today = isoDay(now);
   const seeded: Record<string, number> = {};
 
-  const addCategory = (cat: Omit<Category, "order">, seed: number) => {
+  const addCategory = (cat: Omit<V3Category, "order">, seed: Dollars) => {
     book.categories.push({ ...cat, order: book.categories.length });
     if (seed > 0) seeded[cat.id] = seed;
   };
@@ -221,8 +489,8 @@ function migrateV1(v1: V1State, now: Date): V2State {
     } else if ((data.balance?.value ?? 0) > 0) {
       const target =
         efNode === "BigEF"
-          ? bigEmergencyFundTarget(big!.targetMonths, v1.settings.monthlyExpenses)
-          : emergencyFundTarget(v1.settings.monthlyExpenses);
+          ? bigEmergencyFundTargetDollars(big!.targetMonths, v1.settings.monthlyExpenses)
+          : emergencyFundTargetDollars(v1.settings.monthlyExpenses);
       addCategory(
         {
           id: efNode,
@@ -284,7 +552,7 @@ function migrateV1(v1: V1State, now: Date): V2State {
   for (const nodeId of ["HighDebt", "ModDebt"] as const) {
     const debts = (v1.nodes[nodeId]?.data as V2Debts | undefined)?.debts ?? [];
     for (const debt of debts) {
-      const account: Account = {
+      const account: V3Account = {
         id: `debt:${debt.id}`,
         name: debt.name,
         kind: "loan",
@@ -344,8 +612,8 @@ function migrateV1(v1: V1State, now: Date): V2State {
 // action had no ledger representation. Then every ledger-owned payload field
 // is stripped; nodes keep only what the ledger doesn't model.
 
-function migrateV2(v2: V2State, now: Date): AppState {
-  const book: BudgetBook = JSON.parse(JSON.stringify(v2.budget ?? emptyBudgetBook()));
+function migrateV2(v2: V2State, now: Date): V3State {
+  const book: V3BudgetBook = JSON.parse(JSON.stringify(v2.budget ?? emptyV3Book()));
   const month = ymKey(now);
   const today = isoDay(now);
   const seeded: Record<string, number> = {};
@@ -356,7 +624,7 @@ function migrateV2(v2: V2State, now: Date): AppState {
     const group = ensureGroup(book, groupId);
     if (group) book.groups.push(group);
   };
-  const addCat = (cat: Omit<Category, "order">, seed: number) => {
+  const addCat = (cat: Omit<V3Category, "order">, seed: Dollars) => {
     ensureGrp(cat.groupId);
     book.categories.push({ ...cat, order: book.categories.length });
     if (seed > 0) seeded[cat.id] = seed;
@@ -417,8 +685,8 @@ function migrateV2(v2: V2State, now: Date): AppState {
     } else if (!unionExists && (data.balance?.value ?? 0) > 0) {
       const target =
         efNode === "BigEF"
-          ? bigEmergencyFundTarget(big!.targetMonths, v2.settings.monthlyExpenses)
-          : emergencyFundTarget(v2.settings.monthlyExpenses);
+          ? bigEmergencyFundTargetDollars(big!.targetMonths, v2.settings.monthlyExpenses)
+          : emergencyFundTargetDollars(v2.settings.monthlyExpenses);
       addCat(
         {
           id: efNode,
@@ -494,7 +762,7 @@ function migrateV2(v2: V2State, now: Date): AppState {
       const existing = accountById(id);
       if (existing) {
         if (!existing.nodeId) existing.nodeId = nodeId;
-        const balanceC = toCents(accountBalance(book, id));
+        const balanceC = toCents(dollarAccountBalance(book, id));
         if (debt.paid && balanceC < 0) {
           book.transactions.push({
             id: `txn:adjust:v3:debt:${debt.id}`,
@@ -564,10 +832,10 @@ function migrateV2(v2: V2State, now: Date): AppState {
   }
 
   // Phase 2 — strip: nodes keep only what the ledger doesn't model.
-  const nodes = {} as Record<NodeId, NodeState>;
+  const nodes = {} as Record<NodeId, V3NodeState>;
   for (const [id, legacy] of Object.entries(v2.nodes) as [NodeId, LegacyNodeState][]) {
     const { data, ...rest } = legacy;
-    const node: NodeState = { ...rest };
+    const node: V3NodeState = { ...rest };
     if (data !== undefined) {
       if (id === "BigEF") {
         const months = (data as V2BigEF).targetMonths;
@@ -579,9 +847,9 @@ function migrateV2(v2: V2State, now: Date): AppState {
         node.data = {
           monthlyContribution: c.monthlyContribution ?? 0,
           ...(c.targetAge !== undefined ? { targetAge: c.targetAge } : {}),
-        } satisfies NodeDataMap["College"];
+        };
       } else if (id === "Match" || id === "IRA" || id === "HSA" || id === "Increase401k") {
-        node.data = data as NodeState["data"];
+        node.data = data;
       }
       // Everything else (recurring, EFs, SavePurchase, Goals, debts) is
       // ledger-owned now — the payload is dropped.
@@ -607,7 +875,7 @@ function horizonDate(now: Date, years: number): string {
   return isoDay(d);
 }
 
-function startingTxn(accountId: string, date: string, amount: number): Txn {
+function startingTxn(accountId: string, date: string, amount: Dollars): V3Txn {
   return {
     id: `txn:start:${accountId}`,
     accountId,

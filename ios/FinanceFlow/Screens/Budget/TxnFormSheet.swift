@@ -23,7 +23,7 @@ struct TxnFormSheet: View {
     @State private var toID: String?
     @State private var date = Date()
     @State private var payee = ""
-    @State private var amount: Decimal = 0
+    @State private var amount: Money = .zero
     @State private var categoryID: String?
 
     private var book: BudgetBook { store.state.budget }
@@ -223,7 +223,7 @@ struct TxnFormSheet: View {
     }
 
     private var canCommit: Bool {
-        guard amount > 0 else { return false }
+        guard amount > .zero else { return false }
         switch mode {
         case .expense, .income:
             return accountID != nil

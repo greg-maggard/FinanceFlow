@@ -53,13 +53,13 @@ struct SettingsScreen: View {
             VStack(alignment: .leading, spacing: theme.spacing.md) {
                 Text("Your numbers").font(theme.typography.headline).foregroundStyle(theme.colors.textPrimary)
                 LabeledField(label: "Monthly expenses") {
-                    NumberField(value: store.state.settings.monthlyExpenses ?? 0) { v in
-                        store.updateSettings { $0.monthlyExpenses = v > 0 ? v : nil }
+                    NumberField(value: store.state.settings.monthlyExpenses ?? .zero) { v in
+                        store.updateSettings { $0.monthlyExpenses = v > .zero ? v : nil }
                     }
                 }
                 LabeledField(label: "Pre-tax income (annual)") {
-                    NumberField(value: store.state.settings.preTaxIncome ?? 0) { v in
-                        store.updateSettings { $0.preTaxIncome = v > 0 ? v : nil }
+                    NumberField(value: store.state.settings.preTaxIncome ?? .zero) { v in
+                        store.updateSettings { $0.preTaxIncome = v > .zero ? v : nil }
                     }
                 }
                 HStack(spacing: theme.spacing.md) {
@@ -89,7 +89,7 @@ struct SettingsScreen: View {
     /// money. Mirrors the web Settings row.
     private var integrityCard: some View {
         let integrity = Ledger.bookIntegrity(store.state.budget, month: Recurring.ymKey())
-        let ok = integrity.drift == 0
+        let ok = integrity.drift == .zero
         return GlassCard {
             VStack(alignment: .leading, spacing: theme.spacing.md) {
                 Text("Check integrity").font(theme.typography.headline).foregroundStyle(theme.colors.textPrimary)
@@ -108,11 +108,11 @@ struct SettingsScreen: View {
         }
     }
 
-    private func integrityRow(_ label: String, _ value: Decimal, tint: Color? = nil) -> some View {
+    private func integrityRow(_ label: String, _ value: Money, tint: Color? = nil) -> some View {
         HStack {
             Text(label)
             Spacer()
-            Text(value, format: .currency(code: "USD")).monospacedDigit()
+            Text(value.decimalDollars, format: .currency(code: "USD")).monospacedDigit()
         }
         .font(theme.typography.callout)
         .foregroundStyle(tint ?? theme.colors.textSecondary)

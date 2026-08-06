@@ -76,8 +76,7 @@ struct CategoriesSection: View {
                         CategoryRow(
                             category: category,
                             month: month,
-                            entry: snapshot.categories[category.id]
-                                ?? Ledger.CategoryMonth(assigned: 0, activity: 0, available: 0),
+                            entry: snapshot.categories[category.id] ?? .zero,
                             highlighted: category.id == highlightedId
                         )
                         // Scroll anchor for BudgetScreen's ScrollViewReader.
@@ -242,7 +241,7 @@ private struct CategoryRow: View {
                 }
             }
 
-            if let target = category.monthlyTarget ?? category.balanceTarget, target > 0 {
+            if let target = category.monthlyTarget ?? category.balanceTarget, target > .zero {
                 targetBar(target: target)
             }
         }
@@ -266,14 +265,15 @@ private struct CategoryRow: View {
     }
 
     private var availableColor: Color {
-        if entry.available > 0 { return theme.colors.success }
-        if entry.available < 0 { return theme.colors.danger }
+        if entry.available > .zero { return theme.colors.success }
+        if entry.available < .zero { return theme.colors.danger }
         return theme.colors.textSecondary
     }
 
     /// Same thin capsule as RootView's budget pill row: available vs target.
-    private func targetBar(target: Decimal) -> some View {
-        let fraction = min(1, max(0, (entry.available / target).displayDouble))
+    private func targetBar(target: Money) -> some View {
+        // Both integer cents; the ratio is taken in Double only to size the bar.
+        let fraction = min(1, max(0, Double(entry.available.cents) / Double(target.cents)))
         return GeometryReader { geo in
             ZStack(alignment: .leading) {
                 Capsule().fill(theme.colors.surface)

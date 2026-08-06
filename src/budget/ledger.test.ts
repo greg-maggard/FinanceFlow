@@ -41,14 +41,17 @@ describe("helpers", () => {
     expect(isOnBudget("tracking")).toBe(false);
   });
 
-  it("sums balances exactly despite float-dirty amounts", () => {
+  it("sums balances exactly — the classic 0.1 + 0.2 case, in cents", () => {
+    // 10c + 20c. As dollars-as-doubles this summed to 0.30000000000000004 and
+    // only a rounding step at the boundary hid it. Integer cents make the
+    // dirty value unrepresentable rather than rounding it away afterwards.
     const b = book({
       transactions: [
-        txn({ accountId: "checking", date: "2026-06-01", amount: 0.1 }),
-        txn({ accountId: "checking", date: "2026-06-02", amount: 0.2 }),
+        txn({ accountId: "checking", date: "2026-06-01", amount: 10 }),
+        txn({ accountId: "checking", date: "2026-06-02", amount: 20 }),
       ],
     });
-    expect(accountBalance(b, "checking")).toBe(0.3);
+    expect(accountBalance(b, "checking")).toBe(30);
   });
 
   it("computes every account's balance in one pass, matching accountBalance per account", () => {
@@ -335,11 +338,11 @@ describe("bookIntegrity", () => {
     const months = ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06"];
     const b = book({
       transactions: months.flatMap((m) => [
-        txn({ accountId: "checking", date: `${m}-01`, amount: 1650.37, categoryId: RTA_CATEGORY_ID }),
-        txn({ accountId: "checking", date: `${m}-14`, amount: -1200, categoryId: "rent" }),
-        txn({ accountId: "card", date: `${m}-18`, amount: -450.37, categoryId: "food" }),
+        txn({ accountId: "checking", date: `${m}-01`, amount: 165_037, categoryId: RTA_CATEGORY_ID }),
+        txn({ accountId: "checking", date: `${m}-14`, amount: -120_000, categoryId: "rent" }),
+        txn({ accountId: "card", date: `${m}-18`, amount: -45_037, categoryId: "food" }),
       ]),
-      assignments: Object.fromEntries(months.map((m) => [m, { rent: 1200, food: 450.37 }])),
+      assignments: Object.fromEntries(months.map((m) => [m, { rent: 120_000, food: 45_037 }])),
     });
     // Every month funds itself exactly, so RTA is zero whichever month you view.
     for (const m of months) expect(bookIntegrity(b, m).readyToAssign).toBe(0);

@@ -76,8 +76,8 @@ struct PhaseTrailScreen: View {
                         }
                         Spacer()
                     }
-                    if case let .goal(value, max, _) = progress {
-                        GoalBar(value: value, max: max, color: phase.base)
+                    if case let .goal(value, max, unit, _) = progress {
+                        GoalBar(value: value, max: max, color: phase.base, unit: .init(unit))
                     }
                 }
             }

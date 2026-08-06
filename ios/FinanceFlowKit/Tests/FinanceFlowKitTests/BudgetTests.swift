@@ -22,7 +22,7 @@ struct BudgetTests {
         }
     }
 
-    private func cat(_ id: String, _ nodeId: NodeId, monthlyTarget: Decimal) -> BudgetCategory {
+    private func cat(_ id: String, _ nodeId: NodeId, monthlyTarget: Money) -> BudgetCategory {
         BudgetCategory(id: id, groupId: "g:bills", name: id, monthlyTarget: monthlyTarget, nodeId: nodeId)
     }
 
@@ -46,17 +46,19 @@ struct BudgetTests {
         #expect(summary.funded == 1930)
     }
 
-    @Test("summary sums stay exact across fractional amounts and nodes")
-    func summaryExactDecimals() {
+    @Test("summary sums stay exact across cent-sized amounts and nodes")
+    func summaryExactCents() {
+        // 10c + 20c across two nodes: 0.1 + 0.2 in the old dollars
+        // representation, exactly 30 in v4's integer cents.
         let s = seeded {
             $0.budget.categories = [
-                cat("Rent", .Rent, monthlyTarget: Decimal(string: "0.1")!),
-                cat("Food", .Food, monthlyTarget: Decimal(string: "0.2")!),
+                cat("Rent", .Rent, monthlyTarget: 10),
+                cat("Food", .Food, monthlyTarget: 20),
             ]
-            $0.budget.assignments = [month: ["Rent": Decimal(string: "0.1")!, "Food": Decimal(string: "0.2")!]]
+            $0.budget.assignments = [month: ["Rent": 10, "Food": 20]]
         }
         let summary = Derive.monthlyBudgetSummary(s, month: month)
-        #expect(summary.target == Decimal(string: "0.3")!)
-        #expect(summary.funded == Decimal(string: "0.3")!)
+        #expect(summary.target == 30)
+        #expect(summary.funded == 30)
     }
 }

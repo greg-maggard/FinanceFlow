@@ -44,7 +44,8 @@ describe("AddTransactionFab (w2-fastentry)", () => {
 
     const budget = useStore.getState().budget;
     expect(budget.transactions).toHaveLength(1);
-    expect(budget.transactions[0].amount).toBe(-4.5);
+    // Typed dollars, stored cents: the parse boundary applies the v4 rule.
+    expect(budget.transactions[0].amount).toBe(-450);
     expect(budget.transactions[0].accountId).toBe("checking");
     expect(budget.transactions[0].date).toBe(isoDay());
     // Never blank (w1-bug3's honest fallback), since nothing was picked.
@@ -143,7 +144,7 @@ describe("AddTransactionFab (w2-fastentry)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add income" }));
 
     const budget = useStore.getState().budget;
-    expect(budget.transactions[0].amount).toBe(1000);
+    expect(budget.transactions[0].amount).toBe(100_000);
     expect(screen.getByRole("status")).toHaveTextContent("Added $1,000 to Ready to Assign");
   });
 

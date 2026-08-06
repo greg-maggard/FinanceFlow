@@ -26,10 +26,9 @@ export function makeBigBook(txnCount: number): BudgetBook {
     return Math.floor(rng() * (max - min + 1)) + min;
   };
 
-  // Helper to format number to 2 decimals
-  const toDecimal = (n: number): number => {
-    return Math.round(n * 100) / 100;
-  };
+  // Money is integer cents (schema v4), so the generator emits whole cents
+  // directly — there is no rounding step left to model.
+  const toCents = (dollars: number): number => Math.round(dollars * 100);
 
   // Create 8 accounts
   const accountKinds: Array<"checking" | "savings" | "cash" | "credit" | "loan" | "tracking"> = [
@@ -96,7 +95,7 @@ export function makeBigBook(txnCount: number): BudgetBook {
     const dateStr = `${year}-${month}-${dayStr}`;
 
     // Amount: -500 to +500, rounded to 2 decimals
-    const amount = toDecimal((rng() - 0.5) * 1000);
+    const amount = toCents((rng() - 0.5) * 1000);
 
     // Category assignment: every 10th gets RTA_CATEGORY_ID with positive amount
     // Of the remainder: 80% get cat-${i % 40}, 20% get no category
@@ -143,7 +142,7 @@ export function makeBigBook(txnCount: number): BudgetBook {
     }
 
     for (const catIdx of categoryIndices) {
-      const amount = toDecimal(randInt(50, 500));
+      const amount = toCents(randInt(50, 500));
       monthAssignments[`cat-${catIdx}`] = amount;
     }
 

@@ -119,10 +119,26 @@ struct ProgressRing: View {
 /// Horizontal goal bar with value/target labels.
 struct GoalBar: View {
     @Environment(\.theme) private var theme
+    /// What the two compact labels beneath the bar are counted in. The bar's
+    /// fraction is unitless; only the labels care. `.money` reads `value`/`max`
+    /// as integer cents, matching `Money`.
+    enum Unit {
+        case money
+        case percent
+        /// A plain tally (e.g. 3 of 7 steps done) — no unit suffix.
+        case count
+
+        /// The unit a `ProgressInfo.goal` carries. Mirrors the web's
+        /// `GoalBar`'s `unit` prop.
+        init(_ unit: ProgressUnit) {
+            self = unit == .cents ? .money : .percent
+        }
+    }
+
     let value: Double
     let max: Double
     var color: Color
-    var showCurrency: Bool = true
+    var unit: Unit = .money
 
     private var fraction: Double { max <= 0 ? 0 : Swift.min(1, value / max) }
 
@@ -151,7 +167,11 @@ struct GoalBar: View {
     }
 
     private func format(_ v: Double) -> String {
-        showCurrency ? CurrencyFormat.string(v) : NumberFormat.string(v)
+        switch unit {
+        case .money: return CurrencyFormat.string(Money(cents: Int(v.rounded())))
+        case .percent: return NumberFormat.string(v) + "%"
+        case .count: return NumberFormat.string(v)
+        }
     }
 }
 
@@ -179,10 +199,13 @@ enum CurrencyFormat {
         value.formatted(.currency(code: "USD").precision(.fractionLength(value.rounded() == value ? 0 : 2)))
     }
 
-    /// Exact `Decimal` amounts (how money is stored): whole values show no cents,
-    /// fractional ones show two — matching the `Double` overload's behavior.
-    static func string(_ value: Decimal) -> String {
-        value.formatted(.currency(code: "USD").precision(.fractionLength(value.isWholeAmount ? 0 : 2)))
+    /// Integer cents (how money is stored): whole dollars show no cents,
+    /// fractional ones show two — matching the `Double` overload's behavior and
+    /// the web's `dollars()` in `src/components/budget/bits.tsx`.
+    static func string(_ value: Money) -> String {
+        value.decimalDollars.formatted(
+            .currency(code: "USD").precision(.fractionLength(value.isWholeDollars ? 0 : 2))
+        )
     }
 }
 
@@ -196,18 +219,3 @@ enum NumberFormat {
     }
 }
 
-extension Decimal {
-    /// Lossy conversion for views that animate/draw in `Double` (bars, rings).
-    /// Comparisons and sums must stay in exact `Decimal`; this is display-only.
-    var displayDouble: Double { NSDecimalNumber(decimal: self).doubleValue }
-}
-
-private extension Decimal {
-    /// True when there's no fractional part, so currency formatting hides cents.
-    var isWholeAmount: Bool {
-        var original = self
-        var rounded = Decimal()
-        NSDecimalRound(&rounded, &original, 0, .plain)
-        return rounded == self
-    }
-}

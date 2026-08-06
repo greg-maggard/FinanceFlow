@@ -1,0 +1,317 @@
+{
+  "version": 4,
+  "settings": {
+    "monthlyExpenses": 400001,
+    "preTaxIncome": 12000000,
+    "iraAnnualLimit": 700000,
+    "hsaSelfLimit": 430000,
+    "hsaFamilyLimit": 855000
+  },
+  "decisions": {
+    "Q_Match": "yes",
+    "Q_HighDebt": null,
+    "Q_ModDebt": null,
+    "Q_Purchase": null,
+    "Q_15pct": null,
+    "Q_401k": null,
+    "Q_HSA": null,
+    "Q_College": null,
+    "Q_Early": null,
+    "Q_Goals": null
+  },
+  "nodes": {
+    "Start": {
+      "completed": true,
+      "notes": ""
+    },
+    "Rent": {
+      "completed": false,
+      "notes": "due on the 1st",
+      "monthlyChecks": {
+        "2026-05": true
+      }
+    },
+    "BigEF": {
+      "completed": false,
+      "notes": "",
+      "data": {
+        "targetMonths": 6
+      }
+    },
+    "College": {
+      "completed": false,
+      "notes": "",
+      "data": {
+        "monthlyContribution": 10001,
+        "targetAge": 18
+      }
+    },
+    "IRA": {
+      "completed": false,
+      "notes": "",
+      "data": {
+        "type": "roth",
+        "ytdContribution": {
+          "value": 250055,
+          "source": "manual"
+        },
+        "annualLimit": 700000
+      }
+    },
+    "HSA": {
+      "completed": false,
+      "notes": "",
+      "data": {
+        "coverage": "self",
+        "ytdContribution": {
+          "value": 100000,
+          "source": "plaid",
+          "lastSyncedAt": "2026-06-01T00:00:00.000Z"
+        },
+        "annualLimit": 430000
+      }
+    },
+    "Match": {
+      "completed": false,
+      "notes": "",
+      "data": {
+        "matchPct": 4.5,
+        "currentContribPct": 3.25
+      }
+    },
+    "Increase401k": {
+      "completed": false,
+      "notes": "",
+      "data": {
+        "currentPct": 6.5,
+        "targetPct": 15
+      }
+    }
+  },
+  "budget": {
+    "accounts": [
+      {
+        "id": "checking",
+        "name": "Checking",
+        "kind": "checking",
+        "source": "manual"
+      },
+      {
+        "id": "card",
+        "name": "Card",
+        "kind": "credit",
+        "source": "manual"
+      },
+      {
+        "id": "debt:visa",
+        "name": "Visa",
+        "kind": "loan",
+        "apr": 24.99,
+        "minPayment": 5001,
+        "source": "manual",
+        "nodeId": "HighDebt"
+      },
+      {
+        "id": "acct:college",
+        "name": "529 Plan",
+        "kind": "tracking",
+        "source": "manual",
+        "nodeId": "College"
+      }
+    ],
+    "transactions": [
+      {
+        "id": "t-inflow",
+        "accountId": "checking",
+        "date": "2026-06-01",
+        "payee": "Paycheck",
+        "amount": 123456789,
+        "categoryId": "rta",
+        "source": "manual"
+      },
+      {
+        "id": "t-tenth",
+        "accountId": "checking",
+        "date": "2026-06-02",
+        "amount": 10,
+        "categoryId": "food",
+        "source": "manual"
+      },
+      {
+        "id": "t-fifth",
+        "accountId": "checking",
+        "date": "2026-06-02",
+        "amount": 20,
+        "categoryId": "food",
+        "source": "manual"
+      },
+      {
+        "id": "t-third",
+        "accountId": "checking",
+        "date": "2026-06-03",
+        "amount": 3333,
+        "categoryId": "food",
+        "source": "manual"
+      },
+      {
+        "id": "t-half-below",
+        "accountId": "checking",
+        "date": "2026-06-03",
+        "amount": 3334,
+        "categoryId": "food",
+        "source": "manual"
+      },
+      {
+        "id": "t-pos-exact-half",
+        "accountId": "checking",
+        "date": "2026-06-04",
+        "amount": 13,
+        "categoryId": "food",
+        "source": "manual"
+      },
+      {
+        "id": "t-neg-exact-half",
+        "accountId": "card",
+        "date": "2026-06-04",
+        "amount": -12,
+        "categoryId": "food",
+        "source": "manual"
+      },
+      {
+        "id": "t-neg-third",
+        "accountId": "card",
+        "date": "2026-06-05",
+        "amount": -1234,
+        "categoryId": "food",
+        "source": "manual"
+      },
+      {
+        "id": "t-neg-big-half",
+        "accountId": "card",
+        "date": "2026-06-05",
+        "amount": -123450,
+        "categoryId": "rent",
+        "source": "manual"
+      },
+      {
+        "id": "t-zero",
+        "accountId": "checking",
+        "date": "2026-06-06",
+        "amount": 0,
+        "categoryId": "food",
+        "source": "manual"
+      },
+      {
+        "id": "t-uncategorized",
+        "accountId": "checking",
+        "date": "2026-05-20",
+        "payee": "Corner shop",
+        "amount": -4999,
+        "source": "manual",
+        "categoryId": "cat:uncategorized"
+      },
+      {
+        "id": "t-xfer-out-off",
+        "accountId": "checking",
+        "date": "2026-06-07",
+        "amount": -10000,
+        "transferAccountId": "debt:visa",
+        "transferPairId": "t-xfer-in-off",
+        "source": "manual",
+        "categoryId": "cat:uncategorized"
+      },
+      {
+        "id": "t-xfer-in-off",
+        "accountId": "debt:visa",
+        "date": "2026-06-07",
+        "amount": 10000,
+        "transferAccountId": "checking",
+        "transferPairId": "t-xfer-out-off",
+        "source": "manual"
+      },
+      {
+        "id": "t-xfer-out-on",
+        "accountId": "checking",
+        "date": "2026-06-08",
+        "amount": -2550,
+        "transferAccountId": "card",
+        "transferPairId": "t-xfer-in-on",
+        "source": "manual"
+      },
+      {
+        "id": "t-xfer-in-on",
+        "accountId": "card",
+        "date": "2026-06-08",
+        "amount": 2550,
+        "transferAccountId": "checking",
+        "transferPairId": "t-xfer-out-on",
+        "source": "manual"
+      },
+      {
+        "id": "txn:start:debt:visa",
+        "accountId": "debt:visa",
+        "date": "2026-01-05",
+        "payee": "Starting balance",
+        "amount": -420000,
+        "source": "manual"
+      },
+      {
+        "id": "txn:start:acct:college",
+        "accountId": "acct:college",
+        "date": "2026-01-05",
+        "payee": "Starting balance",
+        "amount": 250000,
+        "source": "manual"
+      }
+    ],
+    "groups": [
+      {
+        "id": "g:bills",
+        "name": "Bills",
+        "order": 0
+      },
+      {
+        "id": "g:system",
+        "name": "System",
+        "order": 999999
+      }
+    ],
+    "categories": [
+      {
+        "id": "food",
+        "groupId": "g:bills",
+        "name": "Food",
+        "order": 0,
+        "monthlyTarget": 3333,
+        "nodeId": "Food"
+      },
+      {
+        "id": "rent",
+        "groupId": "g:bills",
+        "name": "Rent",
+        "order": 1,
+        "monthlyTarget": 180000,
+        "balanceTarget": 0,
+        "targetDate": "2027-01-01",
+        "nodeId": "Rent"
+      },
+      {
+        "id": "cat:uncategorized",
+        "groupId": "g:system",
+        "name": "Uncategorized",
+        "order": 999999
+      }
+    ],
+    "assignments": {
+      "2026-05": {
+        "food": 1
+      },
+      "2026-06": {
+        "food": 3333,
+        "rent": 180001
+      }
+    }
+  },
+  "shownCelebrations": [],
+  "earnedMedals": []
+}

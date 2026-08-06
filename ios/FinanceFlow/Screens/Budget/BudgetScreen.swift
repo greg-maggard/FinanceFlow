@@ -96,10 +96,10 @@ struct BudgetScreen: View {
     /// those dollars, so name them here — otherwise money parked in September
     /// looks unspent from August and gets assigned twice. Mirrors the sub-label
     /// under the web RTA pill (`src/components/budget/BudgetScreen.tsx`).
-    private func readyToAssignCard(_ rta: Decimal, assignedAhead: Decimal) -> some View {
+    private func readyToAssignCard(_ rta: Money, assignedAhead: Money) -> some View {
         let (color, caption): (Color, String) = {
-            if rta > 0 { return (theme.colors.success, "Ready to assign — fund your envelopes") }
-            if rta < 0 { return (theme.colors.danger, "Overassigned — pull money back from a category") }
+            if rta > .zero { return (theme.colors.success, "Ready to assign — fund your envelopes") }
+            if rta < .zero { return (theme.colors.danger, "Overassigned — pull money back from a category") }
             return (theme.colors.textSecondary, "All assigned")
         }()
         return GlassCard {
@@ -111,7 +111,7 @@ struct BudgetScreen: View {
                 Text(caption)
                     .font(theme.typography.caption)
                     .foregroundStyle(color)
-                if assignedAhead != 0 {
+                if assignedAhead != .zero {
                     Text("\(CurrencyFormat.string(assignedAhead)) assigned in future months")
                         .font(theme.typography.caption)
                         .foregroundStyle(theme.colors.textSecondary)

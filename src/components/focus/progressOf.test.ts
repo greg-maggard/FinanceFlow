@@ -6,6 +6,22 @@ import { progressOf } from "./progressOf";
 
 const MONTH = "2026-06";
 
+/**
+ * Every money number in this file is INTEGER CENTS (schema v4). Where a test
+ * needs a value the domain has an opinion about — the emergency-fund gate is
+ * `max($1,000, one month of expenses)` — it is spelled in cents explicitly.
+ */
+const MONTHLY_EXPENSES = 300_000; // $3,000/mo
+
+/** A money goal, with the unit `progressOf` now tags its results with. */
+const GOAL = (value: number, max: number, ready: boolean) => ({
+  kind: "goal",
+  unit: "cents",
+  value,
+  max,
+  ready,
+});
+
 let n = 0;
 function txn(partial: Omit<Txn, "id" | "source"> & { id?: string }): Txn {
   return { id: `t${++n}`, source: "manual", ...partial };
@@ -38,21 +54,23 @@ describe("progressOf recurring nodes", () => {
       ];
       s.budget.assignments = { [MONTH]: { "Rent:base": 1500, "Rent:parking": 100 } };
     });
-    expect(progressOf(s, "Rent", MONTH)).toEqual({ kind: "goal", value: 1600, max: 1700, ready: false });
+    expect(progressOf(s, "Rent", MONTH)).toEqual(GOAL(1600, 1700, false));
   });
 
-  it("exact-cents sums meet the target with no floating-point drift", () => {
-    // As raw doubles, 0.7 + 0.1 == 0.7999999999999999 — a hair below 0.8 on
-    // both sides of the comparison. The ledger's integer-cents arithmetic
-    // makes target and funded exactly 0.8, so plain `>=` is enough.
+  it("cent-sized sums meet the target exactly (v4: nothing smaller exists)", () => {
+    // 70c + 10c. As dollars-as-doubles this was 0.7 + 0.1 == 0.7999999999999999
+    // — a hair below 0.8 on both sides of the comparison, and the reason every
+    // arithmetic site used to need a rounding step. In integer cents the sum is
+    // exactly 80 by construction, so plain `>=` is enough and no sub-cent
+    // operand can exist to make iOS disagree.
     const s = seeded((s) => {
       s.budget.categories = [
-        cat({ id: "Food:a", nodeId: "Food", monthlyTarget: 0.7 }),
-        cat({ id: "Food:b", nodeId: "Food", monthlyTarget: 0.1 }),
+        cat({ id: "Food:a", nodeId: "Food", monthlyTarget: 70 }),
+        cat({ id: "Food:b", nodeId: "Food", monthlyTarget: 10 }),
       ];
-      s.budget.assignments = { [MONTH]: { "Food:a": 0.7, "Food:b": 0.1 } };
+      s.budget.assignments = { [MONTH]: { "Food:a": 70, "Food:b": 10 } };
     });
-    expect(progressOf(s, "Food", MONTH)).toEqual({ kind: "goal", value: 0.8, max: 0.8, ready: true });
+    expect(progressOf(s, "Food", MONTH)).toEqual(GOAL(80, 80, true));
   });
 
   it("a target met entirely by carryover reads ready with nothing assigned", () => {
@@ -64,7 +82,7 @@ describe("progressOf recurring nodes", () => {
       s.budget.categories = [cat({ id: "Rent:base", nodeId: "Rent", monthlyTarget: 1800 })];
       s.budget.assignments = { "2026-05": { "Rent:base": 1800 } };
     });
-    expect(progressOf(s, "Rent", MONTH)).toEqual({ kind: "goal", value: 1800, max: 1800, ready: true });
+    expect(progressOf(s, "Rent", MONTH)).toEqual(GOAL(1800, 1800, true));
   });
 
   it("one over-stuffed envelope cannot cover an empty sibling in the same node", () => {
@@ -75,7 +93,7 @@ describe("progressOf recurring nodes", () => {
       ];
       s.budget.assignments = { [MONTH]: { "Rent:base": 1700 } };
     });
-    expect(progressOf(s, "Rent", MONTH)).toEqual({ kind: "goal", value: 1500, max: 1700, ready: false });
+    expect(progressOf(s, "Rent", MONTH)).toEqual(GOAL(1500, 1700, false));
   });
 
   it("keeps today's zero-target behavior: none, ready", () => {
@@ -93,71 +111,73 @@ describe("progressOf recurring nodes", () => {
 describe("progressOf emergency funds", () => {
   it("SmallEF keeps the single-balance behavior with one envelope", () => {
     const s = seeded((s) => {
-      s.settings.monthlyExpenses = 3000;
+      s.settings.monthlyExpenses = MONTHLY_EXPENSES;
       s.budget.categories = [cat({ id: "SmallEF", nodeId: "SmallEF", groupId: "g:ef" })];
-      s.budget.assignments = { [MONTH]: { SmallEF: 3000 } };
+      s.budget.assignments = { [MONTH]: { SmallEF: MONTHLY_EXPENSES } };
     });
-    expect(progressOf(s, "SmallEF", MONTH)).toEqual({ kind: "goal", value: 3000, max: 3000, ready: true });
+    expect(progressOf(s, "SmallEF", MONTH)).toEqual(
+      GOAL(MONTHLY_EXPENSES, MONTHLY_EXPENSES, true),
+    );
   });
 
   it("buckets sum the balance but never shrink the computed target", () => {
     const s = seeded((s) => {
-      s.settings.monthlyExpenses = 3000;
+      s.settings.monthlyExpenses = MONTHLY_EXPENSES;
       s.budget.categories = [
-        cat({ id: "SmallEF:medical", nodeId: "SmallEF", groupId: "g:ef", balanceTarget: 1000 }),
-        cat({ id: "SmallEF:car", nodeId: "SmallEF", groupId: "g:ef", balanceTarget: 500 }),
+        cat({ id: "SmallEF:medical", nodeId: "SmallEF", groupId: "g:ef", balanceTarget: 100_000 }),
+        cat({ id: "SmallEF:car", nodeId: "SmallEF", groupId: "g:ef", balanceTarget: 50_000 }),
       ];
-      s.budget.assignments = { [MONTH]: { "SmallEF:medical": 800, "SmallEF:car": 500 } };
+      s.budget.assignments = { [MONTH]: { "SmallEF:medical": 80_000, "SmallEF:car": 50_000 } };
     });
-    // Bucket targets (1500) stay below one month of expenses (3000): the
+    // Bucket targets ($1,500) stay below one month of expenses ($3,000): the
     // computed starter gate wins, so naming buckets never shrinks the goal.
-    expect(progressOf(s, "SmallEF", MONTH)).toEqual({ kind: "goal", value: 1300, max: 3000, ready: false });
+    expect(progressOf(s, "SmallEF", MONTH)).toEqual(GOAL(130_000, MONTHLY_EXPENSES, false));
   });
 
   it("SmallEF keeps the computed gate even when bucket targets exceed it", () => {
     const s = seeded((s) => {
-      s.settings.monthlyExpenses = 3000;
+      s.settings.monthlyExpenses = MONTHLY_EXPENSES;
       s.budget.categories = [
-        cat({ id: "SmallEF:medical", nodeId: "SmallEF", groupId: "g:ef", balanceTarget: 9000 }),
+        cat({ id: "SmallEF:medical", nodeId: "SmallEF", groupId: "g:ef", balanceTarget: 900_000 }),
       ];
-      s.budget.assignments = { [MONTH]: { "SmallEF:medical": 800 } };
+      s.budget.assignments = { [MONTH]: { "SmallEF:medical": 80_000 } };
     });
     // Big bucket ambitions live on BigEF; the $1k-or-one-month starter gate
     // never inflates, so the first milestone stays reachable.
-    expect(progressOf(s, "SmallEF", MONTH)).toEqual({ kind: "goal", value: 800, max: 3000, ready: false });
+    expect(progressOf(s, "SmallEF", MONTH)).toEqual(GOAL(80_000, MONTHLY_EXPENSES, false));
   });
 
   it("bucket targets beyond the computed milestone grow the goal", () => {
     const s = seeded((s) => {
-      s.settings.monthlyExpenses = 3000;
+      s.settings.monthlyExpenses = MONTHLY_EXPENSES;
       s.nodes.BigEF.data = { targetMonths: 3 };
       s.budget.categories = [
-        cat({ id: "BigEF:medical", nodeId: "BigEF", groupId: "g:ef", balanceTarget: 6000 }),
-        cat({ id: "BigEF:home", nodeId: "BigEF", groupId: "g:ef", balanceTarget: 5000 }),
+        cat({ id: "BigEF:medical", nodeId: "BigEF", groupId: "g:ef", balanceTarget: 600_000 }),
+        cat({ id: "BigEF:home", nodeId: "BigEF", groupId: "g:ef", balanceTarget: 500_000 }),
       ];
-      s.budget.assignments = { [MONTH]: { "BigEF:medical": 6000, "BigEF:home": 4000 } };
+      s.budget.assignments = { [MONTH]: { "BigEF:medical": 600_000, "BigEF:home": 400_000 } };
     });
-    // Σ bucket targets (11000) exceeds 3 × 3000: the user's real goal shows.
-    expect(progressOf(s, "BigEF", MONTH)).toEqual({ kind: "goal", value: 10000, max: 11000, ready: false });
+    // Σ bucket targets ($11,000) exceeds 3 × $3,000: the user's real goal shows.
+    expect(progressOf(s, "BigEF", MONTH)).toEqual(GOAL(1_000_000, 1_100_000, false));
   });
 
   it("BigEF buckets define the goal when expenses are unset", () => {
     const s = seeded((s) => {
       s.nodes.BigEF.data = { targetMonths: 6 };
-      s.budget.categories = [cat({ id: "BigEF:car", nodeId: "BigEF", groupId: "g:ef", balanceTarget: 4000 })];
-      s.budget.assignments = { [MONTH]: { "BigEF:car": 4000 } };
+      s.budget.categories = [cat({ id: "BigEF:car", nodeId: "BigEF", groupId: "g:ef", balanceTarget: 400_000 })];
+      s.budget.assignments = { [MONTH]: { "BigEF:car": 400_000 } };
     });
-    expect(progressOf(s, "BigEF", MONTH)).toEqual({ kind: "goal", value: 4000, max: 4000, ready: true });
+    expect(progressOf(s, "BigEF", MONTH)).toEqual(GOAL(400_000, 400_000, true));
   });
 
   it("BigEF without balance targets keeps the computed goal", () => {
     const s = seeded((s) => {
-      s.settings.monthlyExpenses = 3000;
+      s.settings.monthlyExpenses = MONTHLY_EXPENSES;
       s.nodes.BigEF.data = { targetMonths: 6 };
       s.budget.categories = [cat({ id: "BigEF", nodeId: "BigEF", groupId: "g:ef" })];
-      s.budget.assignments = { [MONTH]: { BigEF: 18000 } };
+      s.budget.assignments = { [MONTH]: { BigEF: 1_800_000 } };
     });
-    expect(progressOf(s, "BigEF", MONTH)).toEqual({ kind: "goal", value: 18000, max: 18000, ready: true });
+    expect(progressOf(s, "BigEF", MONTH)).toEqual(GOAL(1_800_000, 1_800_000, true));
   });
 });
 
@@ -169,7 +189,7 @@ describe("progressOf SavePurchase", () => {
       ];
       s.budget.assignments = { [MONTH]: { "SavePurchase:car": 12000 } };
     });
-    expect(progressOf(s, "SavePurchase", MONTH)).toEqual({ kind: "goal", value: 12000, max: 12000, ready: true });
+    expect(progressOf(s, "SavePurchase", MONTH)).toEqual(GOAL(12000, 12000, true));
   });
 
   it("aggregates saved and target across goal envelopes", () => {
@@ -180,7 +200,7 @@ describe("progressOf SavePurchase", () => {
       ];
       s.budget.assignments = { [MONTH]: { "SavePurchase:down": 15000, "SavePurchase:car": 12000 } };
     });
-    expect(progressOf(s, "SavePurchase", MONTH)).toEqual({ kind: "goal", value: 27000, max: 52000, ready: false });
+    expect(progressOf(s, "SavePurchase", MONTH)).toEqual(GOAL(27000, 52000, false));
   });
 });
 
@@ -205,20 +225,10 @@ describe("progressOf debts", () => {
   });
 
   it("partial payoff climbs the bar continuously", () => {
-    expect(progressOf(debtState(1200), "HighDebt", MONTH)).toEqual({
-      kind: "goal",
-      value: 1200,
-      max: 4200,
-      ready: false,
-    });
+    expect(progressOf(debtState(1200), "HighDebt", MONTH)).toEqual(GOAL(1200, 4200, false));
   });
 
   it("ready once every open account is cleared", () => {
-    expect(progressOf(debtState(4200), "HighDebt", MONTH)).toEqual({
-      kind: "goal",
-      value: 4200,
-      max: 4200,
-      ready: true,
-    });
+    expect(progressOf(debtState(4200), "HighDebt", MONTH)).toEqual(GOAL(4200, 4200, true));
   });
 });

@@ -3,6 +3,7 @@ import type {
   Account,
   AppState,
   Category,
+  Cents,
   Decision,
   DecisionId,
   MonthKey,
@@ -11,11 +12,22 @@ import type {
   Settings,
   Txn,
 } from "./schema";
-import { UNCATEGORIZED_CATEGORY_ID, ensureUncategorized, makeInitialState, newId } from "./schema";
-import { fromCents, pairTransfer, toCents } from "../budget/ledger";
+import {
+  UNCATEGORIZED_CATEGORY_ID,
+  cents,
+  ensureUncategorized,
+  makeInitialState,
+  newId,
+} from "./schema";
+import { pairTransfer } from "../budget/ledger";
 import type { BookOps } from "../budget/nodeLedger";
 import { migrate } from "./io";
-import { LocalStorageAdapter, StorageError, maybePromoteBackup } from "./storage";
+import {
+  LocalStorageAdapter,
+  StorageError,
+  backupPreMigration,
+  maybePromoteBackup,
+} from "./storage";
 import type { StorageAdapter } from "./storage";
 import { useUI } from "./uiStore";
 
@@ -26,7 +38,7 @@ type Store = AppState & {
   setNodeData: <K extends keyof NodeDataMap>(id: K, data: NodeDataMap[K]) => void;
   patchNodeData: <K extends keyof NodeDataMap>(id: K, patch: Partial<NodeDataMap[K]>) => void;
   setSettings: (patch: Partial<Settings>) => void;
-  assign: (month: MonthKey, categoryId: string, amount: number) => void;
+  assign: (month: MonthKey, categoryId: string, amount: Cents) => void;
   addAccount: (account: Account) => void;
   updateAccount: (account: Account) => void;
   addTxn: (txn: Txn) => void;
@@ -35,7 +47,7 @@ type Store = AppState & {
   addTransfer: (args: {
     from: string;
     to: string;
-    amount: number;
+    amount: Cents;
     date: string;
     payee?: string;
     categoryId?: string;
@@ -102,7 +114,19 @@ function loadInitial(): AppState {
   }
 
   try {
-    return migrate(parsed);
+    const migrated = migrate(parsed);
+    // D7: the document just changed schema version, and the debounced write
+    // below will replace the stored bytes with the v4 image within one
+    // debounce cycle. Stash the ORIGINAL bytes under their own version key
+    // first, so a bad migration stays recoverable from inside the app
+    // (RecoveryScreen / SettingsModal read this key). `maybePromoteBackup`'s
+    // rolling snapshot is throttled to once a day and cannot be relied on to
+    // fire at this one instant — see storage.ts.
+    const storedVersion = (parsed as { version?: unknown }).version;
+    if (typeof storedVersion === "number" && storedVersion < migrated.version) {
+      backupPreMigration(storedVersion, raw);
+    }
+    return migrated;
   } catch (err) {
     // migrate() throws deliberately for a future-version or corrupt document
     // (see io.ts) instead of resetting. Falling through here would destroy
@@ -295,8 +319,8 @@ export const useStore = create<Store>((set) => ({
       for (const [month, table] of Object.entries(book.assignments)) {
         const { [id]: moved, ...rest } = table;
         if (moved !== undefined && carriesActivity) {
-          const merged = toCents(rest[reassignTo] ?? 0) + toCents(moved);
-          if (merged !== 0) rest[reassignTo] = fromCents(merged);
+          const merged = (rest[reassignTo] ?? 0) + moved;
+          if (merged !== 0) rest[reassignTo] = cents(merged);
           else delete rest[reassignTo];
         }
         if (Object.keys(rest).length > 0) assignments[month] = rest;

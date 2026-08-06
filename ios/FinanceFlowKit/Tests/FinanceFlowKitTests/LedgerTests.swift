@@ -10,7 +10,7 @@ struct LedgerTests {
     private func txn(
         _ account: String,
         _ date: String,
-        _ amount: Decimal,
+        _ amount: Money,
         category: String? = nil,
         transfer: String? = nil
     ) -> Txn {
@@ -19,7 +19,7 @@ struct LedgerTests {
 
     private func makeBook(
         transactions: [Txn] = [],
-        assignments: [String: [String: Decimal]] = [:]
+        assignments: [String: [String: Money]] = [:]
     ) -> BudgetBook {
         BudgetBook(
             accounts: [
@@ -46,13 +46,16 @@ struct LedgerTests {
         #expect(!Ledger.isOnBudget(.tracking))
     }
 
-    @Test("sums balances exactly")
+    @Test("sums balances exactly — the classic 0.1 + 0.2 case, in cents")
     func exactBalances() {
+        // 10c + 20c. As dollars-as-doubles the web summed this to
+        // 0.30000000000000004 and only a rounding step at the boundary hid it;
+        // in integer cents the dirty value is unrepresentable, not rounded away.
         let b = makeBook(transactions: [
-            txn("checking", "2026-06-01", Decimal(string: "0.1")!),
-            txn("checking", "2026-06-02", Decimal(string: "0.2")!),
+            txn("checking", "2026-06-01", 10),
+            txn("checking", "2026-06-02", 20),
         ])
-        #expect(Ledger.accountBalance(b, "checking") == Decimal(string: "0.3")!)
+        #expect(Ledger.accountBalance(b, "checking") == 30)
     }
 
     @Test("computes RTA from inflows and assignments through the viewed month")
@@ -92,12 +95,12 @@ struct LedgerTests {
     @Test("reports dollars parked in months after the viewed one")
     func assignedAfterSumsFutureMonths() {
         let b = makeBook(assignments: [
-            "2026-06": ["groceries": 100],
-            "2026-07": ["groceries": 50],
-            "2026-08": ["groceries": Decimal(string: "25.50")!],
+            "2026-06": ["groceries": 10_000],
+            "2026-07": ["groceries": 5_000],
+            "2026-08": ["groceries": 2550],
         ])
-        #expect(Ledger.assignedAfter(b, month: "2026-06") == Decimal(string: "75.50")!)
-        #expect(Ledger.assignedAfter(b, month: "2026-07") == Decimal(string: "25.50")!)
+        #expect(Ledger.assignedAfter(b, month: "2026-06") == 7550)
+        #expect(Ledger.assignedAfter(b, month: "2026-07") == 2550)
         #expect(Ledger.assignedAfter(b, month: "2026-08") == 0)
     }
 
@@ -187,17 +190,17 @@ struct LedgerTests {
 
     @Test("keeps envelope math exact at the cent")
     func exactEnvelopeMath() {
-        let third = Decimal(string: "33.33")!
+        let third = Money(cents: 3333)   // $33.33
         let b = makeBook(
             transactions: [
                 txn("checking", "2026-06-03", -third, category: "phone"),
                 txn("checking", "2026-06-04", -third, category: "phone"),
-                txn("checking", "2026-06-05", -Decimal(string: "33.34")!, category: "phone"),
+                txn("checking", "2026-06-05", -3334, category: "phone"),
             ],
-            assignments: ["2026-06": ["phone": 100]]
+            assignments: ["2026-06": ["phone": 10_000]]   // $100
         )
         let june = Ledger.snapshot(b, month: "2026-06")
-        #expect(june.categories["phone"]?.activity == -100)
+        #expect(june.categories["phone"]?.activity == -10_000)
         #expect(june.categories["phone"]?.available == 0)
     }
 
@@ -243,7 +246,7 @@ struct LedgerTests {
         let months = ["2026-04", "2026-05", "2026-06"]
         let b = makeBook(
             transactions: months.map { txn("checking", "\($0)-20", -90, category: "food") },
-            assignments: Dictionary(uniqueKeysWithValues: months.map { ($0, ["food": Decimal(100)]) })
+            assignments: Dictionary(uniqueKeysWithValues: months.map { ($0, ["food": Money(cents: 100)]) })
         )
         #expect(Ledger.snapshot(b, month: "2026-06").categories["food"]?.available == 30)
     }
@@ -269,10 +272,10 @@ struct LedgerTests {
     func integrityUnbudgetedSpending() {
         let b = makeBook(transactions: [
             txn("checking", "2026-06-01", 1000, category: Ledger.rtaCategoryID),
-            txn("checking", "2026-06-07", -45.55),
+            txn("checking", "2026-06-07", -4555),
         ])
         let i = Ledger.bookIntegrity(b, month: "2026-06")
-        #expect(i.unbudgetedSpending == -45.55)
+        #expect(i.unbudgetedSpending == -4555)
         // The residual is named, so conservation still holds exactly.
         #expect(i.drift == 0)
     }
@@ -302,13 +305,13 @@ struct LedgerTests {
     func integritySixMonthHistory() {
         let months = ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06"]
         var transactions: [Txn] = []
-        var assignments: [String: [String: Decimal]] = [:]
-        let food = Decimal(string: "450.37")!
+        var assignments: [String: [String: Money]] = [:]
+        let food = Money(cents: 45_037)   // $450.37
         for m in months {
-            transactions.append(txn("checking", "\(m)-01", Decimal(string: "1650.37")!, category: Ledger.rtaCategoryID))
-            transactions.append(txn("checking", "\(m)-14", -1200, category: "rent"))
+            transactions.append(txn("checking", "\(m)-01", 165_037, category: Ledger.rtaCategoryID))
+            transactions.append(txn("checking", "\(m)-14", -120_000, category: "rent"))
             transactions.append(txn("card", "\(m)-18", -food, category: "food"))
-            assignments[m] = ["rent": 1200, "food": food]
+            assignments[m] = ["rent": 120_000, "food": food]
         }
         let b = makeBook(transactions: transactions, assignments: assignments)
         // Every month funds itself exactly, so RTA is zero whichever month you view.
@@ -410,25 +413,22 @@ struct LedgerTests {
         #expect(i.drift == 0)
     }
 
-    @Test("toCents rounds a half cent toward +infinity, like JavaScript's Math.round")
-    func toCentsMatchesJSRounding() {
-        #expect(Ledger.toCents(Decimal(string: "-0.005")!) == 0)
-        #expect(Ledger.toCents(Decimal(string: "-0.004")!) == 0)
-        #expect(Ledger.toCents(Decimal(string: "-0.015")!) == -1)
-        #expect(Ledger.toCents(Decimal(string: "0.005")!) == 1)
-        #expect(Ledger.toCents(Decimal(string: "-45.55")!) == -4555)
-        #expect(Ledger.toCents(Decimal(string: "1650.37")!) == 165037)
-    }
+    // The old `Ledger.toCents` is gone: nothing rounds at an arithmetic site
+    // any more, because nothing arrives in dollars. The one surviving rounding
+    // rule lives on `Money` and is exercised by `MoneyTests` and the shared
+    // migration fixture.
 
-    @Test("bookIntegrity stays exact on cent-level amounts that would drift as floats")
+    @Test("bookIntegrity stays exact on cent-sized amounts that would drift as floats")
     func integrityCentExact() {
+        // 10c + 20c - 30c: the 0.1/0.2/0.3 trio, now unrepresentable as anything
+        // but exact integers.
         let b = makeBook(
             transactions: [
-                txn("checking", "2026-06-01", 0.1, category: Ledger.rtaCategoryID),
-                txn("checking", "2026-06-02", 0.2, category: Ledger.rtaCategoryID),
-                txn("checking", "2026-06-03", -0.3, category: "food"),
+                txn("checking", "2026-06-01", 10, category: Ledger.rtaCategoryID),
+                txn("checking", "2026-06-02", 20, category: Ledger.rtaCategoryID),
+                txn("checking", "2026-06-03", -30, category: "food"),
             ],
-            assignments: ["2026-06": ["food": 0.3]]
+            assignments: ["2026-06": ["food": 30]]
         )
         #expect(Ledger.bookIntegrity(b, month: "2026-06").drift == 0)
     }
