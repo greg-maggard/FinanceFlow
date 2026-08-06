@@ -70,13 +70,19 @@ export class AppErrorBoundary extends Component<{ children: ReactNode }, Boundar
 
 function AppShell() {
   const focusedId = useUI((s) => s.focusedId);
-  const setFocus = useUI((s) => s.setFocus);
   const view = useUI((s) => s.view);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
-    if (!focusedId) setFocus(findCurrentNode());
-  }, [focusedId, setFocus]);
+    // Covers both first-ever launch (focusedId still null) and a persisted
+    // focusedId that's no longer a valid NodeId (e.g. after a graph change)
+    // — w2-persist-view. Written via setState rather than setFocus() so it
+    // doesn't also force view to "focus", which would stomp the persisted
+    // view on every cold boot.
+    if (!focusedId || !GRAPH_BY_ID[focusedId]) {
+      useUI.setState({ focusedId: findCurrentNode() });
+    }
+  }, [focusedId]);
 
   const activeId = focusedId ?? "Start";
   const activePhase = useMemo(() => GRAPH_BY_ID[activeId].phase, [activeId]);
