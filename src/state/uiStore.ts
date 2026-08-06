@@ -10,6 +10,17 @@ export type PendingCelebration = { id: NodeId; onPath: boolean };
 /** Where a cross-navigation jump into the Budget screen should land. */
 export type BudgetFocus = { categoryId?: string; accountId?: string };
 
+/**
+ * Fast-entry memory (w2-fastentry): the account and, per account, the
+ * category most recently used when logging a transaction from the FAB.
+ * Lets the fast path pre-fill both without ever landing on blank — the
+ * worst case is a stale-but-honest guess the user overrides in two taps.
+ */
+export type LastUsedTxn = {
+  accountId: string;
+  categoryByAccount: Record<string, string>;
+};
+
 type UIStore = {
   view: ViewMode;
   focusedId: NodeId | null;
@@ -19,6 +30,10 @@ type UIStore = {
   pendingMedal: number | null;
   /** Pending one-shot scroll/pulse request; BudgetScreen consumes it. */
   budgetFocus: BudgetFocus | null;
+  /** Most-recently-used account/category pair for the fast-entry FAB; null
+   *  until the first transaction is ever logged from it. Persisted (see
+   *  writePersistedUi below) so it survives a reload. */
+  lastUsedTxn: LastUsedTxn | null;
   /**
    * Non-null when the most recent persistence write failed (quota exceeded,
    * Safari private mode, storage eviction, ...). Drives the persistent
@@ -46,6 +61,9 @@ type UIStore = {
   setFocus: (id: NodeId | null, direction?: Direction) => void;
   openInBudget: (target: BudgetFocus) => void;
   clearBudgetFocus: () => void;
+  /** Remembers this (account, category) pair as the most recent for that
+   *  account, for the fast-entry FAB's next pre-fill. */
+  recordTxnUsage: (accountId: string, categoryId: string) => void;
   toggleSound: () => void;
   triggerCelebration: (id: NodeId, onPath: boolean) => void;
   clearCelebration: () => void;
@@ -59,18 +77,27 @@ type UIStore = {
 };
 
 /**
- * Persists only `view` and `focusedId` — where the user is, not budget
- * data — under a key separate from the budget document (STORAGE_KEY in
- * store.ts) so it never rides that migration chain. Everything else on
+ * Persists `view`/`focusedId` — where the user is — and (w2-fastentry)
+ * `lastUsedTxn` — the FAB's pre-fill memory. Neither is budget data, so
+ * both live under a key separate from the budget document (STORAGE_KEY in
+ * store.ts) and never ride that migration chain. Everything else on
  * UIStore is a one-shot signal (celebrations, medals, budgetFocus,
  * direction) that would misfire if replayed on reload, so none of it is
  * persisted here.
  */
 const UI_STORAGE_KEY = "financeflow:ui:v1";
 
-type PersistedUi = { view: ViewMode; focusedId: NodeId | null };
+type PersistedUi = { view: ViewMode; focusedId: NodeId | null; lastUsedTxn?: LastUsedTxn };
 
 const VALID_VIEWS: ViewMode[] = ["focus", "overview", "shelf", "budget"];
+
+function isValidLastUsedTxn(v: unknown): v is LastUsedTxn {
+  if (!v || typeof v !== "object") return false;
+  const o = v as { accountId?: unknown; categoryByAccount?: unknown };
+  if (typeof o.accountId !== "string") return false;
+  if (!o.categoryByAccount || typeof o.categoryByAccount !== "object") return false;
+  return Object.values(o.categoryByAccount as object).every((x) => typeof x === "string");
+}
 
 /**
  * Best-effort read of the persisted slice. Deliberately permissive: this is
@@ -87,12 +114,17 @@ function readPersistedUi(): Partial<PersistedUi> {
   const raw = localStorage.getItem(UI_STORAGE_KEY);
   if (!raw) return {};
   try {
-    const parsed = JSON.parse(raw) as { view?: unknown; focusedId?: unknown };
+    const parsed = JSON.parse(raw) as {
+      view?: unknown;
+      focusedId?: unknown;
+      lastUsedTxn?: unknown;
+    };
     const view = VALID_VIEWS.includes(parsed.view as ViewMode)
       ? (parsed.view as ViewMode)
       : undefined;
     const focusedId = typeof parsed.focusedId === "string" ? (parsed.focusedId as NodeId) : null;
-    return { view, focusedId };
+    const lastUsedTxn = isValidLastUsedTxn(parsed.lastUsedTxn) ? parsed.lastUsedTxn : undefined;
+    return { view, focusedId, lastUsedTxn };
   } catch {
     return {};
   }
@@ -122,6 +154,7 @@ export const useUI = create<UIStore>((set) => ({
   pendingCelebration: null,
   pendingMedal: null,
   budgetFocus: null,
+  lastUsedTxn: persistedUi.lastUsedTxn ?? null,
   saveError: null,
   lastSavedAt: null,
   staleTab: null,
@@ -130,6 +163,13 @@ export const useUI = create<UIStore>((set) => ({
   setFocus: (id, direction = "none") => set({ focusedId: id, direction, view: "focus" }),
   openInBudget: (target) => set({ view: "budget", budgetFocus: target }),
   clearBudgetFocus: () => set({ budgetFocus: null }),
+  recordTxnUsage: (accountId, categoryId) =>
+    set((s) => ({
+      lastUsedTxn: {
+        accountId,
+        categoryByAccount: { ...(s.lastUsedTxn?.categoryByAccount ?? {}), [accountId]: categoryId },
+      },
+    })),
   toggleSound: () => set((s) => ({ soundOn: !s.soundOn })),
   triggerCelebration: (id, onPath) => set({ pendingCelebration: { id, onPath } }),
   clearCelebration: () => set({ pendingCelebration: null }),
@@ -144,14 +184,26 @@ export const useUI = create<UIStore>((set) => ({
   setStaleTab: (message) => set({ staleTab: message }),
 }));
 
-// Persist view/focusedId on every change (no debounce needed at this write
-// volume — see w2-persist-view). Deliberately narrow: only writes when one
-// of the two persisted fields actually changed, so the frequent one-shot
-// signals (pendingCelebration, pendingMedal, budgetFocus, ...) that also
-// live on this store don't trigger a write, and are never persisted.
+// Persist view/focusedId/lastUsedTxn on every change (no debounce needed at
+// this write volume — see w2-persist-view, w2-fastentry). Deliberately
+// narrow: only writes when one of the three persisted fields actually
+// changed, so the frequent one-shot signals (pendingCelebration,
+// pendingMedal, budgetFocus, ...) that also live on this store don't
+// trigger a write, and are never persisted. `lastUsedTxn` is omitted from
+// the written object while still null so a session that never touches the
+// FAB persists exactly the same two-key shape as before this field existed.
 useUI.subscribe((state, prevState) => {
-  if (state.view === prevState.view && state.focusedId === prevState.focusedId) return;
-  writePersistedUi({ view: state.view, focusedId: state.focusedId });
+  if (
+    state.view === prevState.view &&
+    state.focusedId === prevState.focusedId &&
+    state.lastUsedTxn === prevState.lastUsedTxn
+  )
+    return;
+  writePersistedUi({
+    view: state.view,
+    focusedId: state.focusedId,
+    ...(state.lastUsedTxn ? { lastUsedTxn: state.lastUsedTxn } : {}),
+  });
 });
 
 // The Workbox-provided reload trigger (from virtual:pwa-register's

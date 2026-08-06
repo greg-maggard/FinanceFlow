@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import { useStore } from "../../state/store";
-import type { Account, Txn } from "../../state/schema";
+import { useUI } from "../../state/uiStore";
+import type { Account, Category, Txn } from "../../state/schema";
 import { RTA_CATEGORY_ID, UNCATEGORIZED_CATEGORY_ID, newId } from "../../state/schema";
 import { isOnBudget, isoDay } from "../../budget/ledger";
 import { GlassCard } from "../glass/GlassCard";
@@ -10,15 +11,25 @@ import { NumberField } from "../glass/NumberField";
 import { KebabMenu } from "../glass/KebabMenu";
 import { Field, SectionTitle, dollars } from "./bits";
 
-type Mode = "expense" | "income" | "transfer";
+export type Mode = "expense" | "income" | "transfer";
 
-const MODE_LABEL: Record<Mode, string> = {
+/** What just landed and where, for a save confirmation (w2-fastentry). */
+export type SavedTxnInfo = { amount: number; envelopeName: string };
+
+export const MODE_LABEL: Record<Mode, string> = {
   expense: "Expense",
   income: "Income",
   transfer: "Transfer",
 };
 
-function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => void }) {
+/** A category's display name for a save confirmation, matching the
+ *  "Uncategorized" label CategorySelect/TxnRow already use. */
+export function categoryLabel(categories: Category[], id: string): string {
+  if (id === UNCATEGORIZED_CATEGORY_ID) return "Uncategorized";
+  return categories.find((c) => c.id === id)?.name ?? "Uncategorized";
+}
+
+export function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => void }) {
   return (
     <div className="flex gap-1.5">
       {(Object.keys(MODE_LABEL) as Mode[]).map((m) => {
@@ -43,7 +54,7 @@ function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => voi
   );
 }
 
-function AccountSelect({
+export function AccountSelect({
   value,
   onChange,
   accounts,
@@ -66,7 +77,13 @@ function AccountSelect({
   );
 }
 
-function CategorySelect({ value, onChange }: { value: string; onChange: (id: string) => void }) {
+export function CategorySelect({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (id: string) => void;
+}) {
   const budget = useStore((s) => s.budget);
   const groups = [...budget.groups].sort((a, b) => a.order - b.order);
   // The catch-all envelope is created lazily, so offer it even before it's in
@@ -95,8 +112,33 @@ function CategorySelect({ value, onChange }: { value: string; onChange: (id: str
   );
 }
 
-function AddTxnForm({ accounts }: { accounts: Account[] }) {
-  const [mode, setMode] = useState<Mode>("expense");
+/**
+ * The full expense/income/transfer form. `mode`/`onModeChange` are optional
+ * and controlled — pass both to drive the mode from outside (the fast-entry
+ * FAB does this so its own ModeToggle stays the single source of truth
+ * instead of stacking a second one); omit both and the form manages its own
+ * mode and renders its own toggle, as TransactionsSection uses it below.
+ * `onSaved` fires once a save actually commits, naming the amount and
+ * envelope it landed in, for callers that want to surface a confirmation.
+ */
+export function AddTxnForm({
+  accounts,
+  mode: controlledMode,
+  onModeChange,
+  onSaved,
+}: {
+  accounts: Account[];
+  mode?: Mode;
+  onModeChange?: (m: Mode) => void;
+  onSaved?: (info: SavedTxnInfo) => void;
+}) {
+  const [internalMode, setInternalMode] = useState<Mode>("expense");
+  const mode = controlledMode ?? internalMode;
+  const setMode = onModeChange ?? setInternalMode;
+  // Only render our own toggle when nobody outside is already driving mode —
+  // otherwise the caller's toggle and this one would fight over one value.
+  const showOwnToggle = controlledMode === undefined;
+  const categories = useStore((s) => s.budget.categories);
   const [accountId, setAccountId] = useState(() => accounts[0]?.id ?? "");
   const [fromId, setFromId] = useState(() => accounts[0]?.id ?? "");
   const [toId, setToId] = useState("");
@@ -126,7 +168,11 @@ function AddTxnForm({ accounts }: { accounts: Account[] }) {
 
   const submit = () => {
     if (!canSubmit) return;
+    let envelopeName: string;
     if (mode === "transfer") {
+      const transferCategoryId = transferNeedsCategory
+        ? categoryId || UNCATEGORIZED_CATEGORY_ID
+        : undefined;
       useStore.getState().addTransfer({
         from: fromId,
         to: toId,
@@ -135,29 +181,38 @@ function AddTxnForm({ accounts }: { accounts: Account[] }) {
         // Same rule as the expense branch below: where money crosses the
         // budget boundary it has to land in an envelope, so "— No category —"
         // falls back to the catch-all rather than leaking out of the system.
-        categoryId: transferNeedsCategory
-          ? categoryId || UNCATEGORIZED_CATEGORY_ID
-          : undefined,
+        categoryId: transferCategoryId,
       });
+      envelopeName = transferCategoryId
+        ? categoryLabel(categories, transferCategoryId)
+        : (accounts.find((a) => a.id === toId)?.name ?? "another account");
     } else {
+      const finalCategoryId =
+        mode === "income" ? RTA_CATEGORY_ID : categoryId || UNCATEGORIZED_CATEGORY_ID;
       useStore.getState().addTxn({
         id: newId(),
         accountId,
         date,
         payee: payee.trim() || undefined,
         amount: mode === "expense" ? -magnitude : magnitude,
-        categoryId:
-          mode === "income" ? RTA_CATEGORY_ID : categoryId || UNCATEGORIZED_CATEGORY_ID,
+        categoryId: finalCategoryId,
         source: "manual",
       });
+      // Shared fast-entry memory (w2-fastentry): every expense, from this
+      // full form or the FAB's fast path, refreshes the FAB's next pre-fill.
+      if (mode === "expense") {
+        useUI.getState().recordTxnUsage(accountId, finalCategoryId);
+      }
+      envelopeName = mode === "income" ? "Ready to Assign" : categoryLabel(categories, finalCategoryId);
     }
+    onSaved?.({ amount: magnitude, envelopeName });
     setPayee("");
     setAmount(0);
   };
 
   return (
     <div className="space-y-3">
-      <ModeToggle mode={mode} onChange={setMode} />
+      {showOwnToggle && <ModeToggle mode={mode} onChange={setMode} />}
 
       {mode === "transfer" ? (
         <>
