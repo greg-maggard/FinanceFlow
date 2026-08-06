@@ -98,6 +98,7 @@ struct AppStoreTests {
         store.assign(month: "2026-06", categoryID: "groceries", amount: 0)
         // Clearing the last assignment removes the empty month table entirely.
         #expect(store.state.budget.assignments["2026-06"] == nil)
+        #expect(Ledger.bookIntegrity(store.state.budget, month: "2026-06").drift == 0)
     }
 
     @Test("deleting one row of a transfer deletes its pair")
@@ -111,6 +112,7 @@ struct AppStoreTests {
         let anyRow = store.state.budget.transactions[0]
         store.deleteTxn(anyRow.id)
         #expect(store.state.budget.transactions.isEmpty)
+        #expect(Ledger.bookIntegrity(store.state.budget, month: "2026-06").drift == 0)
     }
 
     @Test("deleteCategory uncategorizes its transactions and returns assignments to RTA")
@@ -132,6 +134,12 @@ struct AppStoreTests {
         #expect(store.state.budget.assignments.isEmpty)
         // The deleted envelope's dollars are back in the pool — nothing vanished.
         #expect(Ledger.snapshot(store.state.budget, month: "2026-06").readyToAssign == 1000)
+        // FIXME(w1-bug3): drift stays 0 here only because the $40 spend,
+        // orphaned by the delete, lands in the unbudgetedSpending residual —
+        // cash is conserved but the dollars left the envelope system
+        // unnoticed. The invariant holds; tightening what happens to orphaned
+        // activity is bug 3.
+        #expect(Ledger.bookIntegrity(store.state.budget, month: "2026-06").drift == 0)
     }
 
     @Test("apply(_:) lands a balance-edit plan atomically through the store")
@@ -158,6 +166,7 @@ struct AppStoreTests {
         #expect(adjustments.first?.amount == -25)
         #expect(store.state.budget.accounts.contains { $0.id == NodeLedger.adjustAccountID })
         #expect(Ledger.snapshot(store.state.budget, month: month).categories[catID]?.available == -25)
+        #expect(Ledger.bookIntegrity(store.state.budget, month: month).drift == 0)
     }
 
     @Test("addGroup and addCategory assign sequential orders")
@@ -172,5 +181,6 @@ struct AppStoreTests {
         store.addCategory(groupID: groupID, name: "Food")
         #expect(store.state.budget.categories.map(\.order) == [0, 1])
         #expect(store.state.budget.categories.allSatisfy { $0.groupId == groupID })
+        #expect(Ledger.bookIntegrity(store.state.budget, month: Recurring.ymKey()).drift == 0)
     }
 }

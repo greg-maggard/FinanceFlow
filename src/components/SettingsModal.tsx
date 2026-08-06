@@ -1,8 +1,59 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { useStore } from "../state/store";
+import { bookIntegrity } from "../budget/ledger";
+import { ymKey } from "../state/recurring";
 import { GlassCard } from "./glass/GlassCard";
 import { FieldLabel } from "./glass/GlassInput";
 import { NumberField } from "./glass/NumberField";
+
+const money = (n: number) =>
+  n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+
+/**
+ * Conservation-of-money read-out. Every dollar in an on-budget account must be
+ * sitting in an envelope, waiting in Ready-to-Assign, or spent outside the
+ * budget — a non-zero drift means the book invented or lost money.
+ */
+function IntegrityCheck() {
+  const budget = useStore((s) => s.budget);
+  const integrity = bookIntegrity(budget, ymKey());
+  const ok = integrity.drift === 0;
+  const rows: [string, number][] = [
+    ["On-budget cash", integrity.onBudgetCash],
+    ["Sum of available", integrity.sumAvailable],
+    ["Ready to assign", integrity.readyToAssign],
+    ["Unbudgeted spending", integrity.unbudgetedSpending],
+  ];
+
+  return (
+    <div className="space-y-3 border-t border-white/10 pt-4">
+      <div className="text-[11px] uppercase tracking-[0.2em] text-white/55">
+        Check integrity
+      </div>
+      <dl className="space-y-1 text-[12px] text-white/70">
+        {rows.map(([label, value]) => (
+          <div key={label} className="flex items-baseline justify-between gap-4">
+            <dt>{label}</dt>
+            <dd className="tabular-nums text-white/90">{money(value)}</dd>
+          </div>
+        ))}
+        <div className="flex items-baseline justify-between gap-4 pt-1">
+          <dt className={ok ? "text-emerald-300" : "text-red-300"}>
+            {ok ? "Balanced" : "Drift"}
+          </dt>
+          <dd className={`tabular-nums ${ok ? "text-emerald-300" : "text-red-300"}`}>
+            {money(integrity.drift)}
+          </dd>
+        </div>
+      </dl>
+      <span className="text-[11px] text-white/45">
+        {ok
+          ? "Every dollar is accounted for."
+          : "The books don't balance — this is a bug, not your data."}
+      </span>
+    </div>
+  );
+}
 
 export function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const settings = useStore((s) => s.settings);
@@ -97,6 +148,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                     </label>
                   </div>
                 </div>
+                <IntegrityCheck />
               </div>
             </GlassCard>
           </motion.div>

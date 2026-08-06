@@ -190,3 +190,60 @@ export function snapshot(book: BudgetBook, month: MonthKey): MonthSnapshot {
     categories,
   };
 }
+
+export type BookIntegrity = {
+  onBudgetCash: number;
+  sumAvailable: number;
+  readyToAssign: number;
+  unbudgetedSpending: number;
+  drift: number;
+};
+
+/**
+ * The conservation-of-money invariant, made machine-checkable.
+ *
+ * `snapshot()` builds each category's `available` from assignments plus
+ * categorized activity, and Ready-to-Assign from inflows minus everything
+ * assigned minus swept overspending. Summing those definitions across all
+ * categories collapses to:
+ *
+ *   Sigma available + readyToAssign + unbudgetedSpending === Sigma on-budget cash
+ *
+ * where `unbudgetedSpending` is the on-budget, non-transfer money that never
+ * entered an envelope (no `categoryId`, and not an RTA inflow). Every dollar
+ * in an on-budget account is therefore accounted for exactly once, and any
+ * non-zero `drift` is money the book conjured or destroyed — a bug, not a
+ * rounding artifact: the whole computation runs in integer cents, so a healthy
+ * book reports exactly 0 rather than 1e-13.
+ */
+export function bookIntegrity(book: BudgetBook, month: MonthKey): BookIntegrity {
+  const onBudget = new Set(
+    book.accounts.filter((a) => isOnBudget(a.kind)).map((a) => a.id),
+  );
+
+  let onBudgetCashC = 0;
+  let unbudgetedSpendingC = 0;
+  for (const t of book.transactions) {
+    if (!onBudget.has(t.accountId)) continue;
+    onBudgetCashC += toCents(t.amount);
+    if (t.transferAccountId) continue;
+    if (t.categoryId) continue; // categorized (incl. RTA) money is already counted
+    if (monthOf(t.date) > month) continue;
+    unbudgetedSpendingC += toCents(t.amount);
+  }
+
+  const snap = snapshot(book, month);
+  let sumAvailableC = 0;
+  for (const c of Object.values(snap.categories)) sumAvailableC += toCents(c.available);
+  const readyToAssignC = toCents(snap.readyToAssign);
+
+  return {
+    onBudgetCash: fromCents(onBudgetCashC),
+    sumAvailable: fromCents(sumAvailableC),
+    readyToAssign: fromCents(readyToAssignC),
+    unbudgetedSpending: fromCents(unbudgetedSpendingC),
+    drift: fromCents(
+      onBudgetCashC - (sumAvailableC + readyToAssignC + unbudgetedSpendingC),
+    ),
+  };
+}

@@ -212,4 +212,57 @@ struct LedgerTests {
         )
         #expect(Ledger.snapshot(b, month: "2026-06").categories["food"]?.available == 30)
     }
+
+    @Test("bookIntegrity reports zero drift on a fully budgeted book")
+    func integrityBalanced() {
+        let b = makeBook(
+            transactions: [
+                txn("checking", "2026-06-01", 1000, category: Ledger.rtaCategoryID),
+                txn("checking", "2026-06-05", -120, category: "food"),
+            ],
+            assignments: ["2026-06": ["food": 300]]
+        )
+        let i = Ledger.bookIntegrity(b, month: "2026-06")
+        #expect(i.onBudgetCash == 880)
+        #expect(i.sumAvailable == 180)
+        #expect(i.readyToAssign == 700)
+        #expect(i.unbudgetedSpending == 0)
+        #expect(i.drift == 0)
+    }
+
+    @Test("bookIntegrity books an uncategorized on-budget expense as unbudgetedSpending, not drift")
+    func integrityUnbudgetedSpending() {
+        let b = makeBook(transactions: [
+            txn("checking", "2026-06-01", 1000, category: Ledger.rtaCategoryID),
+            txn("checking", "2026-06-07", -45.55),
+        ])
+        let i = Ledger.bookIntegrity(b, month: "2026-06")
+        #expect(i.unbudgetedSpending == -45.55)
+        // The residual is named, so conservation still holds exactly.
+        #expect(i.drift == 0)
+    }
+
+    @Test("bookIntegrity ignores off-budget accounts on both sides of the identity")
+    func integrityIgnoresOffBudget() {
+        let b = makeBook(transactions: [
+            txn("ira", "2026-06-02", 5000),
+            txn("checking", "2026-06-02", 200, category: Ledger.rtaCategoryID),
+        ])
+        let i = Ledger.bookIntegrity(b, month: "2026-06")
+        #expect(i.onBudgetCash == 200)
+        #expect(i.drift == 0)
+    }
+
+    @Test("bookIntegrity stays exact on cent-level amounts that would drift as floats")
+    func integrityCentExact() {
+        let b = makeBook(
+            transactions: [
+                txn("checking", "2026-06-01", 0.1, category: Ledger.rtaCategoryID),
+                txn("checking", "2026-06-02", 0.2, category: Ledger.rtaCategoryID),
+                txn("checking", "2026-06-03", -0.3, category: "food"),
+            ],
+            assignments: ["2026-06": ["food": 0.3]]
+        )
+        #expect(Ledger.bookIntegrity(b, month: "2026-06").drift == 0)
+    }
 }
