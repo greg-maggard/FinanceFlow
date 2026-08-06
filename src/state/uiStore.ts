@@ -28,6 +28,10 @@ type UIStore = {
   /** Epoch ms of the most recent successful persistence write, for the
    *  "Last saved" read-out in SettingsModal. */
   lastSavedAt: number | null;
+  /** True once the PWA service worker reports a new version is waiting.
+   *  Drives the non-blocking update banner in TopBar; see setPwaUpdateHandler
+   *  below for how the reload itself is triggered. */
+  needRefresh: boolean;
   setView: (v: ViewMode) => void;
   setFocus: (id: NodeId | null, direction?: Direction) => void;
   openInBudget: (target: BudgetFocus) => void;
@@ -40,6 +44,7 @@ type UIStore = {
   setSaveError: (message: string | null) => void;
   clearSaveError: () => void;
   setLastSaved: (at: number) => void;
+  setNeedRefresh: (v: boolean) => void;
 };
 
 export const useUI = create<UIStore>((set) => ({
@@ -52,6 +57,7 @@ export const useUI = create<UIStore>((set) => ({
   budgetFocus: null,
   saveError: null,
   lastSavedAt: null,
+  needRefresh: false,
   setView: (v) => set({ view: v }),
   setFocus: (id, direction = "none") => set({ focusedId: id, direction, view: "focus" }),
   openInBudget: (target) => set({ view: "budget", budgetFocus: target }),
@@ -64,4 +70,20 @@ export const useUI = create<UIStore>((set) => ({
   setSaveError: (message) => set({ saveError: message }),
   clearSaveError: () => set({ saveError: null }),
   setLastSaved: (at) => set({ lastSavedAt: at }),
+  setNeedRefresh: (v) => set({ needRefresh: v }),
 }));
+
+// The Workbox-provided reload trigger (from virtual:pwa-register's
+// registerSW) is a function, not serializable UI state, so it lives here as
+// a module-scope reference rather than in the store proper. main.tsx wires
+// it up once at startup; TopBar calls applyPwaUpdate() when the user
+// confirms the update banner.
+let pwaUpdateFn: ((reloadPage?: boolean) => Promise<void>) | null = null;
+
+export function setPwaUpdateHandler(fn: (reloadPage?: boolean) => Promise<void>): void {
+  pwaUpdateFn = fn;
+}
+
+export function applyPwaUpdate(): void {
+  void pwaUpdateFn?.(true);
+}

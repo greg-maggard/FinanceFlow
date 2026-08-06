@@ -31,7 +31,8 @@ export function PhaseTrail({ activePhase }: { activePhase: Phase }) {
       animate={{ y: 0, opacity: 1 }}
       exit={{ y: 90, opacity: 0 }}
       transition={M.morph}
-      className="fixed inset-x-0 bottom-0 z-30 flex justify-center px-4 pb-5"
+      className="fixed inset-x-0 bottom-0 z-30 flex justify-center px-4"
+      style={{ paddingBottom: "calc(1.25rem + env(safe-area-inset-bottom))" }}
     >
       <motion.div
         layout
