@@ -1,0 +1,170 @@
+{
+  "generated_at": "2026-08-02T04:30:11-05:00",
+  "accounts": [
+    {
+      "institution": "Chase",
+      "account_id": "plaid-acct-chk",
+      "name": "Total Checking",
+      "official_name": "Chase Total Checking",
+      "type": "depository",
+      "subtype": "checking",
+      "mask": "4417",
+      "current_balance": 2841.19,
+      "available_balance": 2841.19,
+      "currency": "USD"
+    },
+    {
+      "institution": "Chase",
+      "account_id": "plaid-acct-visa",
+      "name": "Freedom Unlimited",
+      "official_name": "Chase Freedom Unlimited",
+      "type": "credit",
+      "subtype": "credit card",
+      "mask": "9021",
+      "current_balance": 412.66,
+      "available_balance": null,
+      "currency": "USD"
+    },
+    {
+      "institution": "Fidelity",
+      "account_id": "plaid-acct-brokerage",
+      "name": "Individual Brokerage",
+      "official_name": null,
+      "type": "investment",
+      "subtype": "brokerage",
+      "mask": "1188",
+      "current_balance": 18402.55,
+      "available_balance": null,
+      "currency": "USD"
+    },
+    {
+      "institution": "Ally",
+      "account_id": "plaid-acct-savings-new",
+      "name": "Online Savings",
+      "official_name": null,
+      "type": "depository",
+      "subtype": "savings",
+      "mask": "6602",
+      "current_balance": 5100.87,
+      "available_balance": 5100.87,
+      "currency": "USD"
+    }
+  ],
+  "summary": {
+    "count": 11,
+    "total_out": 313.5,
+    "total_in": 2713.31
+  },
+  "transactions": [
+    {
+      "date": "2026-07-20",
+      "name": "INTEREST PAYMENT",
+      "merchant_name": null,
+      "amount": -0.87,
+      "currency": "USD",
+      "category": "INCOME",
+      "account_id": "plaid-acct-savings-new",
+      "pending": false
+    },
+    {
+      "date": "2026-07-25",
+      "name": "FIDELITY BROKERAGE DIV",
+      "merchant_name": null,
+      "amount": -12.44,
+      "currency": "USD",
+      "category": "INCOME",
+      "account_id": "plaid-acct-brokerage",
+      "pending": false
+    },
+    {
+      "date": "2026-07-26",
+      "name": "FIDELITY BROKERAGE FEE",
+      "merchant_name": null,
+      "amount": 5.0,
+      "currency": "USD",
+      "category": "BANK_FEES",
+      "account_id": "plaid-acct-brokerage",
+      "pending": false
+    },
+    {
+      "date": "2026-07-27",
+      "name": "PAYMENT THANK YOU",
+      "merchant_name": null,
+      "amount": -500.0,
+      "currency": "USD",
+      "category": "TRANSFER_IN",
+      "account_id": "plaid-acct-visa",
+      "pending": false
+    },
+    {
+      "date": "2026-07-28",
+      "name": "AMZN Mktp US*2H49Z",
+      "merchant_name": "Amazon",
+      "amount": 62.3,
+      "currency": "USD",
+      "category": "GENERAL_MERCHANDISE",
+      "account_id": "plaid-acct-visa",
+      "pending": false
+    },
+    {
+      "date": "2026-07-29",
+      "name": "COFFEE ROASTERS #22",
+      "merchant_name": "Coffee Roasters",
+      "amount": 4.5,
+      "currency": "USD",
+      "category": "FOOD_AND_DRINK",
+      "account_id": "plaid-acct-chk",
+      "pending": false
+    },
+    {
+      "date": "2026-07-29",
+      "name": "COFFEE ROASTERS #22",
+      "merchant_name": "Coffee Roasters",
+      "amount": 4.5,
+      "currency": "USD",
+      "category": "FOOD_AND_DRINK",
+      "account_id": "plaid-acct-chk",
+      "pending": false
+    },
+    {
+      "date": "2026-07-30",
+      "name": "PAYROLL DIRECT DEP",
+      "merchant_name": null,
+      "amount": -2200.0,
+      "currency": "USD",
+      "category": "INCOME",
+      "account_id": "plaid-acct-chk",
+      "pending": false
+    },
+    {
+      "date": "2026-07-31",
+      "name": "CITY UTILITIES",
+      "merchant_name": "City Utilities",
+      "amount": 138.42,
+      "currency": "USD",
+      "category": "RENT_AND_UTILITIES",
+      "account_id": "plaid-acct-chk",
+      "pending": false
+    },
+    {
+      "date": "2026-08-01",
+      "name": "WHOLE FOODS MKT 10285",
+      "merchant_name": "Whole Foods Market",
+      "amount": 96.13,
+      "currency": "USD",
+      "category": "FOOD_AND_DRINK",
+      "account_id": "plaid-acct-chk",
+      "pending": true
+    },
+    {
+      "date": "2026-08-01",
+      "name": "STARBUCKS STORE 4471",
+      "merchant_name": "Starbucks",
+      "amount": 6.75,
+      "currency": "USD",
+      "category": "FOOD_AND_DRINK",
+      "account_id": "plaid-acct-visa",
+      "pending": true
+    }
+  ]
+}

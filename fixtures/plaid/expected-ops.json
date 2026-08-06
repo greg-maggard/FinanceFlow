@@ -1,0 +1,71 @@
+{
+  "addGroups": [
+    { "id": "g:system", "name": "System", "order": 999999 }
+  ],
+  "addAccounts": [],
+  "updateAccounts": [],
+  "addCategories": [
+    { "id": "cat:uncategorized", "groupId": "g:system", "name": "Uncategorized", "order": 999999 }
+  ],
+  "updateCategories": [],
+  "addTxns": [
+    {
+      "id": "txn:plaid:syn:plaid-acct-visa|2026-07-27|50000|PAYMENT THANK YOU#0",
+      "accountId": "acct-visa",
+      "date": "2026-07-27",
+      "payee": "PAYMENT THANK YOU",
+      "amount": 50000,
+      "categoryId": "cat:uncategorized",
+      "source": "plaid",
+      "plaidTxnId": "syn:plaid-acct-visa|2026-07-27|50000|PAYMENT THANK YOU#0"
+    },
+    {
+      "id": "txn:plaid:syn:plaid-acct-visa|2026-07-28|-6230|AMZN Mktp US*2H49Z#0",
+      "accountId": "acct-visa",
+      "date": "2026-07-28",
+      "payee": "Amazon",
+      "amount": -6230,
+      "categoryId": "cat:uncategorized",
+      "source": "plaid",
+      "plaidTxnId": "syn:plaid-acct-visa|2026-07-28|-6230|AMZN Mktp US*2H49Z#0"
+    },
+    {
+      "id": "txn:plaid:syn:plaid-acct-chk|2026-07-29|-450|COFFEE ROASTERS #22#0",
+      "accountId": "acct-chk",
+      "date": "2026-07-29",
+      "payee": "Coffee Roasters",
+      "amount": -450,
+      "categoryId": "cat:uncategorized",
+      "source": "plaid",
+      "plaidTxnId": "syn:plaid-acct-chk|2026-07-29|-450|COFFEE ROASTERS #22#0"
+    },
+    {
+      "id": "txn:plaid:syn:plaid-acct-chk|2026-07-29|-450|COFFEE ROASTERS #22#1",
+      "accountId": "acct-chk",
+      "date": "2026-07-29",
+      "payee": "Coffee Roasters",
+      "amount": -450,
+      "categoryId": "cat:uncategorized",
+      "source": "plaid",
+      "plaidTxnId": "syn:plaid-acct-chk|2026-07-29|-450|COFFEE ROASTERS #22#1"
+    },
+    {
+      "id": "txn:plaid:syn:plaid-acct-chk|2026-07-30|220000|PAYROLL DIRECT DEP#0",
+      "accountId": "acct-chk",
+      "date": "2026-07-30",
+      "payee": "PAYROLL DIRECT DEP",
+      "amount": 220000,
+      "categoryId": "cat:uncategorized",
+      "source": "plaid",
+      "plaidTxnId": "syn:plaid-acct-chk|2026-07-30|220000|PAYROLL DIRECT DEP#0"
+    }
+  ],
+  "updateTxns": [],
+  "deleteTxnIds": [],
+  "setAssignments": [],
+  "skipped": {
+    "duplicates": 1,
+    "pending": 2,
+    "unmappedAccounts": ["plaid-acct-savings-new", "plaid-acct-brokerage"]
+  }
+}
