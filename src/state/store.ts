@@ -15,7 +15,7 @@ import { UNCATEGORIZED_CATEGORY_ID, ensureUncategorized, makeInitialState, newId
 import { fromCents, pairTransfer, toCents } from "../budget/ledger";
 import type { BookOps } from "../budget/nodeLedger";
 import { migrate } from "./io";
-import { LocalStorageAdapter, StorageError } from "./storage";
+import { LocalStorageAdapter, StorageError, maybePromoteBackup } from "./storage";
 import type { StorageAdapter } from "./storage";
 import { useUI } from "./uiStore";
 
@@ -418,6 +418,13 @@ function writeNow(pendingSlice: PersistedSlice): void {
     clearTimeout(saveTimer);
     saveTimer = null;
   }
+  // w3-backup-key: promote whatever is currently live to its own versioned
+  // backup key *before* it's overwritten below. Read directly from
+  // localStorage (not `lastSaved`/`slice`) so this is always the actual bytes
+  // about to be replaced, not this tab's in-memory idea of them — see
+  // storage.ts for the 24h-interval / one-generation-per-version logic and
+  // the threat-model comment.
+  maybePromoteBackup(typeof localStorage !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null);
   // Optimistic: `lastSaved` is set before the write so the synchronous
   // dedupe in `scheduleSave` stays synchronous. If the write actually fails
   // (quota exceeded, Safari private mode), clear the marker so the next

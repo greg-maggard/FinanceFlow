@@ -54,3 +54,62 @@ describe("RecoveryScreen import path", () => {
     expect(window.location.reload).not.toHaveBeenCalled();
   });
 });
+
+// w3-backup-key: the recovery screen's third option, offered whenever a
+// rolling backup key (see storage.ts) exists on this device.
+describe("RecoveryScreen restore-from-backup path", () => {
+  beforeEach(() => {
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...window.location, reload: vi.fn() },
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
+  it("offers no restore option when no backup key exists", () => {
+    render(<RecoveryScreen message="Stored data isn't valid JSON: bad" raw="{bad" />);
+    expect(
+      screen.queryByRole("button", { name: /restore yesterday's backup/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the backup's timestamp and restores it through adapter.save() + reload", async () => {
+    const saveSpy = vi.spyOn(adapter, "save").mockResolvedValue(undefined);
+    const state = makeInitialState();
+    state.nodes.Start.notes = "restored from rolling backup";
+    const at = new Date("2026-08-01T12:00:00.000Z").getTime();
+    localStorage.setItem(
+      "financeflow:backup:v3",
+      JSON.stringify({ at, raw: JSON.stringify(state) }),
+    );
+
+    render(<RecoveryScreen message="Stored data isn't valid JSON: bad" raw="{bad" />);
+
+    expect(screen.getByText(/2026/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /restore yesterday's backup/i }));
+
+    await waitFor(() => expect(saveSpy).toHaveBeenCalledTimes(1));
+    expect(saveSpy.mock.calls[0][0].nodes.Start.notes).toBe("restored from rolling backup");
+    await waitFor(() => expect(window.location.reload).toHaveBeenCalledTimes(1));
+  });
+
+  it("shows an error and does not reload when the stored backup bytes fail to migrate", async () => {
+    const saveSpy = vi.spyOn(adapter, "save").mockResolvedValue(undefined);
+    localStorage.setItem(
+      "financeflow:backup:v3",
+      JSON.stringify({ at: Date.now(), raw: JSON.stringify({ version: 99 }) }),
+    );
+
+    render(<RecoveryScreen message="Stored data isn't valid JSON: bad" raw="{bad" />);
+    fireEvent.click(screen.getByRole("button", { name: /restore yesterday's backup/i }));
+
+    expect(await screen.findByText(/unsupported financeflow version/i)).toBeInTheDocument();
+    expect(saveSpy).not.toHaveBeenCalled();
+    expect(window.location.reload).not.toHaveBeenCalled();
+  });
+});
