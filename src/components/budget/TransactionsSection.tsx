@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { useStore } from "../../state/store";
 import { useUI } from "../../state/uiStore";
 import type { Account, Category, Txn } from "../../state/schema";
@@ -29,10 +30,21 @@ export function categoryLabel(categories: Category[], id: string): string {
   return categories.find((c) => c.id === id)?.name ?? "Uncategorized";
 }
 
-export function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => void }) {
+export function ModeToggle({
+  mode,
+  onChange,
+  modes = Object.keys(MODE_LABEL) as Mode[],
+}: {
+  mode: Mode;
+  onChange: (m: Mode) => void;
+  /** Which modes to offer — narrowed to expense/income while editing an
+   *  existing row, since turning an edit into a transfer would have to
+   *  conjure a second leg (see AddTxnForm's editingTxn branch). */
+  modes?: Mode[];
+}) {
   return (
     <div className="flex gap-1.5">
-      {(Object.keys(MODE_LABEL) as Mode[]).map((m) => {
+      {modes.map((m) => {
         const active = m === mode;
         return (
           <button
@@ -126,29 +138,44 @@ export function AddTxnForm({
   mode: controlledMode,
   onModeChange,
   onSaved,
+  editingTxn,
+  onCancelEdit,
 }: {
   accounts: Account[];
   mode?: Mode;
   onModeChange?: (m: Mode) => void;
   onSaved?: (info: SavedTxnInfo) => void;
+  /** Pre-fills every field from an existing (non-transfer) row and switches
+   *  Save to `updateTxn` in place instead of adding a new one (w2-edit-txn).
+   *  Callers must never pass a transfer leg here — TransactionsSection's
+   *  editor refuses those before this component ever mounts, since editing
+   *  one leg without its mirror would break the drift invariant. */
+  editingTxn?: Txn;
+  /** Fires once a save or cancel finishes an edit, so the caller can close
+   *  whatever chrome (e.g. a modal) is hosting the form. No-op outside edit. */
+  onCancelEdit?: () => void;
 }) {
-  const [internalMode, setInternalMode] = useState<Mode>("expense");
+  const [internalMode, setInternalMode] = useState<Mode>(() =>
+    editingTxn && editingTxn.categoryId === RTA_CATEGORY_ID ? "income" : "expense",
+  );
   const mode = controlledMode ?? internalMode;
   const setMode = onModeChange ?? setInternalMode;
   // Only render our own toggle when nobody outside is already driving mode —
   // otherwise the caller's toggle and this one would fight over one value.
   const showOwnToggle = controlledMode === undefined;
   const categories = useStore((s) => s.budget.categories);
-  const [accountId, setAccountId] = useState(() => accounts[0]?.id ?? "");
+  const [accountId, setAccountId] = useState(() => editingTxn?.accountId ?? accounts[0]?.id ?? "");
   const [fromId, setFromId] = useState(() => accounts[0]?.id ?? "");
   const [toId, setToId] = useState("");
-  const [date, setDate] = useState(isoDay());
-  const [payee, setPayee] = useState("");
-  const [amount, setAmount] = useState(0);
+  const [date, setDate] = useState(() => editingTxn?.date ?? isoDay());
+  const [payee, setPayee] = useState(() => editingTxn?.payee ?? "");
+  const [amount, setAmount] = useState(() => Math.abs(editingTxn?.amount ?? 0));
   // Pre-selected so an expense can never be saved with no envelope at all —
   // money that leaves an account with no category leaves the envelope system
   // entirely (see bookIntegrity's unbudgetedSpending residual).
-  const [categoryId, setCategoryId] = useState(UNCATEGORIZED_CATEGORY_ID);
+  const [categoryId, setCategoryId] = useState(
+    () => editingTxn?.categoryId ?? UNCATEGORIZED_CATEGORY_ID,
+  );
 
   const kindOf = (id: string) => accounts.find((a) => a.id === id)?.kind;
   const fromKind = kindOf(fromId);
@@ -168,6 +195,10 @@ export function AddTxnForm({
 
   const submit = () => {
     if (!canSubmit) return;
+    // Editing never offers the transfer mode (see ModeToggle's `modes` prop
+    // below), but guard defensively anyway: one leg of a transfer must never
+    // be rewritten on its own, or the mirrored pair drifts apart.
+    if (editingTxn && mode === "transfer") return;
     let envelopeName: string;
     if (mode === "transfer") {
       const transferCategoryId = transferNeedsCategory
@@ -189,30 +220,56 @@ export function AddTxnForm({
     } else {
       const finalCategoryId =
         mode === "income" ? RTA_CATEGORY_ID : categoryId || UNCATEGORIZED_CATEGORY_ID;
-      useStore.getState().addTxn({
-        id: newId(),
-        accountId,
-        date,
-        payee: payee.trim() || undefined,
-        amount: mode === "expense" ? -magnitude : magnitude,
-        categoryId: finalCategoryId,
-        source: "manual",
-      });
-      // Shared fast-entry memory (w2-fastentry): every expense, from this
-      // full form or the FAB's fast path, refreshes the FAB's next pre-fill.
-      if (mode === "expense") {
-        useUI.getState().recordTxnUsage(accountId, finalCategoryId);
+      const finalAmount = mode === "expense" ? -magnitude : magnitude;
+      if (editingTxn) {
+        // Same id, same row count — spread over the original so anything
+        // this form doesn't surface (memo, plaidTxnId, source, ...) survives
+        // the edit untouched.
+        useStore.getState().updateTxn({
+          ...editingTxn,
+          accountId,
+          date,
+          payee: payee.trim() || undefined,
+          amount: finalAmount,
+          categoryId: finalCategoryId,
+        });
+      } else {
+        useStore.getState().addTxn({
+          id: newId(),
+          accountId,
+          date,
+          payee: payee.trim() || undefined,
+          amount: finalAmount,
+          categoryId: finalCategoryId,
+          source: "manual",
+        });
+        // Shared fast-entry memory (w2-fastentry): every expense, from this
+        // full form or the FAB's fast path, refreshes the FAB's next pre-fill.
+        // Editing an existing row isn't a fresh entry, so it doesn't retrain it.
+        if (mode === "expense") {
+          useUI.getState().recordTxnUsage(accountId, finalCategoryId);
+        }
       }
       envelopeName = mode === "income" ? "Ready to Assign" : categoryLabel(categories, finalCategoryId);
     }
     onSaved?.({ amount: magnitude, envelopeName });
+    if (editingTxn) {
+      onCancelEdit?.();
+      return;
+    }
     setPayee("");
     setAmount(0);
   };
 
   return (
     <div className="space-y-3">
-      {showOwnToggle && <ModeToggle mode={mode} onChange={setMode} />}
+      {showOwnToggle && (
+        <ModeToggle
+          mode={mode}
+          onChange={setMode}
+          modes={editingTxn ? ["expense", "income"] : undefined}
+        />
+      )}
 
       {mode === "transfer" ? (
         <>
@@ -300,7 +357,12 @@ export function AddTxnForm({
         </>
       )}
 
-      <div className="flex justify-end pt-1">
+      <div className="flex justify-end gap-2 pt-1">
+        {editingTxn && (
+          <GlassButton size="sm" variant="secondary" onClick={onCancelEdit}>
+            Cancel
+          </GlassButton>
+        )}
         <GlassButton
           size="sm"
           variant="primary"
@@ -308,7 +370,7 @@ export function AddTxnForm({
           onClick={submit}
           className="disabled:opacity-40"
         >
-          Add {MODE_LABEL[mode].toLowerCase()}
+          {editingTxn ? "Save changes" : `Add ${MODE_LABEL[mode].toLowerCase()}`}
         </GlassButton>
       </div>
     </div>
@@ -323,10 +385,15 @@ const TxnRow = memo(function TxnRow({
   txn,
   accountNames,
   categoryNames,
+  onEdit,
 }: {
   txn: Txn;
   accountNames: Map<string, string>;
   categoryNames: Map<string, string>;
+  /** Row tap opens the editor (w2-edit-txn); the row itself decides nothing
+   *  about whether that's allowed — a transfer leg still opens it, and the
+   *  modal is what refuses. */
+  onEdit: (txn: Txn) => void;
 }) {
   const isTransfer = Boolean(txn.transferAccountId);
   const cents = Math.round(txn.amount * 100);
@@ -344,7 +411,19 @@ const TxnRow = memo(function TxnRow({
     .join(" · ");
 
   return (
-    <div className="flex items-center gap-2 py-2">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onEdit(txn)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onEdit(txn);
+        }
+      }}
+      aria-label={`Edit ${title}`}
+      className="-mx-2 flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 hover:bg-white/5"
+    >
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium text-white/90">{title}</div>
         <div className="truncate text-[11px] tabular-nums text-white/45">{sub}</div>
@@ -377,6 +456,75 @@ const TxnRow = memo(function TxnRow({
     </div>
   );
 });
+
+/**
+ * Hosts AddTxnForm in edit mode for a non-transfer row, or a plain refusal
+ * for a transfer leg — editing one leg without its mirror would desync the
+ * pair (see store.ts's paired addTransfer/deleteTxn), so this item refuses
+ * rather than risk it (spec: "Refusing is acceptable for this item").
+ */
+function EditTxnModal({
+  txn,
+  accounts,
+  onClose,
+}: {
+  txn: Txn;
+  accounts: Account[];
+  onClose: () => void;
+}) {
+  const isTransfer = Boolean(txn.transferAccountId);
+  return (
+    <AnimatePresence>
+      <motion.div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-md"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={onClose}
+      >
+        <motion.div
+          className="w-full max-w-md max-h-[85vh]"
+          initial={{ scale: 0.94, y: 20, opacity: 0 }}
+          animate={{ scale: 1, y: 0, opacity: 1 }}
+          exit={{ scale: 0.94, y: 20, opacity: 0 }}
+          transition={{ type: "spring", stiffness: 240, damping: 24 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <GlassCard intensity="strong" className="max-h-[85vh] overflow-y-auto p-6">
+            <div className="mb-5 flex items-center justify-between">
+              <h2 className="text-lg font-semibold tracking-tight text-white/95">
+                {isTransfer ? "Transfer" : "Edit transaction"}
+              </h2>
+              <button
+                onClick={onClose}
+                className="text-white/40 hover:text-white/85"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            {isTransfer ? (
+              <div className="space-y-4">
+                <p className="text-sm text-white/70">
+                  Transfers can't be edited here — the two linked rows would
+                  drift out of sync. Delete the transfer from its kebab menu
+                  and re-enter it instead.
+                </p>
+                <div className="flex justify-end">
+                  <GlassButton size="sm" variant="secondary" onClick={onClose}>
+                    Got it
+                  </GlassButton>
+                </div>
+              </div>
+            ) : (
+              <AddTxnForm accounts={accounts} editingTxn={txn} onCancelEdit={onClose} />
+            )}
+          </GlassCard>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
 
 // Render this many rows up front; "Show more" reveals another page.
 const PAGE_SIZE = 50;
@@ -411,6 +559,9 @@ export function TransactionsSection() {
     [allCategories],
   );
 
+  // The row currently open in the edit modal, or null when it's closed.
+  const [editingTxn, setEditingTxn] = useState<Txn | null>(null);
+
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   // Keep the user's place. `txns` gets a fresh identity on every add, delete
   // and edit, so resetting to page 1 here would throw away their scroll
@@ -444,6 +595,7 @@ export function TransactionsSection() {
                   txn={t}
                   accountNames={accountNames}
                   categoryNames={categoryNames}
+                  onEdit={setEditingTxn}
                 />
               ))}
               {txns.length === 0 && (
@@ -475,6 +627,13 @@ export function TransactionsSection() {
           </>
         )}
       </div>
+      {editingTxn && (
+        <EditTxnModal
+          txn={editingTxn}
+          accounts={accounts}
+          onClose={() => setEditingTxn(null)}
+        />
+      )}
     </GlassCard>
   );
 }

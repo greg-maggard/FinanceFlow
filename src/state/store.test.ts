@@ -197,6 +197,74 @@ describe("deleteCategory", () => {
   });
 });
 
+describe("updateTxn", () => {
+  it("corrects an amount in place: same id, same row count, no drift", () => {
+    const s = useStore.getState();
+    s.reset();
+    s.addAccount({ id: "checking", name: "Checking", kind: "checking", source: "manual" });
+    s.addTxn({
+      id: "t1",
+      accountId: "checking",
+      date: "2026-06-05",
+      payee: "Grocery store",
+      amount: -40,
+      categoryId: UNCATEGORIZED_CATEGORY_ID,
+      source: "manual",
+    });
+
+    useStore.getState().updateTxn({
+      id: "t1",
+      accountId: "checking",
+      date: "2026-06-05",
+      payee: "Grocery store",
+      amount: -55,
+      categoryId: UNCATEGORIZED_CATEGORY_ID,
+      source: "manual",
+    });
+
+    const budget = useStore.getState().budget;
+    expect(budget.transactions).toHaveLength(1);
+    expect(budget.transactions[0].id).toBe("t1");
+    expect(budget.transactions[0].amount).toBe(-55);
+    expect(bookIntegrity(budget, "2026-06").drift).toBe(0);
+  });
+
+  it("materializes the catch-all envelope when an edit retargets a row onto it", () => {
+    const s = useStore.getState();
+    s.reset();
+    s.addAccount({ id: "checking", name: "Checking", kind: "checking", source: "manual" });
+    s.addGroup("Bills");
+    const groupId = useStore.getState().budget.groups[0].id;
+    s.addCategory(groupId, "Phone");
+    const catId = useStore.getState().budget.categories[0].id;
+    s.addTxn({
+      id: "t1",
+      accountId: "checking",
+      date: "2026-06-05",
+      amount: -40,
+      categoryId: catId,
+      source: "manual",
+    });
+    // Never touched the catch-all before this edit.
+    expect(
+      useStore.getState().budget.categories.map((c) => c.id),
+    ).toEqual([catId]);
+
+    useStore.getState().updateTxn({
+      id: "t1",
+      accountId: "checking",
+      date: "2026-06-05",
+      amount: -40,
+      categoryId: UNCATEGORIZED_CATEGORY_ID,
+      source: "manual",
+    });
+
+    const budget = useStore.getState().budget;
+    expect(budget.categories.map((c) => c.id)).toContain(UNCATEGORIZED_CATEGORY_ID);
+    expect(bookIntegrity(budget, "2026-06").drift).toBe(0);
+  });
+});
+
 describe("addTransfer", () => {
   it("materializes the catch-all envelope for a cross-boundary transfer", () => {
     const s = useStore.getState();
