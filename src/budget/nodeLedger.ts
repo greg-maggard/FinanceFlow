@@ -414,9 +414,17 @@ export type FundMonthPlan = {
  * Idempotent for the rest of the month: once an envelope has held its target,
  * its need is 0 and it emits no op — running this again does nothing, whatever
  * has been spent since.
+ *
+ * `snap` is an optional precomputed `snapshot(book, month)` — callers that
+ * already have one (BudgetScreen re-plans on every keystroke; see
+ * w2-fund-month finding 8) can pass it through to skip a second full ledger
+ * pass. Omitted, this computes it exactly as before.
  */
-export function planFundMonth(book: BudgetBook, month: MonthKey): FundMonthPlan {
-  const snap = snapshot(book, month);
+export function planFundMonth(
+  book: BudgetBook,
+  month: MonthKey,
+  snap: MonthSnapshot = snapshot(book, month),
+): FundMonthPlan {
   let remainingC = Math.max(0, toCents(snap.readyToAssign));
 
   const setAssignments: { month: MonthKey; categoryId: string; amount: number }[] = [];

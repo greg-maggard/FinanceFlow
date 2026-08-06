@@ -355,6 +355,15 @@ struct NodeLedgerTests {
         #expect(Ledger.bookIntegrity(next, month: month).drift == 0)
     }
 
+    @Test("accepts a precomputed snapshot (finding 8) and produces the same plan as computing it internally")
+    func planFundMonthAcceptsPrecomputedSnapshot() {
+        let book = targetBook(income: 5000)
+        let snap = Ledger.snapshot(book, month: month)
+        let withSnap = NodeLedger.planFundMonth(book, month: month, snap: snap)
+        let withoutSnap = NodeLedger.planFundMonth(book, month: month)
+        #expect(withSnap == withoutSnap)
+    }
+
     @Test("never drives Ready to Assign negative, and is a no-op run twice")
     func fundTwiceIsNoOp() {
         let book = targetBook(income: 5000)

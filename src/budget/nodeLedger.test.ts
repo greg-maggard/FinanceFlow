@@ -355,6 +355,14 @@ describe("planFundMonth", () => {
     expect(bookIntegrity(next, MONTH).drift).toBe(0);
   });
 
+  it("accepts a precomputed snapshot (finding 8) and produces the same plan as computing it internally", () => {
+    const book = targetBook(5000);
+    const snap = snapshot(book, MONTH);
+    const withSnap = planFundMonth(book, MONTH, snap);
+    const withoutSnap = planFundMonth(book, MONTH);
+    expect(withSnap).toEqual(withoutSnap);
+  });
+
   it("never drives Ready to Assign negative, and is a no-op run twice", () => {
     const book = targetBook(5000);
     const once = apply(book, planFundMonth(book, MONTH).ops);

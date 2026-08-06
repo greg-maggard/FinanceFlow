@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { useStore } from "../../state/store";
-import { RTA_CATEGORY_ID } from "../../state/schema";
-import { bookIntegrity, snapshot } from "../../budget/ledger";
+import { RTA_CATEGORY_ID, UNCATEGORIZED_CATEGORY_ID } from "../../state/schema";
+import { bookIntegrity, isoDay, snapshot } from "../../budget/ledger";
 import { ymKey } from "../../state/recurring";
 import { BudgetScreen } from "./BudgetScreen";
+import { dollars } from "./bits";
 
 const MONTH = ymKey();
 
@@ -133,5 +134,50 @@ describe("BudgetScreen: fund this month", () => {
     expect(screen.queryByRole("button", { name: "Fund this month" })).toBeNull();
     expect(snap.readyToAssign).toBe(400);
     expect(bookIntegrity(useStore.getState().budget, MONTH).drift).toBe(0);
+  });
+});
+
+describe("BudgetScreen: today strip (w2-today-strip finding 9)", () => {
+  beforeEach(() => {
+    useStore.getState().reset();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("shows only two tiles on a fresh book — Uncategorized doesn't exist yet, so it isn't rendered as a dud", () => {
+    render(<BudgetScreen />);
+
+    // The strip is the grid containing the "Ready to Assign" label; on a
+    // fresh book it has exactly two StripStat children, not three.
+    // "On-budget cash" is unique to the today strip (the month header's RTA
+    // pill also says "Ready to Assign", so that label alone is ambiguous).
+    const strip = screen.getByText("On-budget cash").closest(".grid") as HTMLElement;
+    expect(strip.children).toHaveLength(2);
+    expect(within(strip).queryByText("Uncategorized")).toBeNull();
+  });
+
+  it("shows the third tile once Uncategorized is materialized by a real transaction", () => {
+    useStore.getState().addAccount({ id: "checking", name: "Checking", kind: "checking", source: "manual" });
+    useStore.getState().addTxn({
+      id: "txn1",
+      accountId: "checking",
+      date: isoDay(),
+      payee: "Misc",
+      amount: -12,
+      categoryId: UNCATEGORIZED_CATEGORY_ID,
+      source: "manual",
+    });
+
+    render(<BudgetScreen />);
+
+    // "On-budget cash" is unique to the today strip (the month header's RTA
+    // pill also says "Ready to Assign", so that label alone is ambiguous).
+    const strip = screen.getByText("On-budget cash").closest(".grid") as HTMLElement;
+    expect(strip.children).toHaveLength(3);
+    const thirdTile = strip.children[2] as HTMLElement;
+    expect(within(thirdTile).getByText("Uncategorized")).toBeTruthy();
+    expect(within(thirdTile).getByText(dollars(-12))).toBeTruthy();
   });
 });
