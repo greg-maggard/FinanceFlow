@@ -74,10 +74,21 @@ export function getBootRecovery(): BootRecovery | null {
   return bootRecovery;
 }
 
+/** The key name is historic — migrate() upgrades v1/v2 documents in place. */
+const STORAGE_KEY = "financeflow:state:v1";
+
+/** Raw stored bytes, if any — for App.tsx's error boundary (F10 belt-and-
+ *  braces) to hand to RecoveryScreen when a render crash happens *after*
+ *  a successful boot, so the user still gets a download button instead of
+ *  a bare white screen. */
+export function getStoredRaw(): string | null {
+  if (typeof localStorage === "undefined") return null;
+  return localStorage.getItem(STORAGE_KEY);
+}
+
 function loadInitial(): AppState {
   if (typeof localStorage === "undefined") return makeInitialState();
-  const raw = localStorage.getItem("financeflow:state:v1");
-  // migrate() upgrades v1/v2 documents in place; the key name is historic.
+  const raw = localStorage.getItem(STORAGE_KEY);
   if (!raw) return makeInitialState();
 
   let parsed: unknown;
@@ -397,8 +408,9 @@ function scheduleSave(slice: PersistedSlice): void {
 // state is a throwaway fresh state, and persisting it would overwrite the
 // real (unreadable) document sitting in localStorage within one debounce
 // cycle. App.tsx renders a blocking recovery screen instead of the app.
+let unsubscribePersistence: (() => void) | null = null;
 if (typeof window !== "undefined" && !bootRecovery) {
-  useStore.subscribe((s) => {
+  unsubscribePersistence = useStore.subscribe((s) => {
     scheduleSave(toPersistedSlice(s));
   });
 
@@ -408,6 +420,27 @@ if (typeof window !== "undefined" && !bootRecovery) {
   window.addEventListener("pagehide", () => {
     flushSave();
   });
+}
+
+/**
+ * F10 belt-and-braces: called from App.tsx's error boundary when AppShell
+ * throws mid-render on a document that passed migrate()'s validation but is
+ * broken in some way that validation doesn't (and can't exhaustively) check.
+ * Stops any further write — including one already coalescing in the
+ * debounce timer — so a crash can never overwrite the original bytes still
+ * sitting in localStorage. Idempotent and safe to call even when persistence
+ * was never started (boot recovery already suspended it).
+ */
+export function suspendPersistence(): void {
+  if (unsubscribePersistence) {
+    unsubscribePersistence();
+    unsubscribePersistence = null;
+  }
+  if (saveTimer !== null) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  pending = null;
 }
 
 export { adapter };

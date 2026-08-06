@@ -16,6 +16,10 @@ export default defineConfig({
         short_name: "FinanceFlow",
         display: "standalone",
         start_url: "/",
+        // F14: explicit, matching `start_url` — without it, the service
+        // worker's scope silently breaks if the app is ever served from a
+        // subpath rather than the domain root.
+        scope: "/",
         background_color: "#07080f",
         theme_color: "#07080f",
         icons: [

@@ -1,4 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import type { ChangeEvent } from "react";
+import { importJson } from "../state/io";
+import { adapter } from "../state/store";
 
 interface RecoveryScreenProps {
   message: string;
@@ -27,6 +30,35 @@ function downloadRecovery(raw: string): void {
  */
 export function RecoveryScreen({ message, raw }: RecoveryScreenProps) {
   const [confirming, setConfirming] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // F11: without this, recovering meant download-then-erase-then-reload-
+  // then-import-from-Settings — a scary multi-step flow at the worst
+  // possible moment. This runs the file through the exact same
+  // parse+migrate path as a normal import (io.ts's importJson, which throws
+  // on anything it can't trust) and, on success, writes straight through
+  // the storage adapter. The store's persistence subscription is suspended
+  // for the whole recovery session, so setting in-memory state via
+  // replaceAll alone would never actually reach localStorage — the write
+  // has to go through adapter.save() directly, before the reload.
+  async function handleImportFile(e: ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file after an error
+    if (!file) return;
+    setImportError(null);
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const state = importJson(text);
+      await adapter.save(state);
+      window.location.reload();
+    } catch (err) {
+      setImportError((err as Error).message);
+      setImporting(false);
+    }
+  }
 
   return (
     <div
@@ -69,6 +101,42 @@ export function RecoveryScreen({ message, raw }: RecoveryScreenProps) {
         >
           Download my data
         </button>
+
+        <div style={{ borderTop: "1px solid rgba(255,255,255,0.15)", paddingBottom: "1.5rem" }}>
+          <p style={{ opacity: 0.7, fontSize: "0.9rem", margin: "1.25rem 0 0.75rem" }}>
+            Have a backup file (from Download my data or Settings → Export)? Import it directly —
+            this replaces the stored data with the file's contents.
+          </p>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/json"
+            onChange={(e) => void handleImportFile(e)}
+            style={{ display: "none" }}
+          />
+          <button
+            type="button"
+            disabled={importing}
+            onClick={() => fileInputRef.current?.click()}
+            style={{
+              padding: "0.6rem 1.2rem",
+              background: "transparent",
+              color: "rgba(255,255,255,0.9)",
+              border: "1px solid rgba(255,255,255,0.3)",
+              borderRadius: "0.375rem",
+              fontWeight: 600,
+              cursor: importing ? "default" : "pointer",
+              opacity: importing ? 0.6 : 1,
+            }}
+          >
+            {importing ? "Importing…" : "Import a backup file"}
+          </button>
+          {importError && (
+            <p style={{ color: "rgba(255,140,140,0.9)", fontSize: "0.85rem", marginTop: "0.6rem" }}>
+              {importError}
+            </p>
+          )}
+        </div>
 
         <div style={{ borderTop: "1px solid rgba(255,255,255,0.15)", paddingTop: "1.25rem" }}>
           {!confirming ? (
