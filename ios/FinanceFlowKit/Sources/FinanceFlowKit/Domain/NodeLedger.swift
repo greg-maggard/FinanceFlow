@@ -247,7 +247,10 @@ public enum NodeLedger {
                 $0.accountId == adjustAccountID
                     && $0.categoryId == categoryID
                     && Ledger.monthOf(date: $0.date) == month
-                    && $0.amount < 0
+                    // Cents-rounded, matching `toCents(t.amount) < 0` in
+                    // `nodeLedger.ts`: a sub-half-cent amount is not a
+                    // write-off on either engine, so both select the same rows.
+                    && Ledger.toCents($0.amount) < 0
             }
             .sorted { a, b in
                 if a.date != b.date {

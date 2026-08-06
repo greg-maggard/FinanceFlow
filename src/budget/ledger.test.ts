@@ -346,6 +346,113 @@ describe("bookIntegrity", () => {
     expect(bookIntegrity(b, "2026-06").drift).toBe(0);
   });
 
+  /**
+   * The six-month fixture above funds itself exactly every month, so cumulative
+   * cash is $0 at every boundary and drift reads 0 whether or not the cash side
+   * is filtered to the viewed month — it cannot see a month-filter bug. This
+   * book deliberately carries cash forward (income $3,000/mo, rent $1,200,
+   * uneven food leaving June overspent, one $80 ATM withdrawal that never gets
+   * a category) so any drift between the cash side and the envelope side shows
+   * up the moment you view an older month.
+   */
+  function carryForwardBook(extra: Txn[] = []): BudgetBook {
+    return book({
+      transactions: [
+        txn({ accountId: "checking", date: "2026-06-01", amount: 3000, categoryId: RTA_CATEGORY_ID }),
+        txn({ accountId: "checking", date: "2026-06-03", amount: -1200, categoryId: "rent" }),
+        txn({ accountId: "checking", date: "2026-06-20", amount: -550, categoryId: "food" }),
+        txn({ accountId: "checking", date: "2026-07-01", amount: 3000, categoryId: RTA_CATEGORY_ID }),
+        txn({ accountId: "checking", date: "2026-07-03", amount: -1200, categoryId: "rent" }),
+        txn({ accountId: "checking", date: "2026-07-15", amount: -300, categoryId: "food" }),
+        txn({ accountId: "checking", date: "2026-07-25", amount: -80 }), // ATM cash, never categorized
+        txn({ accountId: "checking", date: "2026-08-01", amount: 3000, categoryId: RTA_CATEGORY_ID }),
+        txn({ accountId: "checking", date: "2026-08-03", amount: -1200, categoryId: "rent" }),
+        ...extra,
+      ],
+      assignments: {
+        "2026-06": { rent: 1200, food: 400 },
+        "2026-07": { rent: 1200, food: 500 },
+        "2026-08": { rent: 1200 },
+      },
+    });
+  }
+
+  it("holds at every month boundary of a book that carries cash forward", () => {
+    const b = carryForwardBook();
+    // Hand-derived: cash is cumulative THROUGH the viewed month, like every
+    // other term. June ends $150 overspent on food, which sweeps in July.
+    expect(bookIntegrity(b, "2026-06")).toEqual({
+      onBudgetCash: 1250,
+      sumAvailable: -150,
+      readyToAssign: 1400,
+      unbudgetedSpending: 0,
+      drift: 0,
+    });
+    expect(bookIntegrity(b, "2026-07")).toEqual({
+      onBudgetCash: 2670,
+      sumAvailable: 200,
+      readyToAssign: 2550,
+      unbudgetedSpending: -80,
+      drift: 0,
+    });
+    expect(bookIntegrity(b, "2026-08")).toEqual({
+      onBudgetCash: 4470,
+      sumAvailable: 200,
+      readyToAssign: 4350,
+      unbudgetedSpending: -80,
+      drift: 0,
+    });
+  });
+
+  it("leaves a future-dated transaction out of the viewed month's cash", () => {
+    // A post-dated bill (the date input has no max) must not make the books
+    // "not balance" in August — it isn't part of August's cash yet.
+    const b = carryForwardBook([
+      txn({ accountId: "checking", date: "2026-09-01", amount: -250, categoryId: "rent" }),
+    ]);
+    const aug = bookIntegrity(b, "2026-08");
+    expect(aug.onBudgetCash).toBe(4470);
+    expect(aug.drift).toBe(0);
+    // Once September is the viewed month it counts, on both sides.
+    const sep = bookIntegrity(b, "2026-09");
+    expect(sep.onBudgetCash).toBe(4220);
+    expect(sep.drift).toBe(0);
+  });
+
+  it("books the on-budget leg of an on->off transfer as unbudgetedSpending", () => {
+    // Checking -> tracking with "— No category —": the counterpart lives off
+    // budget and is never summed, so this leg has to land in the identity.
+    const b = carryForwardBook(
+      pairTransfer(book({}).accounts, {
+        from: "checking",
+        to: "ira",
+        amount: 500,
+        date: "2026-08-10",
+      }),
+    );
+    const i = bookIntegrity(b, "2026-08");
+    expect(i.onBudgetCash).toBe(3970);
+    expect(i.unbudgetedSpending).toBe(-580);
+    expect(i.drift).toBe(0);
+  });
+
+  it("keeps an on->on transfer pair out of unbudgetedSpending entirely", () => {
+    // Control: both legs are on budget, so they cancel in cash and must not be
+    // counted as spending on either side.
+    const b = carryForwardBook(
+      pairTransfer(book({}).accounts, {
+        from: "checking",
+        to: "savings",
+        amount: 500,
+        date: "2026-08-10",
+      }),
+    );
+    const i = bookIntegrity(b, "2026-08");
+    expect(i.onBudgetCash).toBe(4470);
+    expect(i.unbudgetedSpending).toBe(-80);
+    expect(i.drift).toBe(0);
+  });
+
   it("stays exact on cent-level amounts that would drift as floats", () => {
     const b = book({
       transactions: [
