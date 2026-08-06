@@ -76,3 +76,83 @@ describe("uiStore view/focusedId persistence (w2-persist-view)", () => {
     expect(useUI.getState().view).toBe("budget");
   });
 });
+
+// w2-fastentry: the FAB's account/category memory rides the same UI key as
+// view/focusedId above, so it needs the same fresh-module-per-test treatment.
+describe("uiStore lastUsedTxn persistence (w2-fastentry)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.resetModules();
+  });
+
+  it("is null on first-ever launch", async () => {
+    const { useUI } = await import("./uiStore");
+    expect(useUI.getState().lastUsedTxn).toBeNull();
+  });
+
+  it("restores a persisted lastUsedTxn on load", async () => {
+    localStorage.setItem(
+      UI_KEY,
+      JSON.stringify({
+        view: "budget",
+        focusedId: null,
+        lastUsedTxn: { accountId: "checking", categoryByAccount: { checking: "cat:coffee" } },
+      }),
+    );
+
+    const { useUI } = await import("./uiStore");
+
+    expect(useUI.getState().lastUsedTxn).toEqual({
+      accountId: "checking",
+      categoryByAccount: { checking: "cat:coffee" },
+    });
+  });
+
+  it("writes lastUsedTxn to the shared UI key, keyed per account, on recordTxnUsage", async () => {
+    const { useUI } = await import("./uiStore");
+
+    useUI.getState().recordTxnUsage("checking", "cat:coffee");
+    expect(JSON.parse(localStorage.getItem(UI_KEY)!)).toEqual({
+      view: "budget",
+      focusedId: null,
+      lastUsedTxn: { accountId: "checking", categoryByAccount: { checking: "cat:coffee" } },
+    });
+
+    // A different account gets its own remembered category, without
+    // clobbering the first account's.
+    useUI.getState().recordTxnUsage("savings", "cat:groceries");
+    expect(useUI.getState().lastUsedTxn).toEqual({
+      accountId: "savings",
+      categoryByAccount: { checking: "cat:coffee", savings: "cat:groceries" },
+    });
+
+    // Logging against "checking" again overwrites only that account's entry.
+    useUI.getState().recordTxnUsage("checking", "cat:transport");
+    expect(useUI.getState().lastUsedTxn).toEqual({
+      accountId: "checking",
+      categoryByAccount: { checking: "cat:transport", savings: "cat:groceries" },
+    });
+  });
+
+  it("falls back to null instead of crashing on a malformed persisted lastUsedTxn", async () => {
+    localStorage.setItem(
+      UI_KEY,
+      JSON.stringify({ view: "budget", focusedId: null, lastUsedTxn: { accountId: 42 } }),
+    );
+
+    const { useUI } = await import("./uiStore");
+
+    expect(useUI.getState().lastUsedTxn).toBeNull();
+  });
+
+  it("omits lastUsedTxn from the persisted write while it is still null", async () => {
+    const { useUI } = await import("./uiStore");
+
+    useUI.getState().setView("overview");
+
+    expect(Object.keys(JSON.parse(localStorage.getItem(UI_KEY)!)).sort()).toEqual([
+      "focusedId",
+      "view",
+    ]);
+  });
+});

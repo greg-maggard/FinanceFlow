@@ -8,6 +8,7 @@ import { OverviewSheet } from "./components/OverviewSheet";
 import { CelebrationLayer } from "./components/CelebrationLayer";
 import { RecoveryScreen } from "./components/RecoveryScreen";
 import { StaleTabBanner } from "./components/StaleTabBanner";
+import { AddTransactionFab } from "./components/AddTransactionFab";
 import { FocusStage } from "./components/focus/FocusStage";
 import { BudgetScreen } from "./components/budget/BudgetScreen";
 import { findCurrentNode } from "./components/focus/advance";
@@ -123,6 +124,9 @@ function AppShell() {
       <OverviewSheet />
       <CelebrationLayer />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      {/* Persistent across every view (w2-fastentry) — mounted at shell level
+          rather than per-view so navigating never hides it. */}
+      <AddTransactionFab />
       <StaleTabBanner />
     </div>
   );
