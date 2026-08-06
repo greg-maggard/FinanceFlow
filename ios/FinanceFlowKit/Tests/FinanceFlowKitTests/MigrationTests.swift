@@ -134,6 +134,38 @@ struct V1ToV3ChainTests {
         #expect(out.node(.Rent).monthlyChecks == ["2026-05": true])
         #expect(out.decisions == v1.decisions)
     }
+
+    // Bug 1: supersession ("SmallEF grows into BigEF; one real-world fund") is
+    // a DOMAIN rule, so it has to survive the v2 leg of the chain too. Before
+    // the fix, v1ToV2 seeded only BigEF's bucket but left both payloads
+    // intact, and v2ToV3's unionExists branch then resurrected SmallEF's
+    // bucket with a SECOND starting inflow — $2,200 of cash for a $1,200 fund.
+    @Test("supersedes SmallEF even when BOTH emergency-fund nodes carry items")
+    func supersedesSmallEFWithItemsOnBothNodes() throws {
+        var v1 = makeV1()
+        v1.settings.monthlyExpenses = 4000
+        v1.nodes[.BigEF]?.data = .bigEF(BigEFData(targetMonths: 6, balance: .manual(0), items: [
+            EFBucket(id: "b1", name: "Medical", target: 3000, balance: .manual(1200)),
+        ]))
+        v1.nodes[.SmallEF]?.data = .smallEF(SmallEFData(balance: .manual(1000), items: [
+            EFBucket(id: "s1", name: "Starter", target: 1000, balance: .manual(1000)),
+        ]))
+
+        let out = try IO.migrate(v1, now: june10)
+        #expect(out.budget.categories.map(\.id) == ["BigEF:b1"])
+        #expect(out.budget.assignments == ["2026-06": ["BigEF:b1": 1200]])
+
+        let inflows = out.budget.transactions.filter { $0.categoryId == Ledger.rtaCategoryID }
+        #expect(inflows.count == 1)
+        #expect(inflows.first?.accountId == "acct:cash")
+        #expect(inflows.first?.amount == 1200)
+        #expect(Ledger.accountBalance(out.budget, "acct:cash") == 1200)
+
+        let june = Ledger.snapshot(out.budget, month: "2026-06")
+        #expect(june.readyToAssign == 0)
+        #expect(june.categories["BigEF:b1"]?.available == 1200)
+        #expect(Ledger.bookIntegrity(out.budget, month: "2026-06").drift == 0)
+    }
 }
 
 @Suite("v2 -> v3 reconcile")
