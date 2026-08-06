@@ -44,13 +44,31 @@ public final class AppStore {
                 // fields in different units, so the document can't be
                 // interpreted until we know which it is.
                 let storedVersion = IO.documentVersion(data)
-                state = try IO.importJSON(data)
+                let loaded = try IO.importJSON(data)
                 // D7: the debounced save below is about to replace the file with
                 // the v4 image. Park the original bytes under their own version
                 // first, so a bad migration stays recoverable.
-                if let storedVersion, storedVersion < state.version {
-                    await storage.backupPreMigration(version: storedVersion)
+                //
+                // The backup GATES the migration. A failed copy used to be
+                // swallowed (`try?`) while the first v4 save went through
+                // regardless — and those two outcomes are correlated, not
+                // independent: the backup adds a whole second copy of the
+                // document while the save only replaces one, so under disk
+                // pressure the backup is precisely what fails and the
+                // overwrite is precisely what succeeds. That path ends with
+                // the pre-migration bytes gone, no copy anywhere, and no
+                // signal. So: keep `state` as the throwaway initial one, leave
+                // the file exactly as it is, suspend autosave for the session,
+                // and tell the user. Nothing is quarantined or renamed — the
+                // document is fine, the disk isn't.
+                if let storedVersion, storedVersion < loaded.version {
+                    guard await storage.backupPreMigration(version: storedVersion) else {
+                        persistenceSuspended = true
+                        loadError = Self.backupBlockedMessage
+                        return
+                    }
                 }
+                state = loaded
             }
             // No file → first run: keep the initial state and allow autosave.
         } catch let StorageError.unreadableContents(underlying) {
@@ -70,6 +88,16 @@ public final class AppStore {
             loadError = "Couldn't open your saved data just now. Your existing data was left untouched — reopen the app to try again."
         }
     }
+
+    /// Shown when the pre-migration backup couldn't be written, so the upgrade
+    /// was blocked. Kept next to the mirror string in `src/state/store.ts`
+    /// (`MIGRATION_BLOCKED_MESSAGE`) — same situation, same promise to the
+    /// user: nothing has been changed.
+    static let backupBlockedMessage = """
+    FinanceFlow couldn't save a backup copy of your data before upgrading it to the new format — \
+    this device may be out of storage. Your existing data has NOT been changed, and nothing is \
+    being saved this session. Free up space and reopen the app to try again.
+    """
 
     /// The file exists but is corrupt or from an unsupported version. Move it
     /// aside (preserved for recovery) and start fresh, re-enabling autosave since

@@ -70,6 +70,22 @@ export class LocalStorageAdapter implements StorageAdapter {
 // copy until a real sync story exists.
 
 const BACKUP_PREFIX = "financeflow:backup:v";
+
+/**
+ * The one-shot pre-migration copy lives under its OWN prefix, separate from
+ * the rolling backup above.
+ *
+ * They used to share `financeflow:backup:v<n>`, and the two policies on that
+ * one slot are incompatible: the rolling promotion writes at most once per 24h,
+ * the pre-migration copy must capture the bytes at one specific instant, and
+ * never-clobber (correct for both individually) resolves the collision by
+ * discarding the pre-migration bytes. A rolling promotion that happened to fire
+ * a minute before the upgrade left the slot occupied by a *stale* document —
+ * up to 24h stale — at the single moment the D7 net exists to catch anything.
+ * Two prefixes, two policies, no starvation; `readLatestBackup` reads both.
+ */
+const PREMIGRATION_PREFIX = "financeflow:premigration:v";
+
 const BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 interface BackupEnvelope {
@@ -142,43 +158,59 @@ export function maybePromoteBackup(liveRaw: string | null, now: number = Date.no
  * its own for this: if it happened to promote a v3 envelope earlier the same
  * day, the throttle would skip the promotion on the first v4 write and the
  * bytes that existed at the instant of migration would be gone. Migration is a
- * once-ever event for a given document, so it gets its own unthrottled write.
+ * once-ever event for a given document, so it gets its own unthrottled write
+ * under its own key prefix (see PREMIGRATION_PREFIX).
  *
- * Never clobbers: an existing envelope under that version key is already a
+ * Write-once: an existing envelope under that version key is already a
  * pre-migration document of the same schema, and overwriting it would trade a
  * known-good backup for a newer one at exactly the moment the user is most
  * likely to need the older. Writes only into an empty slot.
+ *
+ * Returns whether a pre-migration backup for `version` is in place — `true`
+ * when one was just written OR was already there, `false` when the write
+ * failed. NOT best-effort, unlike `maybePromoteBackup`: this result GATES the
+ * migration in store.ts. The failure that matters is a full quota, and it is
+ * not independent of the live write that follows — this call *adds* a second
+ * whole copy of the document while the live save merely *replaces* one, so
+ * under quota pressure this is precisely what fails and the overwrite is
+ * precisely what succeeds. Swallowing it means the pre-migration bytes are
+ * gone with no copy anywhere and no signal to the user.
  */
 export function backupPreMigration(
   version: number,
   liveRaw: string,
   now: number = Date.now(),
-): void {
-  if (typeof localStorage === "undefined") return;
-  const key = `${BACKUP_PREFIX}${version}`;
-  if (localStorage.getItem(key)) return;
+): boolean {
+  if (typeof localStorage === "undefined") return true; // nothing to protect
+  const key = `${PREMIGRATION_PREFIX}${version}`;
+  if (localStorage.getItem(key)) return true; // already parked, don't clobber
   try {
     const envelope: BackupEnvelope = { at: now, raw: liveRaw };
     localStorage.setItem(key, JSON.stringify(envelope));
+    return true;
   } catch {
-    // Best-effort, same reasoning as maybePromoteBackup: a failed backup must
-    // never throw into the boot path.
+    return false;
   }
 }
 
 /**
- * The most recently promoted backup across every version key present, for
- * RecoveryScreen's restore option and SettingsModal's "Last backup" line.
+ * The most recently written backup across every version key of BOTH kinds —
+ * rolling (`financeflow:backup:v<n>`) and pre-migration
+ * (`financeflow:premigration:v<n>`) — for RecoveryScreen's restore option and
+ * SettingsModal's "Last backup" line. Freshest `at` wins, so whichever of the
+ * two mechanisms last captured the document is what gets offered; neither can
+ * hide the other now that they no longer share a slot.
+ *
  * Deliberately version-agnostic: io.ts's migrate() already accepts v1/v2/v3
- * documents, so whichever version key holds the newest envelope is the right
- * one to offer, with no hardcoded "current version" to keep in sync here.
+ * documents, so whichever key holds the newest envelope is the right one to
+ * offer, with no hardcoded "current version" to keep in sync here.
  */
 export function readLatestBackup(): BackupInfo | null {
   if (typeof localStorage === "undefined") return null;
   let best: BackupInfo | null = null;
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
-    if (!key || !key.startsWith(BACKUP_PREFIX)) continue;
+    if (!key || !(key.startsWith(BACKUP_PREFIX) || key.startsWith(PREMIGRATION_PREFIX))) continue;
     const raw = localStorage.getItem(key);
     if (!raw) continue;
     try {

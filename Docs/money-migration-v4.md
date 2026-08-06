@@ -60,7 +60,7 @@ construction, and the web's per-site rounding discipline is no longer load-beari
 | D4 | iOS in-memory type | `Money` struct wrapping `cents: Int`, Codable as a bare Int | Real type safety; formatting/parse helpers hang off it; synthesized Codable via `singleValueContainer` |
 | D5 | Rounding rule (migration + input parse) | `cents = floor(d × 100 + 0.5)` computed in **IEEE-754 double** on both platforms | See §4 — the only rule that is bit-identical across JS and Swift |
 | D6 | v1/v2 legacy migrations | Untouched — still run in dollars | Chain becomes v1→v2→v3→v4; the v4 step is one pure function over a v3 document |
-| D7 | Backup before first v4 write | Web: copy current store to `financeflow:backup:v3` (one-time). iOS: copy `state.json` → `state.v3-backup.json` before first v4 save | Consistent with the quarantine-never-clobber ethos; migration bugs stay recoverable |
+| D7 | Backup before first v4 write | Web: copy current store to `financeflow:premigration:v3` (one-time, its OWN key — the rolling `financeflow:backup:v<n>` snapshot would otherwise starve it). iOS: copy `state.json` → `state.v3-backup.json` before first v4 save. **A failed copy gates the migration** on both platforms: block and surface recovery rather than overwrite unbacked bytes | Consistent with the quarantine-never-clobber ethos; migration bugs stay recoverable |
 | D8 | Percentages and rates | **Not converted** — they are not money | `Account.apr`, `Match.matchPct`/`currentContribPct`, `Increase401k.currentPct`/`targetPct` stay as-is |
 
 **Non-goals:** field renames; multi-currency; `ShortID` changes; touching the v1/v2
@@ -181,7 +181,9 @@ Work through in order; each step compiles and passes tests before the next.
    `GoalBar.tsx:73-74` rounds `c / 100` for its compact labels.
 8. **Persistence bootstrap — `src/state/store.ts` `loadInitial()`**: before saving a
    freshly migrated v4 state, write the raw pre-migration string to
-   `financeflow:backup:v3` if that key is empty (D7).
+   `financeflow:premigration:v3` if that key is empty (D7). If that write fails,
+   do NOT adopt the migrated state — set `bootRecovery` so persistence stays
+   suspended and RecoveryScreen offers the original bytes for download.
 9. **Tests** — update fixtures (`0.1` → `10`, `1000` → `100_000`, …) in
    `ledger.test.ts`, `nodeLedger.test.ts`, `progressOf.test.ts`, `store.test.ts`;
    `io.test.ts` gains v3→v4 cases and keeps v1→v4 / v2→v4 chain tests. Add the
@@ -268,7 +270,7 @@ but strict:
 3. Device-test iOS: install, confirm the v3→v4 migration of the real on-device
    document (backup file appears, balances/ready flags unchanged to the cent).
 4. Web: open with production localStorage copied into a dev profile first if
-   paranoid; the `financeflow:backup:v3` key is the safety net.
+   paranoid; the `financeflow:premigration:v3` key is the safety net.
 5. Merge. From then on, exports are v4; a stale v3 app refuses them loudly
    (`Unsupported FinanceFlow version`) rather than corrupting — re-update, done.
 

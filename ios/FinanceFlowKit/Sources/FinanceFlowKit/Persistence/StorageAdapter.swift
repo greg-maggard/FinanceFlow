@@ -26,13 +26,25 @@ public protocol StorageAdapter: Sendable {
     /// D7 (money-migration-v4.md): copy the current document aside under its own
     /// schema version before the first save of a newly-migrated one, so a bad
     /// migration stays recoverable. Must never clobber an existing backup for
-    /// that version. No-op for adapters with no backing file.
-    func backupPreMigration(version: Int) async
+    /// that version.
+    ///
+    /// Returns `true` when a pre-migration backup for `version` is in place —
+    /// either just written, or already present from an earlier launch — and
+    /// `false` when the copy could not be made. The result GATES the migration
+    /// (`AppStore.bootstrap`): the pre-migration bytes are irreplaceable, and
+    /// the first autosave of the migrated document replaces them, so a `false`
+    /// must stop that write rather than being swallowed. Disk-full is exactly
+    /// the case that fails here — a backup *adds* a whole second copy while the
+    /// live save merely *replaces* one — so this is the failure most likely to
+    /// coincide with a successful overwrite.
+    ///
+    /// Adapters with no backing file have nothing to protect and return `true`.
+    func backupPreMigration(version: Int) async -> Bool
 }
 
 public extension StorageAdapter {
     func quarantineUnreadableFile() async {}
-    func backupPreMigration(version: Int) async {}
+    func backupPreMigration(version: Int) async -> Bool { true }
 }
 
 /// Writes a single pretty-printed `state.json` to the app's Documents directory.
@@ -69,16 +81,24 @@ public struct FileStorageAdapter: StorageAdapter {
     /// version already exists: that file is already a pre-migration copy of the
     /// same schema, and replacing it would trade a known-good backup for a newer
     /// one at exactly the moment the user is most likely to need the older.
-    public func backupPreMigration(version: Int) async {
+    ///
+    /// A copy failure (disk full, protected container) is REPORTED, not
+    /// swallowed — see the protocol doc. Returning `false` blocks the migrated
+    /// write instead of letting it replace bytes nothing has a copy of.
+    public func backupPreMigration(version: Int) async -> Bool {
         let fm = FileManager.default
-        guard fm.fileExists(atPath: fileURL.path) else { return }
+        guard fm.fileExists(atPath: fileURL.path) else { return true }
         let base = fileURL.deletingPathExtension().lastPathComponent
         let backup = fileURL
             .deletingLastPathComponent()
             .appendingPathComponent("\(base).v\(version)-backup.json")
-        guard !fm.fileExists(atPath: backup.path) else { return }
-        // Best-effort: a failed backup must never block the boot path.
-        try? fm.copyItem(at: fileURL, to: backup)
+        guard !fm.fileExists(atPath: backup.path) else { return true }
+        do {
+            try fm.copyItem(at: fileURL, to: backup)
+            return true
+        } catch {
+            return false
+        }
     }
 
     /// Rename the existing file to `state.corrupt-<timestamp>.json` so it is
@@ -102,6 +122,10 @@ public actor MemoryStorageAdapter: StorageAdapter {
     private var stored: Data?
     public private(set) var saveCount = 0
     public private(set) var backedUpVersions: [Int] = []
+    /// Test hook: makes `backupPreMigration` report failure, standing in for a
+    /// full disk. Set it to prove the migrated write is gated, not merely
+    /// logged.
+    public private(set) var backupShouldFail = false
 
     public init(initial: AppState? = nil) {
         self.stored = initial.flatMap { try? JSONCoder.encode($0) }
@@ -121,9 +145,21 @@ public actor MemoryStorageAdapter: StorageAdapter {
         saveCount += 1
     }
 
-    public func backupPreMigration(version: Int) async {
-        guard stored != nil, !backedUpVersions.contains(version) else { return }
-        backedUpVersions.append(version)
+    public func setBackupShouldFail(_ value: Bool) {
+        backupShouldFail = value
+    }
+
+    public func backupPreMigration(version: Int) async -> Bool {
+        guard stored != nil else { return true }   // nothing to protect
+        if backupShouldFail { return false }
+        if !backedUpVersions.contains(version) { backedUpVersions.append(version) }
+        return true
+    }
+
+    /// The bytes exactly as they sit in the adapter, for asserting that a
+    /// blocked migration left the stored document untouched.
+    public func storedBytes() -> Data? {
+        stored
     }
 
     /// The document as last persisted, decoded. `nil` when nothing is stored.
