@@ -45,10 +45,14 @@ import { useUI } from "./uiStore";
  *     or that was deleted, is left alone rather than clobbered.
  *   - `assignments`: the deleted category's original per-month assigned
  *     cents, keyed by month. When `carriesActivity`, that amount was merged
- *     into `reassignTo`'s entry for the same month, so undo subtracts it
- *     back out of whatever `reassignTo` holds *now* (not the pre-delete
- *     value) before restoring the category's own entry — money-conserving
- *     regardless of what happened to `reassignTo` in between.
+ *     into `reassignTo`'s entry for the same month.
+ *   - `merged`: what `reassignTo`'s entry held *immediately after* that
+ *     merge, per month. Undo unwinds the merge only when the entry still
+ *     holds exactly this value; if the user overwrote it during the toast
+ *     window, their value is the intended one and is left untouched.
+ *     Subtracting blindly instead preserved the user's *delta*, not their
+ *     assignment — typing $150 over a merged $200 undid to −$50, a negative
+ *     assignment no other code path can produce (Wave 3 recheck, F4).
  */
 export type CategoryDeleteUndo = {
   category: Category;
@@ -56,6 +60,7 @@ export type CategoryDeleteUndo = {
   carriesActivity: boolean;
   txnIds: string[];
   assignments: Record<MonthKey, Cents>;
+  merged: Record<MonthKey, Cents>;
 };
 
 type Store = AppState & {
@@ -400,6 +405,7 @@ export const useStore = create<Store>((set) => ({
           : s.budget;
 
       const originalAssignments: Record<MonthKey, Cents> = {};
+      const mergedValues: Record<MonthKey, Cents> = {};
       const assignments: AppState["budget"]["assignments"] = {};
       for (const [month, table] of Object.entries(book.assignments)) {
         const { [id]: moved, ...rest } = table;
@@ -407,6 +413,7 @@ export const useStore = create<Store>((set) => ({
           originalAssignments[month] = moved;
           if (carriesActivity) {
             const merged = (rest[reassignTo] ?? 0) + moved;
+            mergedValues[month] = cents(merged);
             if (merged !== 0) rest[reassignTo] = cents(merged);
             else delete rest[reassignTo];
           }
@@ -416,7 +423,14 @@ export const useStore = create<Store>((set) => ({
 
       const txnIds = book.transactions.filter((t) => t.categoryId === id).map((t) => t.id);
 
-      patch = { category, reassignTo, carriesActivity, txnIds, assignments: originalAssignments };
+      patch = {
+        category,
+        reassignTo,
+        carriesActivity,
+        txnIds,
+        assignments: originalAssignments,
+        merged: mergedValues,
+      };
 
       return {
         budget: {
@@ -438,7 +452,7 @@ export const useStore = create<Store>((set) => ({
   // toast's five-second window survives: it's simply never touched.
   undoDeleteCategory: (patch) =>
     set((s) => {
-      const { category, reassignTo, carriesActivity, txnIds, assignments: original } = patch;
+      const { category, reassignTo, carriesActivity, txnIds, assignments: original, merged } = patch;
       const categories = s.budget.categories.some((c) => c.id === category.id)
         ? s.budget.categories
         : [...s.budget.categories, category];
@@ -452,9 +466,17 @@ export const useStore = create<Store>((set) => ({
       for (const [month, moved] of Object.entries(original)) {
         const table = { ...(assignments[month] ?? {}) };
         if (carriesActivity) {
-          const remaining = (table[reassignTo] ?? 0) - moved;
-          if (remaining !== 0) table[reassignTo] = cents(remaining);
-          else delete table[reassignTo];
+          // Unwind the merge only if the target still holds exactly what the
+          // merge produced. If the user overwrote it during the toast window,
+          // their value is the assignment they intend — keep it. (Blind
+          // subtraction preserved their delta instead, minting negative
+          // assignments; see CategoryDeleteUndo's doc.)
+          const current = table[reassignTo] ?? 0;
+          if (current === (merged[month] ?? 0)) {
+            const preMerge = current - moved;
+            if (preMerge !== 0) table[reassignTo] = cents(preMerge);
+            else delete table[reassignTo];
+          }
         }
         table[category.id] = moved;
         assignments[month] = table;
