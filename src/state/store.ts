@@ -56,16 +56,48 @@ if (typeof localStorage !== "undefined") {
   localStorage.removeItem("financeflow:ynab:v1");
 }
 
+/** Describes a stored document that could not be loaded, for App.tsx's blocking recovery screen. */
+export interface BootRecovery {
+  message: string;
+  raw: string;
+}
+
+// Set (at most once, during module init) when the stored document exists but
+// couldn't be parsed or migrated. When set, loadInitial() falls back to a
+// fresh in-memory state for rendering purposes only — the persistence
+// subscription below is suspended so nothing ever overwrites the original
+// bytes still sitting in localStorage. Read via getBootRecovery().
+let bootRecovery: BootRecovery | null = null;
+
+export function getBootRecovery(): BootRecovery | null {
+  return bootRecovery;
+}
+
 function loadInitial(): AppState {
   if (typeof localStorage === "undefined") return makeInitialState();
+  const raw = localStorage.getItem("financeflow:state:v1");
+  // migrate() upgrades v1/v2 documents in place; the key name is historic.
+  if (!raw) return makeInitialState();
+
+  let parsed: unknown;
   try {
-    const raw = localStorage.getItem("financeflow:state:v1");
-    // migrate() upgrades v1 documents in place; the key name is historic.
-    if (raw) return migrate(JSON.parse(raw));
-  } catch {
-    // fall through
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    // Bytes aren't even JSON: unreadable, not empty. Never silently reset —
+    // surface it so the user can recover the raw document.
+    bootRecovery = { message: `Stored data isn't valid JSON: ${(err as Error).message}`, raw };
+    return makeInitialState();
   }
-  return makeInitialState();
+
+  try {
+    return migrate(parsed);
+  } catch (err) {
+    // migrate() throws deliberately for a future-version or corrupt document
+    // (see io.ts) instead of resetting. Falling through here would destroy
+    // it via the debounced persistence write within SAVE_DEBOUNCE_MS.
+    bootRecovery = { message: (err as Error).message, raw };
+    return makeInitialState();
+  }
 }
 
 export const useStore = create<Store>((set) => ({
@@ -314,7 +346,11 @@ function scheduleSave(slice: PersistedSlice): void {
   }, SAVE_DEBOUNCE_MS);
 }
 
-if (typeof window !== "undefined") {
+// Suspended for the session when boot recovery is active: the in-memory
+// state is a throwaway fresh state, and persisting it would overwrite the
+// real (unreadable) document sitting in localStorage within one debounce
+// cycle. App.tsx renders a blocking recovery screen instead of the app.
+if (typeof window !== "undefined" && !bootRecovery) {
   useStore.subscribe((s) => {
     scheduleSave(toPersistedSlice(s));
   });
