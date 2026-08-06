@@ -215,6 +215,52 @@ struct NodeLedgerTests {
         #expect(Ledger.snapshot(book, month: month).categories["BigEF:b1"]?.available == 250)
     }
 
+    @Test("raising the next day unwinds the write-off instead of burning RTA")
+    func raiseNextDayUnwinds() {
+        let before = efBook()
+        let rtaBefore = Ledger.snapshot(before, month: month).readyToAssign
+        // Day 10: fat-finger the balance down past the assignment. Day 11: fix it.
+        var book = apply(before, NodeLedger.planBalanceEdit(before, month: month, categoryID: "BigEF:b1", newAvailable: -300, today: "\(month)-10"))
+        book = apply(book, NodeLedger.planBalanceEdit(book, month: month, categoryID: "BigEF:b1", newAvailable: 1200, today: "\(month)-11"))
+
+        #expect(book.transactions.filter { $0.accountId == NodeLedger.adjustAccountID }.isEmpty)
+        #expect(book.assignments == before.assignments)
+        let snap = Ledger.snapshot(book, month: month)
+        #expect(snap.categories["BigEF:b1"]?.available == 1200)
+        #expect(snap.readyToAssign == rtaBefore)
+        #expect(Ledger.bookIntegrity(book, month: month).drift == 0)
+    }
+
+    @Test("raising past the write-offs clears them, then assigns the residual")
+    func raisePastWriteOffs() {
+        var book = efBook()
+        book = apply(book, NodeLedger.planBalanceEdit(book, month: month, categoryID: "BigEF:b1", newAvailable: -300, today: "\(month)-10"))
+        book = apply(book, NodeLedger.planBalanceEdit(book, month: month, categoryID: "BigEF:b1", newAvailable: 500, today: "\(month)-11"))
+
+        #expect(book.transactions.filter { $0.accountId == NodeLedger.adjustAccountID }.isEmpty)
+        #expect(book.assignments[month]?["BigEF:b1"] == 500)
+        #expect(Ledger.snapshot(book, month: month).categories["BigEF:b1"]?.available == 500)
+        #expect(Ledger.bookIntegrity(book, month: month).drift == 0)
+    }
+
+    @Test("a partial raise unwinds the NEWEST write-off first")
+    func partialRaiseUnwindsNewestFirst() {
+        var book = efBook()
+        book = apply(book, NodeLedger.planBalanceEdit(book, month: month, categoryID: "BigEF:b1", newAvailable: -300, today: "\(month)-10"))
+        book = apply(book, NodeLedger.planBalanceEdit(book, month: month, categoryID: "BigEF:b1", newAvailable: -800, today: "\(month)-12"))
+        book = apply(book, NodeLedger.planBalanceEdit(book, month: month, categoryID: "BigEF:b1", newAvailable: -600, today: "\(month)-13"))
+
+        let byDate = Dictionary(
+            uniqueKeysWithValues: book.transactions
+                .filter { $0.accountId == NodeLedger.adjustAccountID }
+                .map { ($0.date, $0.amount) }
+        )
+        // The 12th's −500 absorbs the whole +200; the 10th's −300 is untouched.
+        #expect(byDate == ["\(month)-10": -300, "\(month)-12": -300])
+        #expect(Ledger.snapshot(book, month: month).categories["BigEF:b1"]?.available == -600)
+        #expect(Ledger.bookIntegrity(book, month: month).drift == 0)
+    }
+
     // MARK: - Account planners
 
     @Test("debt balance edits upsert one adjustment and delete it at net zero")
