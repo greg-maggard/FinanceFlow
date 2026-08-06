@@ -182,12 +182,18 @@ export const useStore = create<Store>((set) => ({
       };
     }),
   addTransfer: (args) =>
-    set((s) => ({
-      budget: {
-        ...s.budget,
-        transactions: [...s.budget.transactions, ...pairTransfer(s.budget.accounts, args)],
-      },
-    })),
+    set((s) => {
+      const pair = pairTransfer(s.budget.accounts, args);
+      // A cross-boundary transfer parks a category on its on-budget leg, so
+      // it can carry the catch-all just like a plain expense — and an id with
+      // no row behind it is an envelope snapshot() computes but no screen
+      // renders. Materialize it here too (pairTransfer strips the category
+      // from same-side pairs, so this reads the rows, not the argument).
+      const book = pair.some((t) => t.categoryId === UNCATEGORIZED_CATEGORY_ID)
+        ? ensureUncategorized(s.budget)
+        : s.budget;
+      return { budget: { ...book, transactions: [...book.transactions, ...pair] } };
+    }),
   addGroup: (name) =>
     set((s) => ({
       budget: {

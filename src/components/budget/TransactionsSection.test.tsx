@@ -104,6 +104,37 @@ describe("TransactionsSection", () => {
     expect(budget.transactions[0].categoryId).toBe(UNCATEGORIZED_CATEGORY_ID);
   });
 
+  it("still yields a categoryId on a cross-boundary transfer when the user picks '— No category —'", () => {
+    seedAccount();
+    useStore.getState().addAccount({
+      id: "brokerage",
+      name: "Brokerage",
+      kind: "tracking",
+      source: "manual",
+    });
+    render(<TransactionsSection />);
+    fireEvent.click(screen.getByRole("button", { name: "Transfer" }));
+    // [0] is From (pre-selected to Checking), [1] is To; the budget-side
+    // category picker only appears once the pair crosses the boundary.
+    fireEvent.change(screen.getAllByRole("combobox")[1], { target: { value: "brokerage" } });
+    fireEvent.change(screen.getAllByRole("combobox")[2], { target: { value: "" } });
+    fireEvent.change(screen.getByPlaceholderText("0"), { target: { value: "500" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add transfer" }));
+
+    const budget = useStore.getState().budget;
+    const outflow = budget.transactions.find((t) => t.accountId === "checking");
+    expect(outflow?.amount).toBe(-500);
+    // The dollars leave the budget, so they have to leave an envelope too.
+    expect(outflow?.categoryId).toBe(UNCATEGORIZED_CATEGORY_ID);
+    // And the envelope they name is a real, rendered row (store.addTransfer).
+    expect(budget.categories.map((c) => c.id)).toContain(UNCATEGORIZED_CATEGORY_ID);
+    // The tracking-side leg stays out of the budget entirely.
+    expect(budget.transactions.find((t) => t.accountId === "brokerage")?.categoryId).toBeUndefined();
+    const integrity = bookIntegrity(budget, isoDay().slice(0, 7));
+    expect(integrity.unbudgetedSpending).toBe(0);
+    expect(integrity.drift).toBe(0);
+  });
+
   it("renders the empty state with no transactions", () => {
     seedAccount();
     render(<TransactionsSection />);

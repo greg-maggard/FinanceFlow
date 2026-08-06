@@ -197,6 +197,68 @@ describe("deleteCategory", () => {
   });
 });
 
+describe("addTransfer", () => {
+  it("materializes the catch-all envelope for a cross-boundary transfer", () => {
+    const s = useStore.getState();
+    s.reset();
+    s.addAccount({ id: "checking", name: "Checking", kind: "checking", source: "manual" });
+    s.addAccount({ id: "brokerage", name: "Brokerage", kind: "tracking", source: "manual" });
+    s.addTxn({
+      id: "t1",
+      accountId: "checking",
+      date: "2026-06-01",
+      amount: 1000,
+      categoryId: "rta",
+      source: "manual",
+    });
+    // A book that has never touched the catch-all.
+    expect(useStore.getState().budget.categories).toEqual([]);
+
+    useStore.getState().addTransfer({
+      from: "checking",
+      to: "brokerage",
+      amount: 500,
+      date: "2026-06-05",
+      categoryId: UNCATEGORIZED_CATEGORY_ID,
+    });
+
+    const budget = useStore.getState().budget;
+    // The row the on-budget leg points at now exists, so the −500 envelope is
+    // rendered rather than only computed — no silent sweep into next month's
+    // Ready to Assign.
+    const category = budget.categories.find((c) => c.id === UNCATEGORIZED_CATEGORY_ID);
+    expect(category?.name).toBe("Uncategorized");
+    expect(category?.nodeId).toBeUndefined();
+    expect(budget.groups.some((g) => g.id === "g:system")).toBe(true);
+    expect(snapshot(budget, "2026-06").categories[UNCATEGORIZED_CATEGORY_ID].available).toBe(
+      -500,
+    );
+    expect(bookIntegrity(budget, "2026-06").drift).toBe(0);
+  });
+
+  it("conjures no envelope for a same-side transfer", () => {
+    const s = useStore.getState();
+    s.reset();
+    s.addAccount({ id: "checking", name: "Checking", kind: "checking", source: "manual" });
+    s.addAccount({ id: "savings", name: "Savings", kind: "savings", source: "manual" });
+    // pairTransfer strips the category from an on→on pair, so there is no id
+    // to honour and no row the user never asked for.
+    useStore.getState().addTransfer({
+      from: "checking",
+      to: "savings",
+      amount: 200,
+      date: "2026-06-05",
+      categoryId: UNCATEGORIZED_CATEGORY_ID,
+    });
+
+    const budget = useStore.getState().budget;
+    expect(budget.categories).toEqual([]);
+    expect(budget.groups).toEqual([]);
+    expect(budget.transactions.every((t) => t.categoryId === undefined)).toBe(true);
+    expect(bookIntegrity(budget, "2026-06").drift).toBe(0);
+  });
+});
+
 describe("applyBookOps", () => {
   it("applies a balance-edit plan atomically through the store", () => {
     const s = useStore.getState();
