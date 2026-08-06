@@ -190,6 +190,16 @@ public final class AppStore {
                 from: from, to: to, amount: amount, date: date,
                 payee: payee, categoryID: categoryID
             )
+            // A cross-boundary transfer parks a category on its on-budget leg,
+            // so it can carry the catch-all just like a plain expense — and an
+            // id with no row behind it is an envelope `snapshot` computes but
+            // no screen renders. Materialize it here too (`pairTransfer` strips
+            // the category from same-side pairs, so this reads the rows, not
+            // the argument). Mirrors `addTransfer` in store.ts.
+            if pair.out.categoryId == BudgetBook.uncategorizedCategoryID
+                || pair.inflow.categoryId == BudgetBook.uncategorizedCategoryID {
+                state.budget.ensureUncategorized()
+            }
             state.budget.transactions.append(contentsOf: [pair.out, pair.inflow])
         }
     }

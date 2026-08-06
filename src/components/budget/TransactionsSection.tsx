@@ -132,7 +132,12 @@ function AddTxnForm({ accounts }: { accounts: Account[] }) {
         to: toId,
         amount: magnitude,
         date,
-        categoryId: transferNeedsCategory ? categoryId || undefined : undefined,
+        // Same rule as the expense branch below: where money crosses the
+        // budget boundary it has to land in an envelope, so "— No category —"
+        // falls back to the catch-all rather than leaking out of the system.
+        categoryId: transferNeedsCategory
+          ? categoryId || UNCATEGORIZED_CATEGORY_ID
+          : undefined,
       });
     } else {
       useStore.getState().addTxn({

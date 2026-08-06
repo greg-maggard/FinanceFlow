@@ -265,7 +265,13 @@ struct TxnFormSheet: View {
                 to: to,
                 amount: amount,
                 date: day,
-                categoryID: crossesBudgetBoundary ? categoryID : nil
+                // Same rule as the expense branch above: where money crosses
+                // the budget boundary it has to land in an envelope, so
+                // "No category" falls back to the catch-all rather than
+                // leaking out of the system.
+                categoryID: crossesBudgetBoundary
+                    ? (categoryID ?? BudgetBook.uncategorizedCategoryID)
+                    : nil
             )
         }
         dismiss()

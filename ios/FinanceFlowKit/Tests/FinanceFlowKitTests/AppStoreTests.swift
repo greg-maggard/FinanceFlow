@@ -194,6 +194,52 @@ struct AppStoreTests {
         )
     }
 
+    @Test("addTransfer materializes the catch-all envelope for a cross-boundary transfer")
+    func crossBoundaryTransferMaterializesCatchAll() {
+        let store = AppStore(storage: MemoryStorageAdapter())
+        store.addAccount(Account(id: "checking", name: "Checking", kind: .checking))
+        store.addAccount(Account(id: "brokerage", name: "Brokerage", kind: .tracking))
+        store.addTxn(Txn(id: "t1", accountId: "checking", date: "2026-06-01", amount: 1000, categoryId: Ledger.rtaCategoryID))
+        // A book that has never touched the catch-all.
+        #expect(store.state.budget.categories.isEmpty)
+
+        store.addTransfer(
+            from: "checking", to: "brokerage", amount: 500, date: "2026-06-05",
+            categoryID: BudgetBook.uncategorizedCategoryID
+        )
+
+        // The row the on-budget leg points at now exists, so the −500 envelope
+        // is rendered rather than only computed — no silent sweep into next
+        // month's Ready to Assign.
+        let category = store.state.budget.categories.first { $0.id == BudgetBook.uncategorizedCategoryID }
+        #expect(category?.name == "Uncategorized")
+        #expect(category?.nodeId == nil)
+        #expect(store.state.budget.groups.contains { $0.id == BudgetBook.systemGroupID })
+        #expect(
+            Ledger.snapshot(store.state.budget, month: "2026-06")
+                .categories[BudgetBook.uncategorizedCategoryID]?.available == -500
+        )
+        #expect(Ledger.bookIntegrity(store.state.budget, month: "2026-06").drift == 0)
+    }
+
+    @Test("addTransfer conjures no envelope for a same-side transfer")
+    func sameSideTransferConjuresNoEnvelope() {
+        let store = AppStore(storage: MemoryStorageAdapter())
+        store.addAccount(Account(id: "checking", name: "Checking", kind: .checking))
+        store.addAccount(Account(id: "savings", name: "Savings", kind: .savings))
+        // pairTransfer strips the category from an on→on pair, so there is no
+        // id to honour and no row the user never asked for.
+        store.addTransfer(
+            from: "checking", to: "savings", amount: 200, date: "2026-06-05",
+            categoryID: BudgetBook.uncategorizedCategoryID
+        )
+
+        #expect(store.state.budget.categories.isEmpty)
+        #expect(store.state.budget.groups.isEmpty)
+        #expect(store.state.budget.transactions.allSatisfy { $0.categoryId == nil })
+        #expect(Ledger.bookIntegrity(store.state.budget, month: "2026-06").drift == 0)
+    }
+
     @Test("deleteCategory refuses to delete the Uncategorized envelope")
     func deleteUncategorizedIsNoOp() {
         let store = AppStore(storage: MemoryStorageAdapter())
