@@ -20,7 +20,7 @@ struct OverviewScreen: View {
             ScrollView {
                 VStack(spacing: theme.spacing.xl) {
                     overallCard(progress: progress)
-                    if store.budget.target > 0 { budgetCard(store.budget) }
+                    if store.budget.target > .zero { budgetCard(store.budget) }
                     if let node = currentNode { nextUpCard(node) }
                     phasesCard
                 }
@@ -68,7 +68,7 @@ struct OverviewScreen: View {
                 Text("Monthly budget")
                     .font(theme.typography.headline)
                     .foregroundStyle(theme.colors.textPrimary)
-                GoalBar(value: budget.funded.displayDouble, max: budget.target.displayDouble, color: c.base)
+                GoalBar(value: Double(budget.funded.cents), max: Double(budget.target.cents), color: c.base)
                 Text("Funded \(CurrencyFormat.string(budget.funded)) of \(CurrencyFormat.string(budget.target)) this month")
                     .font(theme.typography.caption)
                     .foregroundStyle(theme.colors.textSecondary)
@@ -112,7 +112,7 @@ struct OverviewScreen: View {
                                 .font(theme.typography.caption)
                                 .foregroundStyle(c.text)
                         }
-                        GoalBar(value: Double(p.done), max: Double(Swift.max(p.total, 1)), color: c.base, showCurrency: false)
+                        GoalBar(value: Double(p.done), max: Double(Swift.max(p.total, 1)), color: c.base, unit: .count)
                     }
                 }
             }

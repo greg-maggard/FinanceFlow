@@ -22,7 +22,7 @@ function seedTxns(count: number) {
       accountId: "checking",
       date: `2024-01-${String((i % 28) + 1).padStart(2, "0")}`,
       payee: `Payee ${i}`,
-      amount: -(i + 1),
+      amount: -(i + 1) * 100,
       source: "manual",
     });
   }
@@ -79,7 +79,7 @@ describe("TransactionsSection", () => {
     const budget = useStore.getState().budget;
     expect(budget.transactions).toHaveLength(1);
     expect(budget.transactions[0].categoryId).toBe(UNCATEGORIZED_CATEGORY_ID);
-    expect(budget.transactions[0].amount).toBe(-12.34);
+    expect(budget.transactions[0].amount).toBe(-1234);
     // The envelope is real now: visible, assignable, and holding the spend, so
     // none of the money sits outside the envelope system.
     expect(budget.categories.map((c) => c.id)).toContain(UNCATEGORIZED_CATEGORY_ID);
@@ -123,7 +123,7 @@ describe("TransactionsSection", () => {
 
     const budget = useStore.getState().budget;
     const outflow = budget.transactions.find((t) => t.accountId === "checking");
-    expect(outflow?.amount).toBe(-500);
+    expect(outflow?.amount).toBe(-50_000);
     // The dollars leave the budget, so they have to leave an envelope too.
     expect(outflow?.categoryId).toBe(UNCATEGORIZED_CATEGORY_ID);
     // And the envelope they name is a real, rendered row (store.addTransfer).
@@ -142,7 +142,7 @@ describe("TransactionsSection", () => {
       accountId: "checking",
       date: "2024-01-05",
       payee: "Grocery run",
-      amount: -42.5,
+      amount: -4250,
       categoryId: UNCATEGORIZED_CATEGORY_ID,
       source: "manual",
     });
@@ -158,7 +158,7 @@ describe("TransactionsSection", () => {
     const budget = useStore.getState().budget;
     expect(budget.transactions).toHaveLength(1);
     expect(budget.transactions[0].id).toBe("t1");
-    expect(budget.transactions[0].amount).toBe(-50);
+    expect(budget.transactions[0].amount).toBe(-5000);
     expect(bookIntegrity(budget, "2024-01").drift).toBe(0);
     // The editor closes once the save lands.
     expect(screen.queryByRole("heading", { name: "Edit transaction" })).toBeNull();
@@ -189,7 +189,7 @@ describe("TransactionsSection", () => {
     // Neither leg was touched.
     const budget = useStore.getState().budget;
     expect(budget.transactions).toHaveLength(2);
-    expect(budget.transactions.every((t) => Math.abs(t.amount) === 100)).toBe(true);
+    expect(budget.transactions.every((t) => Math.abs(t.amount) === 10_000)).toBe(true);
     expect(bookIntegrity(budget, isoDay().slice(0, 7)).drift).toBe(0);
   });
 
@@ -205,7 +205,7 @@ describe("TransactionsSection", () => {
       accountId: "checking",
       date: "2024-01-05",
       payee: "Grocery run",
-      amount: -42.5,
+      amount: -4250,
       categoryId: UNCATEGORIZED_CATEGORY_ID,
       source: "manual",
     });
@@ -223,7 +223,7 @@ describe("TransactionsSection", () => {
       accountId: "checking",
       date: "2024-01-05",
       payee: "Grocery run",
-      amount: -42.5,
+      amount: -4250,
       categoryId: UNCATEGORIZED_CATEGORY_ID,
       source: "manual",
     });
@@ -250,7 +250,7 @@ describe("TransactionsSection", () => {
       accountId: "acct:adjust",
       date: "2024-01-15",
       payee: "Balance adjustment",
-      amount: -50,
+      amount: -5000,
       categoryId: "food",
       source: "manual",
     });

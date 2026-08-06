@@ -64,7 +64,7 @@ struct CodableRoundTripTests {
     /// They must keep decoding into the relic structs losslessly: a payload
     /// decode failure would make the AppState decoder's per-node `try?`
     /// silently discard that node's `completed`/`notes`.
-    @Test("a raw v2 document decodes its wide payloads into the relic structs")
+    @Test("a raw v2 document decodes its wide payloads into the legacy structs")
     func rawV2DocumentDecodes() throws {
         let v2JSON = """
         {
@@ -84,8 +84,9 @@ struct CodableRoundTripTests {
           "budget": { "accounts": [], "transactions": [], "groups": [], "categories": [], "assignments": {} }
         }
         """
-        // Decode only — deliberately NOT migrated.
-        let decoded = try JSONCoder.decode(Data(v2JSON.utf8))
+        // Decode only — deliberately NOT migrated. Pre-v4 documents are dollars,
+        // so they decode as `LegacyState`, never the live (integer-cents) model.
+        let decoded = try JSONCoder.decoder.decode(LegacyState.self, from: Data(v2JSON.utf8))
         #expect(decoded.version == 2)
         #expect(decoded.node(.Start).completed == true)
         #expect(decoded.node(.Start).notes == "kickoff")
@@ -139,10 +140,11 @@ struct CodableRoundTripTests {
 
     @Test("unsupported version throws and is never silently wiped")
     func unsupportedVersionThrows() {
-        var s = AppState.makeInitial()
-        s.version = 99
+        let future = Data("""
+        {"version": 99, "settings": {}, "decisions": {}, "nodes": {}, "budget": {}}
+        """.utf8)
         #expect(throws: IO.ImportError.unsupportedVersion(99)) {
-            try IO.migrate(s)
+            try IO.importJSON(future)
         }
     }
 }

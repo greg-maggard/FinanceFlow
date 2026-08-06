@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { Cents } from "../../state/schema";
 import { FieldLabel, GlassInput } from "../glass/GlassInput";
 
 /**
@@ -6,15 +7,17 @@ import { FieldLabel, GlassInput } from "../glass/GlassInput";
  * Anything used by more than one section lives here.
  */
 
-/** "$1,234.56" — whole dollars stay clean ("$1,234"), cents show when real. */
-export function dollars(n: number): string {
-  const cents = Math.round(n * 100);
-  const abs = Math.abs(cents) / 100;
+/**
+ * "$1,234.56" from integer cents — whole dollars stay clean ("$1,234"), cents
+ * show when real. The only place money becomes text.
+ */
+export function dollars(c: Cents): string {
+  const abs = Math.abs(c) / 100;
   const text = abs.toLocaleString(undefined, {
-    minimumFractionDigits: cents % 100 === 0 ? 0 : 2,
+    minimumFractionDigits: c % 100 === 0 ? 0 : 2,
     maximumFractionDigits: 2,
   });
-  return `${cents < 0 ? "−" : ""}$${text}`;
+  return `${c < 0 ? "−" : ""}$${text}`;
 }
 
 /** Labelled field, matching the node forms. */

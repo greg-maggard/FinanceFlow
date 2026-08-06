@@ -1,6 +1,9 @@
 # Schema v4: Integer Cents on the Wire
 
-**Status:** Spec — approved for implementation, not yet started.
+**Status:** IMPLEMENTED (both platforms, one branch). The §7 fixture pair lives at
+`fixtures/migration/{v3-nasty,v4-expected}.json` and is asserted by
+`src/state/io.test.ts` and `ios/.../SharedMigrationFixtureTests.swift`.
+One correction to this document was required during implementation — see §4.
 **Scope:** Both platforms (web `src/`, iOS `ios/`). One document format, one migration, shipped together.
 **Written:** 2026-07-06. Designed to be execution-ready without further design decisions.
 
@@ -112,17 +115,29 @@ cents(d) = floor(d * 100 + 0.5)        // evaluated in IEEE-754 double
 
 Why double, when iOS has exact `Decimal`? Because the *web* can only see the
 IEEE-double image of what's in the JSON, and JSON-number → nearest-double is
-identical everywhere. If iOS rounded the exact Decimal instead, a stored `33.335`
-would migrate to `3334` on iOS (Decimal sees the exact half, rounds away from zero)
-but `3333` on web (the nearest double to 33.335 is fractionally below the half).
-Routing both platforms through double makes migration **bit-identical by
-construction**. Sub-cent values are rare (typed-input edge case) but they are the
-entire reason this migration exists — the rule must be airtight for exactly those.
+identical everywhere. Routing both platforms through double makes migration
+**bit-identical by construction**, whatever that image happens to be. Sub-cent
+values are rare (typed-input edge case) but they are the entire reason this
+migration exists — the rule must be airtight for exactly those.
 
-Negative amounts (outflows) hit this too: the formula rounds `-1234.5` to `-1234` on
-both platforms. Do not substitute `NSDecimalRound(.plain)` (rounds half away from
-zero → `-1235`) or Swift's `.toNearestOrAwayFromZero`. The migration test fixture
-(§7) pins these cases.
+> **Correction (found during implementation).** The original text of this section
+> illustrated the rule with: "a stored `33.335` would migrate to `3334` on iOS
+> (Decimal sees the exact half, rounds away from zero) but `3333` on web (the
+> nearest double to 33.335 is fractionally below the half)." **The worked example
+> was wrong about the double.** The nearest double to `33.335` is
+> `33.33500000000000085265…`, which is fractionally *above* the decimal value, so
+> `d * 100` rounds to exactly `3333.5` and `floor(3333.5 + 0.5)` is **3334** — the
+> same answer exact `Decimal` would give, not a different one. The RULE (D5) is
+> unaffected and is what both platforms implement; only the illustration was
+> incorrect. `33.335 → 3334` is pinned in the §7 fixture and asserted by name on
+> both platforms.
+
+Negative amounts (outflows) hit this too: the formula rounds a scaled `-1234.5`
+(i.e. `-12.345` dollars) to `-1234` on both platforms. Do not substitute
+`NSDecimalRound(.plain)` (rounds half away from zero → `-1235`) or Swift's
+`.toNearestOrAwayFromZero`. The migration test fixture (§7) pins these cases,
+including the exactly-representable halves `±0.125` where the double is not an
+approximation at all.
 
 ---
 
@@ -214,12 +229,34 @@ Commit two fixture files (suggest `fixtures/migration/v3-nasty.json` and
 - `v3-nasty.json`: a v3 document salted with the hostile cases — `0.1`/`0.2` sums,
   `33.333`, `33.335`, `-12.345`, `-1234.5`-style negative halves, a sub-cent
   assignment, large balances (`1234567.89`), zero and missing optionals.
-- `v4-expected.json`: its exact v4 image (generate once from the web implementation,
-  then **verify by hand against §4** before committing — this file is the contract).
+- `v4-expected.json`: its exact v4 image (generated once from the web
+  implementation, then **verified by hand against §4** before committing — this
+  file is the contract).
 
-Both vitest and XCTest assert: `migrate(v3-nasty) == v4-expected`, field-for-field.
-If both platforms match the same committed bytes, migration divergence is impossible.
-This test is the single most important deliverable after the migration itself.
+Both vitest and swift-testing assert: `migrate(v3-nasty) == v4-expected`,
+field-for-field. If both platforms match the same committed bytes, migration
+divergence is impossible. This test is the single most important deliverable
+after the migration itself.
+
+**Rider (implemented with v4): the uncategorized back-fill.** `migrateV3` (web)
+and `Migration.v3ToV4` (Swift) also move every on-budget row that never entered an
+envelope onto `cat:uncategorized`, creating `g:system` and the envelope in the same
+pass. The rows selected are exactly those `bookIntegrity` counts in its
+`unbudgetedSpending` residual: on an on-budget account, no `categoryId`, and not
+one leg of an on-budget → on-budget transfer (that pair cancels in the cash total,
+so giving it an envelope would invent activity that never happened). w1-bug3 made
+this state unreachable from the UI going forward but deliberately did not rewrite
+history; v4 is the one document rewrite, with one backup, where it gets fixed.
+
+**Consequence, stated plainly:** an uncategorized outflow that used to sit outside
+the envelope system now reads as overspending in Uncategorized, and a *past*
+month's overspend sweeps into Ready-to-Assign. So §8.3's "balances unchanged to
+the cent" holds for every envelope and account balance, but Ready-to-Assign
+legitimately drops by the total of any previously-uncategorized on-budget
+spending. That is the correction, not a regression — the money always left, the
+book just wasn't saying where from. After this pass `unbudgetedSpending` is 0 and
+stays 0, which is what makes `bookIntegrity().drift === 0` an unconditional
+invariant from v4 forward.
 
 ## 8. Rollout sequencing
 

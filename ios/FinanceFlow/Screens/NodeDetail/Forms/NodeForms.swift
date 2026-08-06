@@ -83,12 +83,12 @@ private struct RecurringForm: View {
         VStack(alignment: .leading, spacing: theme.spacing.sm) {
             HStack(spacing: theme.spacing.md) {
                 LabeledField(label: "Monthly target") {
-                    NumberField(value: 0) { v in
-                        patchCategory(ensureFirstCategory()) { $0.monthlyTarget = v > 0 ? v : nil }
+                    NumberField(value: .zero) { v in
+                        patchCategory(ensureFirstCategory()) { $0.monthlyTarget = v > .zero ? v : nil }
                     }
                 }
                 LabeledField(label: "Saved this month") {
-                    NumberField(value: 0) { v in
+                    NumberField(value: .zero) { v in
                         store.assign(month: Recurring.ymKey(), categoryID: ensureFirstCategory(), amount: v)
                     }
                 }
@@ -99,7 +99,7 @@ private struct RecurringForm: View {
         }
     }
 
-    private func itemsEditor(_ rows: [NodeLedger.NodeRow], totals: (target: Decimal, funded: Decimal)) -> some View {
+    private func itemsEditor(_ rows: [NodeLedger.NodeRow], totals: (target: Money, funded: Money)) -> some View {
         VStack(alignment: .leading, spacing: theme.spacing.sm) {
             FieldLabel(text: "Items")
             ForEach(rows, id: \.category.id) { row in
@@ -107,15 +107,15 @@ private struct RecurringForm: View {
                     namePlaceholder: "Item (e.g. Power)",
                     name: nameBinding(row.category),
                     value: row.assigned,
-                    target: row.category.monthlyTarget ?? 0,
+                    target: row.category.monthlyTarget ?? .zero,
                     color: phaseColor,
                     onOpenBudget: { nav.openBudget(categoryId: row.category.id) },
                     onDelete: { pendingDelete = row.category }
                 ) {
                     HStack(spacing: theme.spacing.sm) {
                         LabeledField(label: "Target") {
-                            NumberField(value: row.category.monthlyTarget ?? 0) { v in
-                                patchCategory(row.category.id) { $0.monthlyTarget = v > 0 ? v : nil }
+                            NumberField(value: row.category.monthlyTarget ?? .zero) { v in
+                                patchCategory(row.category.id) { $0.monthlyTarget = v > .zero ? v : nil }
                             }
                         }
                         LabeledField(label: "Saved this month") {
@@ -226,7 +226,7 @@ private struct BigEFForm: View {
             } else {
                 EFBucketEditor(nodeId: .BigEF, rows: rows, computedTarget: computed)
             }
-            Text(target > 0 ? "Target: \(CurrencyFormat.string(target))" : "Set monthly expenses in Settings to compute target.")
+            Text(target > .zero ? "Target: \(CurrencyFormat.string(target))" : "Set monthly expenses in Settings to compute target.")
                 .font(theme.typography.caption)
                 .foregroundStyle(theme.colors.textSecondary)
         }
@@ -240,15 +240,15 @@ private struct EFFirstBalanceField: View {
     @Environment(AppStore.self) private var store
     /// Host milestone — the created envelope reports into this node.
     let nodeId: NodeId
-    let computedTarget: Decimal
+    let computedTarget: Money
 
     var body: some View {
         LabeledField(label: "Current balance") {
-            NumberField(value: 0) { v in writeFirstBalance(v) }
+            NumberField(value: .zero) { v in writeFirstBalance(v) }
         }
     }
 
-    private func writeFirstBalance(_ v: Decimal) {
+    private func writeFirstBalance(_ v: Money) {
         let categoryID: String
         if let existing = NodeLedger.efCategories(store.state.budget).first {
             categoryID = existing.id
@@ -257,7 +257,7 @@ private struct EFFirstBalanceField: View {
                 store.state.budget,
                 nodeId: nodeId,
                 name: "Emergency Fund",
-                balanceTarget: computedTarget > 0 ? computedTarget : nil
+                balanceTarget: computedTarget > .zero ? computedTarget : nil
             )
             store.apply(plan.ops)
             categoryID = plan.categoryID
@@ -282,12 +282,12 @@ private struct EFBucketEditor: View {
     /// Host milestone — new buckets get this node's id.
     let nodeId: NodeId
     let rows: [NodeLedger.NodeRow]
-    let computedTarget: Decimal
+    let computedTarget: Money
 
     @State private var pendingDelete: BudgetCategory?
 
     var body: some View {
-        let bucketTargets = rows.reduce(Decimal(0)) { $0 + ($1.category.balanceTarget ?? 0) }
+        let bucketTargets = rows.reduce(Money.zero) { $0 + ($1.category.balanceTarget ?? .zero) }
         let color = theme.phaseColor(Flowchart.node(nodeId).phase).base
         VStack(alignment: .leading, spacing: theme.spacing.sm) {
             FieldLabel(text: "Buckets")
@@ -296,15 +296,15 @@ private struct EFBucketEditor: View {
                     namePlaceholder: "Bucket (e.g. Medical)",
                     name: nameBinding(row.category),
                     value: row.available,
-                    target: row.category.balanceTarget ?? 0,
+                    target: row.category.balanceTarget ?? .zero,
                     color: color,
                     onOpenBudget: { nav.openBudget(categoryId: row.category.id) },
                     onDelete: { pendingDelete = row.category }
                 ) {
                     HStack(spacing: theme.spacing.sm) {
                         LabeledField(label: "Target") {
-                            NumberField(value: row.category.balanceTarget ?? 0) { v in
-                                patchCategory(row.category.id) { $0.balanceTarget = v > 0 ? v : nil }
+                            NumberField(value: row.category.balanceTarget ?? .zero) { v in
+                                patchCategory(row.category.id) { $0.balanceTarget = v > .zero ? v : nil }
                             }
                         }
                         LabeledField(label: "Balance") {
@@ -417,7 +417,7 @@ private struct IRAForm: View {
 
     var body: some View {
         let d = store.state.node(.IRA).data?.ira
-            ?? IRAData(type: .roth, ytdContribution: .manual(0), annualLimit: store.state.settings.iraAnnualLimit)
+            ?? IRAData(type: .roth, ytdContribution: .manual(.zero), annualLimit: store.state.settings.iraAnnualLimit)
         VStack(alignment: .leading, spacing: theme.spacing.md) {
             LabeledField(label: "Type") {
                 Picker("", selection: Binding(
@@ -440,7 +440,7 @@ private struct IRAForm: View {
         }
     }
 
-    private func write(_ d: IRAData, type: IRAType? = nil, ytd: Decimal? = nil, limit: Decimal? = nil) {
+    private func write(_ d: IRAData, type: IRAType? = nil, ytd: Money? = nil, limit: Money? = nil) {
         store.setNodeData(.IRA, .ira(IRAData(
             type: type ?? d.type,
             ytdContribution: .manual(ytd ?? d.ytdContribution.value),
@@ -456,7 +456,7 @@ private struct HSAForm: View {
     var body: some View {
         let settings = store.state.settings
         let d = store.state.node(.HSA).data?.hsa
-            ?? HSAData(coverage: .`self`, ytdContribution: .manual(0), annualLimit: settings.hsaSelfLimit)
+            ?? HSAData(coverage: .`self`, ytdContribution: .manual(.zero), annualLimit: settings.hsaSelfLimit)
         VStack(alignment: .leading, spacing: theme.spacing.md) {
             LabeledField(label: "Coverage") {
                 Picker("", selection: Binding(
@@ -513,7 +513,6 @@ private struct CollegeForm: View {
                 NumberField(value: d.monthlyContribution) { v in
                     store.setNodeData(.College, .college(CollegeData(
                         monthlyContribution: v,
-                        balance: d.balance,
                         targetAge: d.targetAge
                     )))
                 }

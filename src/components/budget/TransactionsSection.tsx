@@ -190,7 +190,7 @@ export function AddTxnForm({
 
   const magnitude = Math.abs(amount);
   const canSubmit =
-    Math.round(magnitude * 100) > 0 &&
+    magnitude > 0 &&
     date.length > 0 &&
     (mode === "transfer" ? Boolean(fromId && toId && fromId !== toId) : Boolean(accountId));
 
@@ -397,9 +397,8 @@ const TxnRow = memo(function TxnRow({
   onEdit: (txn: Txn) => void;
 }) {
   const isTransfer = Boolean(txn.transferAccountId);
-  const cents = Math.round(txn.amount * 100);
   const title = isTransfer
-    ? `Transfer ${cents < 0 ? "→" : "←"} ${
+    ? `Transfer ${txn.amount < 0 ? "→" : "←"} ${
         accountNames.get(txn.transferAccountId ?? "") ?? "Unknown account"
       }`
     : txn.payee?.trim() || "No payee";
@@ -430,7 +429,7 @@ const TxnRow = memo(function TxnRow({
       </button>
       <span
         className={`text-sm font-semibold tabular-nums ${
-          cents < 0 ? "text-red-300/90" : cents > 0 ? "text-emerald-300/90" : "text-white/60"
+          txn.amount < 0 ? "text-red-300/90" : txn.amount > 0 ? "text-emerald-300/90" : "text-white/60"
         }`}
       >
         {dollars(txn.amount)}

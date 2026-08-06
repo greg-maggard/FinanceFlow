@@ -105,12 +105,14 @@ struct NodeDetailSheet: View {
     private func taskBody(node: GraphNode, phase: PhaseColor) -> some View {
         let progress = progressOf(store.state, nodeId)
         return VStack(alignment: .leading, spacing: theme.spacing.lg) {
-            if case let .goal(value, max, ready) = progress, max > 0 {
+            if case let .goal(value, max, unit, ready) = progress, max > 0 {
                 VStack(alignment: .leading, spacing: theme.spacing.xs) {
-                    GoalBar(value: value, max: max, color: phase.base)
+                    GoalBar(value: value, max: max, color: phase.base, unit: .init(unit))
                     if recurringNodes.contains(nodeId) {
+                        // Recurring nodes are always money goals, so `value` and
+                        // `max` here are integer cents.
                         Text(
-                            "Funded \(CurrencyFormat.string(value)) of \(CurrencyFormat.string(max))"
+                            "Funded \(CurrencyFormat.string(Money(cents: Int(value)))) of \(CurrencyFormat.string(Money(cents: Int(max))))"
                                 + " · \(CurrencyFormat.string(leftThisMonth)) left this month"
                         )
                         .font(theme.typography.caption)
@@ -139,10 +141,10 @@ struct NodeDetailSheet: View {
     /// month covered?" and counts money that has already gone out the door, so
     /// after any spending it disagrees with the Budget screen's available —
     /// showing both saves the user from reconciling the two.
-    private var leftThisMonth: Decimal {
+    private var leftThisMonth: Money {
         let book = store.state.budget
         let snap = Ledger.snapshot(book, month: Recurring.ymKey())
-        return NodeLedger.nodeRows(book, snap, nodeId).reduce(Decimal(0)) { $0 + $1.available }
+        return NodeLedger.nodeRows(book, snap, nodeId).reduce(Money.zero) { $0 + $1.available }
     }
 
     private func completeButton(phase: PhaseColor) -> some View {

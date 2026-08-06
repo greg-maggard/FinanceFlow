@@ -3,13 +3,14 @@ import type {
   BudgetBook,
   Category,
   CategoryGroup,
+  Cents,
   MonthKey,
   NodeId,
   Txn,
 } from "../state/schema";
-import { newId } from "../state/schema";
+import { cents, newId } from "../state/schema";
 import type { MonthSnapshot } from "./ledger";
-import { accountBalance, fromCents, monthOf, snapshot, toCents } from "./ledger";
+import { accountBalance, monthOf, snapshot } from "./ledger";
 import { RECURRING } from "../theme/identity";
 
 /**
@@ -61,6 +62,9 @@ export function adjustmentTxnId(targetId: string, date: string): string {
 // ---------------------------------------------------------------------------
 // Reads
 
+/** The month entry of an envelope the snapshot has never heard of. */
+const ZERO_MONTH = { assigned: cents(0), activity: cents(0), available: cents(0) };
+
 export function linkedCategories(book: BudgetBook, nodeId: NodeId): Category[] {
   return book.categories.filter((c) => c.nodeId === nodeId);
 }
@@ -75,16 +79,16 @@ export function linkedAccounts(book: BudgetBook, nodeId: NodeId): Account[] {
 
 export type NodeRow = {
   category: Category;
-  assigned: number;
-  activity: number;
-  available: number;
+  assigned: Cents;
+  activity: Cents;
+  available: Cents;
 };
 
 /** The node's envelopes joined with the month snapshot (EF nodes see the union). */
 export function nodeRows(book: BudgetBook, snap: MonthSnapshot, nodeId: NodeId): NodeRow[] {
   const cats = EF_NODES.has(nodeId) ? efCategories(book) : linkedCategories(book, nodeId);
   return cats.map((category) => {
-    const m = snap.categories[category.id] ?? { assigned: 0, activity: 0, available: 0 };
+    const m = snap.categories[category.id] ?? ZERO_MONTH;
     return { category, assigned: m.assigned, activity: m.activity, available: m.available };
   });
 }
@@ -109,25 +113,25 @@ export function recurringTotals(
   book: BudgetBook,
   snap: MonthSnapshot,
   nodeId: NodeId,
-): { target: number; funded: number } {
-  let targetC = 0;
-  let fundedC = 0;
+): { target: Cents; funded: Cents } {
+  let target = 0;
+  let funded = 0;
   for (const row of nodeRows(book, snap, nodeId)) {
-    const catTargetC = toCents(row.category.monthlyTarget ?? 0);
-    const heldC = Math.max(0, toCents(row.available) - toCents(row.activity));
-    targetC += catTargetC;
-    fundedC += Math.min(catTargetC, heldC);
+    const catTarget = row.category.monthlyTarget ?? 0;
+    const held = Math.max(0, row.available - row.activity);
+    target += catTarget;
+    funded += Math.min(catTarget, held);
   }
-  return { target: fromCents(targetC), funded: fromCents(fundedC) };
+  return { target: cents(target), funded: cents(funded) };
 }
 
 /** Emergency fund balance: Σ available over the SmallEF/BigEF union. */
-export function efBalance(book: BudgetBook, snap: MonthSnapshot): number {
-  let c = 0;
+export function efBalance(book: BudgetBook, snap: MonthSnapshot): Cents {
+  let total = 0;
   for (const cat of efCategories(book)) {
-    c += toCents(snap.categories[cat.id]?.available ?? 0);
+    total += snap.categories[cat.id]?.available ?? 0;
   }
-  return fromCents(c);
+  return cents(total);
 }
 
 /**
@@ -135,13 +139,13 @@ export function efBalance(book: BudgetBook, snap: MonthSnapshot): number {
  * bucket targets may grow the terminal goal beyond months × expenses but can
  * never shrink it.
  */
-export function efTarget(book: BudgetBook, nodeId: "SmallEF" | "BigEF", computed: number): number {
+export function efTarget(book: BudgetBook, nodeId: "SmallEF" | "BigEF", computed: Cents): Cents {
   if (nodeId === "SmallEF") return computed;
-  let bucketsC = 0;
+  let buckets = 0;
   for (const cat of efCategories(book)) {
-    bucketsC += toCents(cat.balanceTarget ?? 0);
+    buckets += cat.balanceTarget ?? 0;
   }
-  return Math.max(computed, fromCents(bucketsC));
+  return cents(Math.max(computed, buckets));
 }
 
 /** SavePurchase / Goals: saved = Σ available, target = Σ balance targets. */
@@ -149,22 +153,22 @@ export function purchaseTotals(
   book: BudgetBook,
   snap: MonthSnapshot,
   nodeId: "SavePurchase" | "Goals",
-): { saved: number; target: number } {
-  let savedC = 0;
-  let targetC = 0;
+): { saved: Cents; target: Cents } {
+  let saved = 0;
+  let target = 0;
   for (const row of nodeRows(book, snap, nodeId)) {
-    savedC += toCents(row.available);
-    targetC += toCents(row.category.balanceTarget ?? 0);
+    saved += row.available;
+    target += row.category.balanceTarget ?? 0;
   }
-  return { saved: fromCents(savedC), target: fromCents(targetC) };
+  return { saved: cents(saved), target: cents(target) };
 }
 
 export type DebtRow = {
   account: Account;
   /** What's still owed (0 once cleared). */
-  outstanding: number;
+  outstanding: Cents;
   /** Original principal, read from the account's starting transaction. */
-  principal: number;
+  principal: Cents;
   paid: boolean;
 };
 
@@ -176,23 +180,23 @@ export function debtRows(book: BudgetBook, nodeId: "HighDebt" | "ModDebt"): Debt
   // the scan below rather than walking the whole book to build an empty list.
   if (accounts.length === 0) return [];
   const wanted = new Set(accounts.map((a) => a.id));
-  const balancesC = new Map<string, number>();
+  const balances = new Map<string, number>();
   const startingTxns = new Map<string, Txn>();
   for (const t of book.transactions) {
     if (!wanted.has(t.accountId)) continue;
-    balancesC.set(t.accountId, (balancesC.get(t.accountId) ?? 0) + toCents(t.amount));
+    balances.set(t.accountId, (balances.get(t.accountId) ?? 0) + t.amount);
     if (t.id === startingTxnId(t.accountId)) startingTxns.set(t.accountId, t);
   }
   return accounts.map((account) => {
-    const balanceC = balancesC.get(account.id) ?? 0;
+    const balance = balances.get(account.id) ?? 0;
     const start = startingTxns.get(account.id);
-    const outstandingC = Math.max(0, -balanceC);
-    const principalC = start ? Math.max(0, -toCents(start.amount)) : outstandingC;
+    const outstanding = Math.max(0, -balance);
+    const principal = start ? Math.max(0, -start.amount) : outstanding;
     return {
       account,
-      outstanding: fromCents(outstandingC),
-      principal: fromCents(principalC),
-      paid: balanceC >= 0,
+      outstanding: cents(outstanding),
+      principal: cents(principal),
+      paid: balance >= 0,
     };
   });
 }
@@ -205,24 +209,24 @@ export function debtRows(book: BudgetBook, nodeId: "HighDebt" | "ModDebt"): Debt
 export function debtTotals(
   book: BudgetBook,
   nodeId: "HighDebt" | "ModDebt",
-): { paid: number; total: number; allPaid: boolean; hasAny: boolean } {
+): { paid: Cents; total: Cents; allPaid: boolean; hasAny: boolean } {
   const rows = debtRows(book, nodeId);
-  let totalC = 0;
-  let outstandingC = 0;
+  let total = 0;
+  let outstanding = 0;
   for (const row of rows) {
-    totalC += toCents(row.principal);
-    outstandingC += toCents(row.outstanding);
+    total += row.principal;
+    outstanding += row.outstanding;
   }
-  const paidC = Math.min(Math.max(totalC - outstandingC, 0), totalC);
+  const paid = Math.min(Math.max(total - outstanding, 0), total);
   return {
-    paid: fromCents(paidC),
-    total: fromCents(totalC),
+    paid: cents(paid),
+    total: cents(total),
     allPaid: rows.length > 0 && rows.every((r) => r.paid),
     hasAny: rows.length > 0,
   };
 }
 
-export function collegeBalance(book: BudgetBook): number {
+export function collegeBalance(book: BudgetBook): Cents {
   return accountBalance(book, COLLEGE_ACCOUNT_ID);
 }
 
@@ -240,7 +244,7 @@ export type BookOps = {
   updateTxns?: Txn[];
   deleteTxnIds?: string[];
   /** Absolute amounts, `store.assign` semantics (<= 0 clears). */
-  setAssignments?: { month: MonthKey; categoryId: string; amount: number }[];
+  setAssignments?: { month: MonthKey; categoryId: string; amount: Cents }[];
 };
 
 export function ensureGroup(book: BudgetBook, groupId: string): CategoryGroup | null {
@@ -278,7 +282,7 @@ function outstandingAdjustments(book: BudgetBook, month: MonthKey, categoryId: s
         t.accountId === ADJUST_ACCOUNT_ID &&
         t.categoryId === categoryId &&
         monthOf(t.date) === month &&
-        toCents(t.amount) < 0,
+        t.amount < 0,
     )
     .sort((a, b) => {
       if (a.date !== b.date) return a.date < b.date ? 1 : -1;
@@ -304,49 +308,48 @@ export function planBalanceEdit(
   book: BudgetBook,
   month: MonthKey,
   categoryId: string,
-  newAvailable: number,
+  newAvailable: Cents,
   today: string,
 ): BookOps {
   const snap = snapshot(book, month);
-  const entry = snap.categories[categoryId] ?? { assigned: 0, activity: 0, available: 0 };
-  let deltaC = toCents(newAvailable) - toCents(entry.available);
-  if (deltaC === 0) return {};
+  const entry = snap.categories[categoryId] ?? ZERO_MONTH;
+  let delta = newAvailable - entry.available;
+  if (delta === 0) return {};
 
   const ops: BookOps = {};
   const adjId = adjustmentTxnId(categoryId, today);
   const existingAdj = book.transactions.find((t) => t.id === adjId);
-  const assignedC = toCents(entry.assigned);
+  const assigned = entry.assigned;
 
-  if (deltaC > 0) {
+  if (delta > 0) {
     for (const adj of outstandingAdjustments(book, month, categoryId)) {
-      if (deltaC <= 0) break;
-      const adjC = toCents(adj.amount);
-      const unwindC = Math.min(deltaC, -adjC);
-      if (adjC + unwindC === 0) (ops.deleteTxnIds ??= []).push(adj.id);
-      else (ops.updateTxns ??= []).push({ ...adj, amount: fromCents(adjC + unwindC) });
-      deltaC -= unwindC;
+      if (delta <= 0) break;
+      const unwind = Math.min(delta, -adj.amount);
+      if (adj.amount + unwind === 0) (ops.deleteTxnIds ??= []).push(adj.id);
+      else (ops.updateTxns ??= []).push({ ...adj, amount: cents(adj.amount + unwind) });
+      delta -= unwind;
     }
-    if (deltaC > 0) {
-      ops.setAssignments = [{ month, categoryId, amount: fromCents(assignedC + deltaC) }];
+    if (delta > 0) {
+      ops.setAssignments = [{ month, categoryId, amount: cents(assigned + delta) }];
     }
     return ops;
   }
 
-  const fromAssignC = Math.min(-deltaC, assignedC);
-  if (fromAssignC > 0) {
-    ops.setAssignments = [{ month, categoryId, amount: fromCents(assignedC - fromAssignC) }];
+  const fromAssign = Math.min(-delta, assigned);
+  if (fromAssign > 0) {
+    ops.setAssignments = [{ month, categoryId, amount: cents(assigned - fromAssign) }];
   }
-  const remainderC = -deltaC - fromAssignC;
-  if (remainderC > 0) {
+  const remainder = -delta - fromAssign;
+  if (remainder > 0) {
     const account = ensureAdjustmentAccount(book);
     if (account) ops.addAccounts = [account];
-    const baseC = existingAdj ? toCents(existingAdj.amount) : 0;
+    const base = existingAdj ? existingAdj.amount : 0;
     const txn: Txn = {
       id: adjId,
       accountId: ADJUST_ACCOUNT_ID,
       date: today,
       payee: "Balance adjustment",
-      amount: fromCents(baseC - remainderC),
+      amount: cents(base - remainder),
       categoryId,
       source: "manual",
     };
@@ -360,8 +363,8 @@ export function planBalanceEdit(
 export type FundShortfall = {
   categoryId: string;
   name: string;
-  /** Dollars still needed to reach the monthly target. */
-  short: number;
+  /** Cents still needed to reach the monthly target. */
+  short: Cents;
 };
 
 /**
@@ -375,12 +378,12 @@ export type FundMonthPlan = {
   targeted: number;
   /** Of those, how many this plan actually moves money into. */
   funding: number;
-  /** Dollars this plan moves out of Ready to Assign — Σ of the ops' increases. */
-  total: number;
+  /** Cents this plan moves out of Ready to Assign — Σ of the ops' increases. */
+  total: Cents;
   /** Envelopes the money ran out before filling, in book order. */
   underfunded: FundShortfall[];
   /** Σ of `underfunded[].short`. */
-  shortfall: number;
+  shortfall: Cents;
 };
 
 /**
@@ -425,38 +428,34 @@ export function planFundMonth(
   month: MonthKey,
   snap: MonthSnapshot = snapshot(book, month),
 ): FundMonthPlan {
-  let remainingC = Math.max(0, toCents(snap.readyToAssign));
+  let remaining = Math.max(0, snap.readyToAssign);
 
-  const setAssignments: { month: MonthKey; categoryId: string; amount: number }[] = [];
+  const setAssignments: { month: MonthKey; categoryId: string; amount: Cents }[] = [];
   const underfunded: FundShortfall[] = [];
   let targeted = 0;
-  let shortfallC = 0;
-  let totalC = 0;
+  let shortfall = 0;
+  let total = 0;
 
   for (const cat of book.categories) {
-    const targetC = toCents(cat.monthlyTarget ?? 0);
-    if (targetC <= 0) continue;
+    const target = cat.monthlyTarget ?? 0;
+    if (target <= 0) continue;
     targeted += 1;
-    const m = snap.categories[cat.id] ?? { assigned: 0, activity: 0, available: 0 };
+    const m = snap.categories[cat.id] ?? ZERO_MONTH;
     // What the envelope held for the month: carryover + assigned. Carryover is
     // never negative (`snapshot` sweeps a month-end hole into Ready to Assign
     // instead of carrying it), so this is >= 0 and needs no clamp.
-    const heldC = toCents(m.available) - toCents(m.activity);
-    const needC = Math.max(0, targetC - heldC);
-    if (needC === 0) continue;
-    const giveC = Math.min(needC, remainingC);
-    if (giveC > 0) {
-      setAssignments.push({
-        month,
-        categoryId: cat.id,
-        amount: fromCents(toCents(m.assigned) + giveC),
-      });
-      remainingC -= giveC;
-      totalC += giveC;
+    const held = m.available - m.activity;
+    const need = Math.max(0, target - held);
+    if (need === 0) continue;
+    const give = Math.min(need, remaining);
+    if (give > 0) {
+      setAssignments.push({ month, categoryId: cat.id, amount: cents(m.assigned + give) });
+      remaining -= give;
+      total += give;
     }
-    if (giveC < needC) {
-      underfunded.push({ categoryId: cat.id, name: cat.name, short: fromCents(needC - giveC) });
-      shortfallC += needC - giveC;
+    if (give < need) {
+      underfunded.push({ categoryId: cat.id, name: cat.name, short: cents(need - give) });
+      shortfall += need - give;
     }
   }
 
@@ -466,9 +465,9 @@ export function planFundMonth(
     ops,
     targeted,
     funding: setAssignments.length,
-    total: fromCents(totalC),
+    total: cents(total),
     underfunded,
-    shortfall: fromCents(shortfallC),
+    shortfall: cents(shortfall),
   };
 }
 
@@ -476,22 +475,22 @@ export function planFundMonth(
 function planAccountBalanceTo(
   book: BudgetBook,
   accountId: string,
-  targetBalance: number,
+  targetBalance: Cents,
   today: string,
   memo?: string,
 ): BookOps {
-  const deltaC = toCents(targetBalance) - toCents(accountBalance(book, accountId));
-  if (deltaC === 0) return {};
+  const delta = targetBalance - accountBalance(book, accountId);
+  if (delta === 0) return {};
   const adjId = adjustmentTxnId(accountId, today);
   const existing = book.transactions.find((t) => t.id === adjId);
-  const newAmountC = (existing ? toCents(existing.amount) : 0) + deltaC;
-  if (existing && newAmountC === 0) return { deleteTxnIds: [adjId] };
+  const newAmount = (existing ? existing.amount : 0) + delta;
+  if (existing && newAmount === 0) return { deleteTxnIds: [adjId] };
   const txn: Txn = {
     id: adjId,
     accountId,
     date: today,
     payee: "Balance adjustment",
-    amount: fromCents(newAmountC),
+    amount: cents(newAmount),
     memo,
     source: "manual",
   };
@@ -502,15 +501,15 @@ function planAccountBalanceTo(
 export function planDebtBalanceEdit(
   book: BudgetBook,
   accountId: string,
-  newOwed: number,
+  newOwed: Cents,
   today: string,
 ): BookOps {
-  return planAccountBalanceTo(book, accountId, -Math.abs(newOwed), today);
+  return planAccountBalanceTo(book, accountId, cents(-Math.abs(newOwed)), today);
 }
 
 export function planCollegeBalanceEdit(
   book: BudgetBook,
-  newBalance: number,
+  newBalance: Cents,
   today: string,
 ): BookOps {
   const ops = planAccountBalanceTo(book, COLLEGE_ACCOUNT_ID, newBalance, today);
@@ -520,7 +519,7 @@ export function planCollegeBalanceEdit(
 }
 
 export function planMarkDebtPaid(book: BudgetBook, accountId: string, today: string): BookOps {
-  return planAccountBalanceTo(book, accountId, 0, today, "Marked paid");
+  return planAccountBalanceTo(book, accountId, cents(0), today, "Marked paid");
 }
 
 /** Create an envelope linked to a node, ensuring its well-known group exists. */
@@ -528,7 +527,7 @@ export function planCreateLinkedCategory(
   book: BudgetBook,
   nodeId: NodeId,
   name: string,
-  goal?: { monthlyTarget?: number; balanceTarget?: number; targetDate?: string },
+  goal?: { monthlyTarget?: Cents; balanceTarget?: Cents; targetDate?: string },
 ): { ops: BookOps; categoryId: string } {
   const groupId = groupForNode(nodeId);
   const group = ensureGroup(book, groupId);
@@ -551,7 +550,7 @@ export function planCreateLinkedCategory(
 export function planCreateDebtAccount(
   _book: BudgetBook,
   nodeId: "HighDebt" | "ModDebt",
-  init: { name: string; balance: number; apr: number; minPayment: number },
+  init: { name: string; balance: Cents; apr: number; minPayment: Cents },
   today: string,
 ): { ops: BookOps; accountId: string } {
   const account: Account = {
@@ -571,7 +570,7 @@ export function planCreateDebtAccount(
         accountId: account.id,
         date: today,
         payee: "Starting balance",
-        amount: -Math.abs(init.balance),
+        amount: cents(-Math.abs(init.balance)),
         source: "manual",
       },
     ];

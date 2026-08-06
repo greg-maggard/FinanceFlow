@@ -61,9 +61,9 @@ public enum NodeLedger {
 
     public struct NodeRow: Equatable, Sendable {
         public var category: BudgetCategory
-        public var assigned: Decimal
-        public var activity: Decimal
-        public var available: Decimal
+        public var assigned: Money
+        public var activity: Money
+        public var available: Money
     }
 
     /// The node's envelopes joined with the month snapshot (EF nodes see the union).
@@ -74,8 +74,7 @@ public enum NodeLedger {
     ) -> [NodeRow] {
         let cats = efNodes.contains(nodeId) ? efCategories(book) : linkedCategories(book, nodeId)
         return cats.map { category in
-            let m = snap.categories[category.id]
-                ?? Ledger.CategoryMonth(assigned: 0, activity: 0, available: 0)
+            let m = snap.categories[category.id] ?? .zero
             return NodeRow(
                 category: category,
                 assigned: m.assigned,
@@ -104,12 +103,12 @@ public enum NodeLedger {
         _ book: BudgetBook,
         _ snap: Ledger.MonthSnapshot,
         _ nodeId: NodeId
-    ) -> (target: Decimal, funded: Decimal) {
-        var target: Decimal = 0
-        var funded: Decimal = 0
+    ) -> (target: Money, funded: Money) {
+        var target = Money.zero
+        var funded = Money.zero
         for row in nodeRows(book, snap, nodeId) {
-            let catTarget = row.category.monthlyTarget ?? 0
-            let held = max(0, row.available - row.activity)
+            let catTarget = row.category.monthlyTarget ?? .zero
+            let held = max(.zero, row.available - row.activity)
             target += catTarget
             funded += min(catTarget, held)
         }
@@ -117,10 +116,10 @@ public enum NodeLedger {
     }
 
     /// Emergency fund balance: Σ available over the SmallEF/BigEF union.
-    public static func efBalance(_ book: BudgetBook, _ snap: Ledger.MonthSnapshot) -> Decimal {
-        var total: Decimal = 0
+    public static func efBalance(_ book: BudgetBook, _ snap: Ledger.MonthSnapshot) -> Money {
+        var total = Money.zero
         for cat in efCategories(book) {
-            total += snap.categories[cat.id]?.available ?? 0
+            total += snap.categories[cat.id]?.available ?? .zero
         }
         return total
     }
@@ -128,11 +127,11 @@ public enum NodeLedger {
     /// EF target per milestone: SmallEF keeps the computed starter gate;
     /// BigEF's bucket targets may grow the terminal goal beyond
     /// months × expenses but can never shrink it.
-    public static func efTarget(_ book: BudgetBook, _ nodeId: NodeId, computed: Decimal) -> Decimal {
+    public static func efTarget(_ book: BudgetBook, _ nodeId: NodeId, computed: Money) -> Money {
         guard nodeId == .BigEF else { return computed }
-        var buckets: Decimal = 0
+        var buckets = Money.zero
         for cat in efCategories(book) {
-            buckets += cat.balanceTarget ?? 0
+            buckets += cat.balanceTarget ?? .zero
         }
         return max(computed, buckets)
     }
@@ -142,12 +141,12 @@ public enum NodeLedger {
         _ book: BudgetBook,
         _ snap: Ledger.MonthSnapshot,
         _ nodeId: NodeId
-    ) -> (saved: Decimal, target: Decimal) {
-        var saved: Decimal = 0
-        var target: Decimal = 0
+    ) -> (saved: Money, target: Money) {
+        var saved = Money.zero
+        var target = Money.zero
         for row in nodeRows(book, snap, nodeId) {
             saved += row.available
-            target += row.category.balanceTarget ?? 0
+            target += row.category.balanceTarget ?? .zero
         }
         return (saved, target)
     }
@@ -155,9 +154,9 @@ public enum NodeLedger {
     public struct DebtRow: Equatable, Sendable {
         public var account: Account
         /// What's still owed (0 once cleared).
-        public var outstanding: Decimal
+        public var outstanding: Money
         /// Original principal, read from the account's starting transaction.
-        public var principal: Decimal
+        public var principal: Money
         public var paid: Bool
     }
 
@@ -168,13 +167,13 @@ public enum NodeLedger {
             .map { account in
                 let balance = Ledger.accountBalance(book, account.id)
                 let start = book.transactions.first { $0.id == startingTxnID(account.id) }
-                let outstanding = max(0, -balance)
-                let principal = start.map { max(0, -$0.amount) } ?? outstanding
+                let outstanding = max(.zero, -balance)
+                let principal = start.map { max(.zero, -$0.amount) } ?? outstanding
                 return DebtRow(
                     account: account,
                     outstanding: outstanding,
                     principal: principal,
-                    paid: balance >= 0
+                    paid: balance >= .zero
                 )
             }
     }
@@ -185,19 +184,19 @@ public enum NodeLedger {
     public static func debtTotals(
         _ book: BudgetBook,
         _ nodeId: NodeId
-    ) -> (paid: Decimal, total: Decimal, allPaid: Bool, hasAny: Bool) {
+    ) -> (paid: Money, total: Money, allPaid: Bool, hasAny: Bool) {
         let rows = debtRows(book, nodeId)
-        var total: Decimal = 0
-        var outstanding: Decimal = 0
+        var total = Money.zero
+        var outstanding = Money.zero
         for row in rows {
             total += row.principal
             outstanding += row.outstanding
         }
-        let paid = min(max(total - outstanding, 0), total)
+        let paid = min(max(total - outstanding, .zero), total)
         return (paid, total, !rows.isEmpty && rows.allSatisfy(\.paid), !rows.isEmpty)
     }
 
-    public static func collegeBalance(_ book: BudgetBook) -> Decimal {
+    public static func collegeBalance(_ book: BudgetBook) -> Money {
         Ledger.accountBalance(book, collegeAccountID)
     }
 
@@ -207,9 +206,9 @@ public enum NodeLedger {
         public var month: String
         public var categoryID: String
         /// Absolute amount, `AppStore.assign` semantics (<= 0 clears).
-        public var amount: Decimal
+        public var amount: Money
 
-        public init(month: String, categoryID: String, amount: Decimal) {
+        public init(month: String, categoryID: String, amount: Money) {
             self.month = month
             self.categoryID = categoryID
             self.amount = amount
@@ -263,10 +262,11 @@ public enum NodeLedger {
                 $0.accountId == adjustAccountID
                     && $0.categoryId == categoryID
                     && Ledger.monthOf(date: $0.date) == month
-                    // Cents-rounded, matching `toCents(t.amount) < 0` in
-                    // `nodeLedger.ts`: a sub-half-cent amount is not a
-                    // write-off on either engine, so both select the same rows.
-                    && Ledger.toCents($0.amount) < 0
+                    // Matching `t.amount < 0` in `nodeLedger.ts`. Both engines
+                    // compare the same integer, so both select the same rows —
+                    // before v4 this needed a rounding step each side had to
+                    // remember, and a sub-half-cent row was the boundary.
+                    && $0.amount < .zero
             }
             .sorted { a, b in
                 if a.date != b.date {
@@ -290,25 +290,24 @@ public enum NodeLedger {
         _ book: BudgetBook,
         month: String,
         categoryID: String,
-        newAvailable: Decimal,
+        newAvailable: Money,
         today: String
     ) -> BookOps {
         let snap = Ledger.snapshot(book, month: month)
-        let entry = snap.categories[categoryID]
-            ?? Ledger.CategoryMonth(assigned: 0, activity: 0, available: 0)
+        let entry = snap.categories[categoryID] ?? .zero
         var delta = newAvailable - entry.available
         var ops = BookOps()
-        if delta == 0 { return ops }
+        if delta == .zero { return ops }
 
         let adjID = adjustmentTxnID(categoryID, date: today)
         let existingAdj = book.transactions.first { $0.id == adjID }
         let assigned = entry.assigned
 
-        if delta > 0 {
+        if delta > .zero {
             for adj in outstandingAdjustments(book, month: month, categoryID: categoryID) {
-                if delta <= 0 { break }
+                if delta <= .zero { break }
                 let unwind = min(delta, -adj.amount)
-                if adj.amount + unwind == 0 {
+                if adj.amount + unwind == .zero {
                     ops.deleteTxnIDs.append(adj.id)
                 } else {
                     var updated = adj
@@ -317,22 +316,22 @@ public enum NodeLedger {
                 }
                 delta -= unwind
             }
-            if delta > 0 {
+            if delta > .zero {
                 ops.setAssignments = [AssignmentSet(month: month, categoryID: categoryID, amount: assigned + delta)]
             }
             return ops
         }
 
         let fromAssign = min(-delta, assigned)
-        if fromAssign > 0 {
+        if fromAssign > .zero {
             ops.setAssignments = [AssignmentSet(month: month, categoryID: categoryID, amount: assigned - fromAssign)]
         }
         let remainder = -delta - fromAssign
-        if remainder > 0 {
+        if remainder > .zero {
             if let account = ensureAdjustmentAccount(book) {
                 ops.addAccounts = [account]
             }
-            let base = existingAdj?.amount ?? 0
+            let base = existingAdj?.amount ?? .zero
             let txn = Txn(
                 id: adjID,
                 accountId: adjustAccountID,
@@ -354,10 +353,10 @@ public enum NodeLedger {
     public struct FundShortfall: Equatable, Sendable {
         public var categoryID: String
         public var name: String
-        /// Dollars still needed to reach the monthly target.
-        public var short: Decimal
+        /// Cents still needed to reach the monthly target.
+        public var short: Money
 
-        public init(categoryID: String, name: String, short: Decimal) {
+        public init(categoryID: String, name: String, short: Money) {
             self.categoryID = categoryID
             self.name = name
             self.short = short
@@ -373,13 +372,13 @@ public enum NodeLedger {
         public var targeted: Int
         /// Of those, how many this plan actually moves money into.
         public var funding: Int
-        /// Dollars this plan moves out of Ready to Assign — Σ of the ops'
+        /// Cents this plan moves out of Ready to Assign — Σ of the ops'
         /// increases.
-        public var total: Decimal
+        public var total: Money
         /// Envelopes the money ran out before filling, in book order.
         public var underfunded: [FundShortfall]
         /// Σ of `underfunded[].short`.
-        public var shortfall: Decimal
+        public var shortfall: Money
     }
 
     /// Fill this month's monthly targets from Ready to Assign, in one batch.
@@ -425,29 +424,28 @@ public enum NodeLedger {
         snap precomputed: Ledger.MonthSnapshot? = nil
     ) -> FundMonthPlan {
         let snap = precomputed ?? Ledger.snapshot(book, month: month)
-        var remaining = max(0, snap.readyToAssign)
+        var remaining = max(.zero, snap.readyToAssign)
 
         var ops = BookOps()
         var underfunded: [FundShortfall] = []
         var targeted = 0
-        var shortfall: Decimal = 0
-        var total: Decimal = 0
+        var shortfall = Money.zero
+        var total = Money.zero
 
         for cat in book.categories {
-            let target = cat.monthlyTarget ?? 0
-            guard target > 0 else { continue }
+            let target = cat.monthlyTarget ?? .zero
+            guard target > .zero else { continue }
             targeted += 1
-            let m = snap.categories[cat.id]
-                ?? Ledger.CategoryMonth(assigned: 0, activity: 0, available: 0)
+            let m = snap.categories[cat.id] ?? .zero
             // What the envelope held for the month: carryover + assigned.
             // Carryover is never negative (`snapshot` sweeps a month-end hole
             // into Ready to Assign instead of carrying it), so this is >= 0
             // and needs no clamp.
             let held = m.available - m.activity
-            let need = max(0, target - held)
-            if need == 0 { continue }
+            let need = max(.zero, target - held)
+            if need == .zero { continue }
             let give = min(need, remaining)
-            if give > 0 {
+            if give > .zero {
                 ops.setAssignments.append(
                     AssignmentSet(month: month, categoryID: cat.id, amount: m.assigned + give)
                 )
@@ -477,17 +475,17 @@ public enum NodeLedger {
     private static func planAccountBalance(
         _ book: BudgetBook,
         accountID: String,
-        target: Decimal,
+        target: Money,
         today: String,
         memo: String? = nil
     ) -> BookOps {
         let delta = target - Ledger.accountBalance(book, accountID)
         var ops = BookOps()
-        if delta == 0 { return ops }
+        if delta == .zero { return ops }
         let adjID = adjustmentTxnID(accountID, date: today)
         let existing = book.transactions.first { $0.id == adjID }
-        let newAmount = (existing?.amount ?? 0) + delta
-        if existing != nil, newAmount == 0 {
+        let newAmount = (existing?.amount ?? .zero) + delta
+        if existing != nil, newAmount == .zero {
             ops.deleteTxnIDs = [adjID]
             return ops
         }
@@ -511,15 +509,15 @@ public enum NodeLedger {
     public static func planDebtBalanceEdit(
         _ book: BudgetBook,
         accountID: String,
-        newOwed: Decimal,
+        newOwed: Money,
         today: String
     ) -> BookOps {
-        planAccountBalance(book, accountID: accountID, target: -abs(newOwed), today: today)
+        planAccountBalance(book, accountID: accountID, target: -newOwed.magnitude, today: today)
     }
 
     public static func planCollegeBalanceEdit(
         _ book: BudgetBook,
-        newBalance: Decimal,
+        newBalance: Money,
         today: String
     ) -> BookOps {
         var ops = planAccountBalance(book, accountID: collegeAccountID, target: newBalance, today: today)
@@ -530,7 +528,7 @@ public enum NodeLedger {
     }
 
     public static func planMarkDebtPaid(_ book: BudgetBook, accountID: String, today: String) -> BookOps {
-        planAccountBalance(book, accountID: accountID, target: 0, today: today, memo: "Marked paid")
+        planAccountBalance(book, accountID: accountID, target: .zero, today: today, memo: "Marked paid")
     }
 
     /// Create an envelope linked to a node, ensuring its well-known group exists.
@@ -538,8 +536,8 @@ public enum NodeLedger {
         _ book: BudgetBook,
         nodeId: NodeId,
         name: String,
-        monthlyTarget: Decimal? = nil,
-        balanceTarget: Decimal? = nil,
+        monthlyTarget: Money? = nil,
+        balanceTarget: Money? = nil,
         targetDate: String? = nil
     ) -> (ops: BookOps, categoryID: String) {
         let groupID = groupForNode(nodeId)
@@ -566,9 +564,9 @@ public enum NodeLedger {
         _ book: BudgetBook,
         nodeId: NodeId,
         name: String,
-        balance: Decimal,
+        balance: Money,
         apr: Decimal,
-        minPayment: Decimal,
+        minPayment: Money,
         today: String
     ) -> (ops: BookOps, accountID: String) {
         let account = Account(
@@ -581,14 +579,14 @@ public enum NodeLedger {
         )
         var ops = BookOps()
         ops.addAccounts = [account]
-        if balance != 0 {
+        if balance != .zero {
             ops.addTxns = [
                 Txn(
                     id: startingTxnID(account.id),
                     accountId: account.id,
                     date: today,
                     payee: "Starting balance",
-                    amount: -abs(balance)
+                    amount: -balance.magnitude
                 ),
             ]
         }

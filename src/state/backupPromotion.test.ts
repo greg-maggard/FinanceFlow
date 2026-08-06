@@ -6,8 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // (the previous live document, not the one about to be written) and the
 // right timing (fresh module registry per test, same rationale as
 // multiTab.test.ts: store.ts's module-level writeSeq/lastSaved state is not
-// meant to be exercised across tests).
-const BACKUP_KEY = "financeflow:backup:v3";
+// meant to be exercised across tests). The key is version-derived, so a fresh
+// (v4) document promotes under the v4 key -- see storage.ts.
+const BACKUP_KEY = "financeflow:backup:v4";
 
 describe("rolling backup key wired into the persistence write path (w3-backup-key)", () => {
   beforeEach(() => {

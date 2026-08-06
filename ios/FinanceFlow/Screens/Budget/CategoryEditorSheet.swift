@@ -19,7 +19,7 @@ struct CategoryEditorSheet: View {
 
     @State private var name = ""
     @State private var goalKind: GoalKind = .none
-    @State private var goalAmount: Decimal = 0
+    @State private var goalAmount: Money = .zero
 
     var body: some View {
         NavigationStack {
@@ -79,23 +79,23 @@ struct CategoryEditorSheet: View {
 
     private func seed() {
         name = category.name
-        if let monthly = category.monthlyTarget, monthly > 0 {
+        if let monthly = category.monthlyTarget, monthly > .zero {
             goalKind = .monthly
             goalAmount = monthly
-        } else if let total = category.balanceTarget, total > 0 {
+        } else if let total = category.balanceTarget, total > .zero {
             goalKind = .total
             goalAmount = total
         } else {
             goalKind = .none
-            goalAmount = 0
+            goalAmount = .zero
         }
     }
 
     private func commit() {
         var updated = category
         updated.name = trimmedName
-        updated.monthlyTarget = goalKind == .monthly && goalAmount > 0 ? goalAmount : nil
-        updated.balanceTarget = goalKind == .total && goalAmount > 0 ? goalAmount : nil
+        updated.monthlyTarget = goalKind == .monthly && goalAmount > .zero ? goalAmount : nil
+        updated.balanceTarget = goalKind == .total && goalAmount > .zero ? goalAmount : nil
         store.updateCategory(updated)
         dismiss()
     }

@@ -164,14 +164,16 @@ describe("monthlyBudgetSummary", () => {
     expect(monthlyBudgetSummary(s, MONTH)).toEqual({ target: 1960, funded: 1930 });
   });
 
-  it("summary sums stay exact across fractional amounts and nodes", () => {
+  it("summary sums stay exact across cent-sized amounts and nodes", () => {
+    // 10c + 20c across two nodes: 0.1 + 0.2 in the old dollars representation,
+    // exactly 30 in v4's integer cents.
     const s = seeded(
       [
-        cat({ id: "Rent", nodeId: "Rent", monthlyTarget: 0.1 }),
-        cat({ id: "Food", nodeId: "Food", monthlyTarget: 0.2 }),
+        cat({ id: "Rent", nodeId: "Rent", monthlyTarget: 10 }),
+        cat({ id: "Food", nodeId: "Food", monthlyTarget: 20 }),
       ],
-      { Rent: 0.1, Food: 0.2 },
+      { Rent: 10, Food: 20 },
     );
-    expect(monthlyBudgetSummary(s, MONTH)).toEqual({ target: 0.3, funded: 0.3 });
+    expect(monthlyBudgetSummary(s, MONTH)).toEqual({ target: 30, funded: 30 });
   });
 });

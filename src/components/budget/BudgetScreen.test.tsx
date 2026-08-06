@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { useStore } from "../../state/store";
-import { RTA_CATEGORY_ID, UNCATEGORIZED_CATEGORY_ID } from "../../state/schema";
+import { RTA_CATEGORY_ID, UNCATEGORIZED_CATEGORY_ID, cents } from "../../state/schema";
 import { bookIntegrity, isoDay, snapshot } from "../../budget/ledger";
 import { ymKey } from "../../state/recurring";
 import { BudgetScreen } from "./BudgetScreen";
@@ -27,8 +27,8 @@ function seed(income: number) {
   s.addCategory(groupId, "Rent");
   s.addCategory(groupId, "Groceries");
   for (const [name, monthlyTarget] of [
-    ["Rent", 1200],
-    ["Groceries", 400],
+    ["Rent", 120_000],
+    ["Groceries", 40_000],
   ] as const) {
     const cat = useStore.getState().budget.categories.find((c) => c.name === name)!;
     s.updateCategory({ ...cat, monthlyTarget });
@@ -45,7 +45,7 @@ describe("BudgetScreen: fund this month", () => {
   });
 
   it("an untouched month says so instead of showing a wall of empty bars", () => {
-    seed(2000);
+    seed(200_000);
     render(<BudgetScreen />);
     expect(screen.getByText("Nothing assigned yet this month")).toBeTruthy();
     expect(screen.queryByText("Monthly target")).toBeNull();
@@ -53,7 +53,7 @@ describe("BudgetScreen: fund this month", () => {
     // The tap asks first, naming the total and the envelope count.
     fireEvent.click(screen.getAllByRole("button", { name: "Fund this month" })[0]);
     expect(screen.getByText("Move $1,600 into 2 envelopes?")).toBeTruthy();
-    expect(snapshot(useStore.getState().budget, MONTH).readyToAssign).toBe(2000);
+    expect(snapshot(useStore.getState().budget, MONTH).readyToAssign).toBe(200_000);
 
     fireEvent.click(screen.getByRole("button", { name: "Move $1,600" }));
 
@@ -61,9 +61,9 @@ describe("BudgetScreen: fund this month", () => {
     const byName = Object.fromEntries(
       useStore.getState().budget.categories.map((c) => [c.name, snap.categories[c.id]!]),
     );
-    expect(byName.Rent.available).toBe(1200);
-    expect(byName.Groceries.available).toBe(400);
-    expect(snap.readyToAssign).toBe(400);
+    expect(byName.Rent.available).toBe(120_000);
+    expect(byName.Groceries.available).toBe(40_000);
+    expect(snap.readyToAssign).toBe(40_000);
     expect(bookIntegrity(useStore.getState().budget, MONTH).drift).toBe(0);
     // The month is funded: the prompt gives way to the bars it replaced.
     expect(screen.queryByText("Nothing assigned yet this month")).toBeNull();
@@ -75,19 +75,19 @@ describe("BudgetScreen: fund this month", () => {
   });
 
   it("cancelling the confirmation moves nothing", () => {
-    seed(2000);
+    seed(200_000);
     render(<BudgetScreen />);
     fireEvent.click(screen.getAllByRole("button", { name: "Fund this month" })[0]);
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
     expect(screen.queryByText("Move $1,600 into 2 envelopes?")).toBeNull();
     expect(useStore.getState().budget.assignments[MONTH]).toBeUndefined();
-    expect(snapshot(useStore.getState().budget, MONTH).readyToAssign).toBe(2000);
+    expect(snapshot(useStore.getState().budget, MONTH).readyToAssign).toBe(200_000);
     expect(screen.getAllByRole("button", { name: "Fund this month" }).length).toBeGreaterThan(0);
   });
 
   it("reports what the money did not cover", () => {
-    seed(1300);
+    seed(130_000);
     render(<BudgetScreen />);
     fireEvent.click(screen.getAllByRole("button", { name: "Fund this month" })[0]);
     fireEvent.click(screen.getByRole("button", { name: "Move $1,300" }));
@@ -110,7 +110,7 @@ describe("BudgetScreen: fund this month", () => {
   });
 
   it("spending a funded envelope down does not re-arm the button", () => {
-    seed(2000);
+    seed(200_000);
     render(<BudgetScreen />);
     fireEvent.click(screen.getAllByRole("button", { name: "Fund this month" })[0]);
     fireEvent.click(screen.getByRole("button", { name: "Move $1,600" }));
@@ -122,7 +122,7 @@ describe("BudgetScreen: fund this month", () => {
       accountId: "checking",
       date: `${MONTH}-25`,
       payee: "Market",
-      amount: -400,
+      amount: -40_000,
       categoryId: groceries.id,
       source: "manual",
     });
@@ -132,7 +132,7 @@ describe("BudgetScreen: fund this month", () => {
     const snap = snapshot(useStore.getState().budget, MONTH);
     expect(snap.categories[groceries.id]!.available).toBe(0);
     expect(screen.queryByRole("button", { name: "Fund this month" })).toBeNull();
-    expect(snap.readyToAssign).toBe(400);
+    expect(snap.readyToAssign).toBe(40_000);
     expect(bookIntegrity(useStore.getState().budget, MONTH).drift).toBe(0);
   });
 });
@@ -165,7 +165,7 @@ describe("BudgetScreen: today strip (w2-today-strip finding 9)", () => {
       accountId: "checking",
       date: isoDay(),
       payee: "Misc",
-      amount: -12,
+      amount: -1200,
       categoryId: UNCATEGORIZED_CATEGORY_ID,
       source: "manual",
     });
@@ -178,6 +178,6 @@ describe("BudgetScreen: today strip (w2-today-strip finding 9)", () => {
     expect(strip.children).toHaveLength(3);
     const thirdTile = strip.children[2] as HTMLElement;
     expect(within(thirdTile).getByText("Uncategorized")).toBeTruthy();
-    expect(within(thirdTile).getByText(dollars(-12))).toBeTruthy();
+    expect(within(thirdTile).getByText(dollars(cents(-1200)))).toBeTruthy();
   });
 });

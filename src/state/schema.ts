@@ -16,8 +16,51 @@ export type Decisions = Record<DecisionId, Decision>;
 
 export type Source = "manual" | "plaid" | "ynab";
 
+// ---------------------------------------------------------------------------
+// Money (v4): integer cents, everywhere.
+//
+// Before v4 money was dollars-as-`number` on the wire and every arithmetic
+// site had to remember to route through a `toCents` helper. That was exact
+// only by discipline, and it was not the same discipline iOS used (exact
+// `Decimal`), so a document carrying a sub-cent amount — which nothing stopped
+// the input fields from producing — could render a different `ready` flag on
+// each platform. Storing integer cents makes sub-cent states unrepresentable:
+// both platforms are deterministic by construction.
+//
+// The brand is erased at runtime (a `Cents` IS a `number`); it exists so the
+// compiler catches a dollars value reaching a cents parameter during and after
+// the port. `migrate()` casts once, at the boundary.
+
+/** Integer cents. Runtime representation is a plain `number`. */
+export type Cents = number & { readonly __cents?: unique symbol };
+
+/** Brand an integer as `Cents`. No rounding — see `centsFromDollars`. */
+export const cents = (n: number): Cents => n as Cents;
+
+/**
+ * The one rounding rule (money-migration-v4.md §4), shared by the v3→v4
+ * migration and both platforms' input parsing:
+ *
+ *     cents(d) = floor(d * 100 + 0.5)     // evaluated in IEEE-754 double
+ *
+ * Spelled as the formula rather than `Math.round` so the Swift mirror is
+ * literally the same expression. A half cent goes toward +infinity on both
+ * platforms, so -1234.5 dollars is -123450 cents and -12.345 is -1234 (NOT
+ * -1235 — do not substitute a round-half-away-from-zero rule on either side).
+ */
+export function centsFromDollars(dollars: number): Cents {
+  // A JSON document cannot spell NaN or Infinity, but it CAN spell a literal
+  // too large for a double (`1e400` parses as Infinity). Migration must never
+  // turn unreadable input into a NaN that then serializes as `null` and eats
+  // the field — clamp to zero, which is at least a number the ledger can
+  // reason about. The Swift mirror does the same, where an unguarded
+  // `Int(...)` conversion would trap instead.
+  if (!Number.isFinite(dollars)) return cents(0);
+  return cents(Math.floor(dollars * 100 + 0.5));
+}
+
 export type SourcedNumber = {
-  value: number;
+  value: Cents;
   source: Source;
   lastSyncedAt?: string;
 };
@@ -32,15 +75,15 @@ export type NodeDataMap = {
   IRA: {
     type: "roth" | "traditional";
     ytdContribution: SourcedNumber;
-    annualLimit: number;
+    annualLimit: Cents;
   };
   Increase401k: { currentPct: number; targetPct: number };
   HSA: {
     coverage: "self" | "family";
     ytdContribution: SourcedNumber;
-    annualLimit: number;
+    annualLimit: Cents;
   };
-  College: { monthlyContribution: number; targetAge?: number };
+  College: { monthlyContribution: Cents; targetAge?: number };
 };
 
 export type NodeId =
@@ -86,19 +129,19 @@ export type NodeState = {
 };
 
 export type Settings = {
-  monthlyExpenses?: number;
-  preTaxIncome?: number;
-  iraAnnualLimit: number;
-  hsaSelfLimit: number;
-  hsaFamilyLimit: number;
+  monthlyExpenses?: Cents;
+  preTaxIncome?: Cents;
+  iraAnnualLimit: Cents;
+  hsaSelfLimit: Cents;
+  hsaFamilyLimit: Cents;
 };
 
 // ---------------------------------------------------------------------------
 // Budget book (v2): the zero-based envelope core.
 //
-// Money stays dollars-as-`number` on the wire (matching every other field);
-// all arithmetic must go through the cents-exact helpers in
-// `src/budget/ledger.ts` so float drift can never corrupt envelope math.
+// Money is integer `Cents` in memory and on the wire (v4). Every sum below is
+// exact integer arithmetic — there is no rounding step left to forget, and no
+// representable value the iOS mirror can read differently.
 
 export type AccountKind = "checking" | "savings" | "cash" | "credit" | "loan" | "tracking";
 
@@ -106,9 +149,9 @@ export type Account = {
   id: string;
   name: string;
   kind: AccountKind;
-  /** Annual rate, for credit/loan accounts. */
+  /** Annual rate, for credit/loan accounts. NOT money — never converted. */
   apr?: number;
-  minPayment?: number;
+  minPayment?: Cents;
   closed?: boolean;
   source: Source;
   plaidAccountId?: string;
@@ -129,7 +172,7 @@ export type Txn = {
   /** Local calendar date, "YYYY-MM-DD". */
   date: string;
   payee?: string;
-  amount: number;
+  amount: Cents;
   categoryId?: string;
   transferAccountId?: string;
   /** The other row of a transfer pair, so the pair can be edited/deleted atomically. */
@@ -151,9 +194,9 @@ export type Category = {
   name: string;
   order: number;
   /** Needed-for-spending target per month. */
-  monthlyTarget?: number;
+  monthlyTarget?: Cents;
   /** Save-a-total target (purchase goals, EF buckets). */
-  balanceTarget?: number;
+  balanceTarget?: Cents;
   targetDate?: string;
   hidden?: boolean;
   /** Flowchart node this category reports into, if any. */
@@ -214,8 +257,8 @@ export type BudgetBook = {
   transactions: Txn[];
   groups: CategoryGroup[];
   categories: Category[];
-  /** assignments[month][categoryId] = dollars assigned to that envelope in that month. */
-  assignments: Record<MonthKey, Record<string, number>>;
+  /** assignments[month][categoryId] = cents assigned to that envelope in that month. */
+  assignments: Record<MonthKey, Record<string, Cents>>;
 };
 
 export function emptyBudgetBook(): BudgetBook {
@@ -228,7 +271,7 @@ export function newId(): string {
 }
 
 export type AppState = {
-  version: 3;
+  version: 4;
   settings: Settings;
   decisions: Decisions;
   nodes: Record<NodeId, NodeState>;
@@ -240,9 +283,9 @@ export type AppState = {
 export const DEFAULT_SETTINGS: Settings = {
   monthlyExpenses: undefined,
   preTaxIncome: undefined,
-  iraAnnualLimit: 7000,
-  hsaSelfLimit: 4300,
-  hsaFamilyLimit: 8550,
+  iraAnnualLimit: cents(700_000),
+  hsaSelfLimit: cents(430_000),
+  hsaFamilyLimit: cents(855_000),
 };
 
 export function emptyNodeState(): NodeState {
@@ -263,7 +306,7 @@ export function makeInitialState(): AppState {
   const nodes = {} as Record<NodeId, NodeState>;
   for (const id of ids) nodes[id] = emptyNodeState();
   return {
-    version: 3,
+    version: 4,
     settings: { ...DEFAULT_SETTINGS },
     budget: emptyBudgetBook(),
     shownCelebrations: [],
@@ -284,12 +327,17 @@ export function makeInitialState(): AppState {
   };
 }
 
-export function emergencyFundTarget(monthlyExpenses?: number): number {
-  if (!monthlyExpenses || monthlyExpenses <= 0) return 1000;
-  return Math.max(1000, monthlyExpenses);
+/** The $1,000 starter gate, in cents. */
+const SMALL_EF_FLOOR = 100_000;
+
+export function emergencyFundTarget(monthlyExpenses?: Cents): Cents {
+  if (!monthlyExpenses || monthlyExpenses <= 0) return cents(SMALL_EF_FLOOR);
+  return cents(Math.max(SMALL_EF_FLOOR, monthlyExpenses));
 }
 
-export function bigEmergencyFundTarget(months: number, monthlyExpenses?: number): number {
-  if (!monthlyExpenses || monthlyExpenses <= 0) return 0;
-  return months * monthlyExpenses;
+// `months` is a small whole number and `monthlyExpenses` is already an
+// integer, so the product is integer-exact with no rounding step.
+export function bigEmergencyFundTarget(months: number, monthlyExpenses?: Cents): Cents {
+  if (!monthlyExpenses || monthlyExpenses <= 0) return cents(0);
+  return cents(months * monthlyExpenses);
 }

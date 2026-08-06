@@ -26,8 +26,8 @@ struct ProgressTests {
         _ id: String,
         _ nodeId: NodeId,
         group: String = "g:bills",
-        monthlyTarget: Decimal? = nil,
-        balanceTarget: Decimal? = nil
+        monthlyTarget: Money? = nil,
+        balanceTarget: Money? = nil
     ) -> BudgetCategory {
         BudgetCategory(
             id: id, groupId: group, name: id,
@@ -44,7 +44,7 @@ struct ProgressTests {
             ]
             $0.budget.assignments = [month: ["Rent:base": 1500, "Rent:parking": 100]]
         }
-        guard case let .goal(value, max, ready) = progressOf(s, .Rent, month: month) else {
+        guard case let .goal(value, max, _, ready) = progressOf(s, .Rent, month: month) else {
             Issue.record("expected .goal"); return
         }
         #expect(max == 1700)
@@ -52,24 +52,24 @@ struct ProgressTests {
         #expect(ready == false)
     }
 
-    @Test("exact decimal sums meet the target with no floating-point drift")
+    @Test("cent-sized sums meet the target exactly (v4: nothing smaller exists)")
     func exactSumsAreReady() {
-        // As `Double`, 0.7 + 0.1 == 0.7999999999999999 — a hair below 0.8 on
-        // both sides of the comparison, so `ready` would need a tolerance to
-        // not get stuck false. The ledger sums exact `Decimal`s, so target and
-        // funded are both exactly 0.8 and plain `>=` is enough.
+        // 70c + 10c. As dollars-as-`Double` this was 0.7 + 0.1 ==
+        // 0.7999999999999999 — a hair below 0.8 on both sides of the
+        // comparison, so `ready` would need a tolerance to not get stuck false.
+        // In integer cents the sum is exactly 80 and plain `>=` is enough.
         let s = seeded {
             $0.budget.categories = [
-                cat("Food:a", .Food, monthlyTarget: Decimal(string: "0.7")!),
-                cat("Food:b", .Food, monthlyTarget: Decimal(string: "0.1")!),
+                cat("Food:a", .Food, monthlyTarget: 70),
+                cat("Food:b", .Food, monthlyTarget: 10),
             ]
-            $0.budget.assignments = [month: ["Food:a": Decimal(string: "0.7")!, "Food:b": Decimal(string: "0.1")!]]
+            $0.budget.assignments = [month: ["Food:a": 70, "Food:b": 10]]
         }
-        guard case let .goal(value, max, ready) = progressOf(s, .Food, month: month) else {
+        guard case let .goal(value, max, _, ready) = progressOf(s, .Food, month: month) else {
             Issue.record("expected .goal"); return
         }
-        #expect(max == 0.8)
-        #expect(value == 0.8)
+        #expect(max == 80)
+        #expect(value == 80)
         #expect(ready == true)
     }
 
@@ -83,7 +83,7 @@ struct ProgressTests {
             $0.budget.categories = [cat("Rent:base", .Rent, monthlyTarget: 1800)]
             $0.budget.assignments = ["2026-05": ["Rent:base": 1800]]
         }
-        guard case let .goal(value, max, ready) = progressOf(s, .Rent, month: month) else {
+        guard case let .goal(value, max, _, ready) = progressOf(s, .Rent, month: month) else {
             Issue.record("expected .goal"); return
         }
         #expect(max == 1800)
@@ -100,7 +100,7 @@ struct ProgressTests {
             ]
             $0.budget.assignments = [month: ["Rent:base": 1700]]
         }
-        guard case let .goal(value, max, ready) = progressOf(s, .Rent, month: month) else {
+        guard case let .goal(value, max, _, ready) = progressOf(s, .Rent, month: month) else {
             Issue.record("expected .goal"); return
         }
         #expect(max == 1700)
@@ -121,7 +121,7 @@ struct ProgressTests {
     }
 
     /// A Visa with its $4,200 opening balance and `paidSoFar` paid back.
-    private func debtState(paidSoFar: Decimal) -> AppState {
+    private func debtState(paidSoFar: Money) -> AppState {
         state {
             $0.budget.accounts = [
                 Account(id: "debt:d1", name: "Visa", kind: .loan, apr: Decimal(string: "24.99")!, nodeId: .HighDebt),
@@ -129,7 +129,7 @@ struct ProgressTests {
             $0.budget.transactions = [
                 Txn(id: NodeLedger.startingTxnID("debt:d1"), accountId: "debt:d1", date: "2026-01-05", amount: -4200),
             ]
-            if paidSoFar > 0 {
+            if paidSoFar > .zero {
                 $0.budget.transactions.append(Txn(accountId: "debt:d1", date: "2026-03-01", amount: paidSoFar))
             }
         }
@@ -137,7 +137,7 @@ struct ProgressTests {
 
     @Test("debts: the payoff bar climbs continuously; ready only when all cleared")
     func debts() {
-        guard case let .goal(value, max, ready) = progressOf(debtState(paidSoFar: 1200), .HighDebt, month: month) else {
+        guard case let .goal(value, max, _, ready) = progressOf(debtState(paidSoFar: 1200), .HighDebt, month: month) else {
             Issue.record("expected .goal"); return
         }
         #expect(max == 4200)
@@ -145,7 +145,7 @@ struct ProgressTests {
         #expect(ready == false)
 
         let allPaid = debtState(paidSoFar: 4200)
-        #expect(progressOf(allPaid, .HighDebt, month: month) == .goal(value: 4200, max: 4200, ready: true))
+        #expect(progressOf(allPaid, .HighDebt, month: month) == .goal(value: 4200, max: 4200, unit: .cents, ready: true))
     }
 
     @Test("no linked debt accounts is not ready")
@@ -156,15 +156,15 @@ struct ProgressTests {
     @Test("SmallEF target is max($1000, one month of expenses)")
     func smallEF() {
         let s = seeded {
-            $0.settings.monthlyExpenses = 3000
+            $0.settings.monthlyExpenses = 300_000   // $3,000/mo
             $0.budget.categories = [cat("SmallEF", .SmallEF, group: "g:ef")]
-            $0.budget.assignments = [month: ["SmallEF": 3000]]
+            $0.budget.assignments = [month: ["SmallEF": 300_000]]
         }
-        guard case let .goal(value, max, ready) = progressOf(s, .SmallEF, month: month) else {
+        guard case let .goal(value, max, _, ready) = progressOf(s, .SmallEF, month: month) else {
             Issue.record("expected .goal"); return
         }
-        #expect(max == 3000)
-        #expect(value == 3000)
+        #expect(max == 300_000)
+        #expect(value == 300_000)
         #expect(ready == true)
     }
 
@@ -172,69 +172,69 @@ struct ProgressTests {
     func smallEFFloor() {
         let s = seeded {
             $0.budget.categories = [cat("SmallEF", .SmallEF, group: "g:ef")]
-            $0.budget.assignments = [month: ["SmallEF": 1000]]
+            $0.budget.assignments = [month: ["SmallEF": 100_000]]
         }
-        guard case let .goal(_, max, ready) = progressOf(s, .SmallEF, month: month) else {
+        guard case let .goal(_, max, _, ready) = progressOf(s, .SmallEF, month: month) else {
             Issue.record("expected .goal"); return
         }
-        #expect(max == 1000)
+        #expect(max == 100_000)   // the $1,000 starter gate
         #expect(ready == true)
     }
 
     @Test("SmallEF keeps the computed gate even when bucket targets exceed it")
     func smallEFGate() {
         let s = seeded {
-            $0.settings.monthlyExpenses = 3000
-            $0.budget.categories = [cat("SmallEF:medical", .SmallEF, group: "g:ef", balanceTarget: 9000)]
-            $0.budget.assignments = [month: ["SmallEF:medical": 800]]
+            $0.settings.monthlyExpenses = 300_000   // $3,000/mo
+            $0.budget.categories = [cat("SmallEF:medical", .SmallEF, group: "g:ef", balanceTarget: 900_000)]
+            $0.budget.assignments = [month: ["SmallEF:medical": 80_000]]
         }
-        guard case let .goal(value, max, ready) = progressOf(s, .SmallEF, month: month) else {
+        guard case let .goal(value, max, _, ready) = progressOf(s, .SmallEF, month: month) else {
             Issue.record("expected .goal"); return
         }
         // Big bucket ambitions live on BigEF; the $1k-or-one-month starter
         // gate never inflates, so the first milestone stays reachable.
-        #expect(max == 3000)
-        #expect(value == 800)
+        #expect(max == 300_000)
+        #expect(value == 80_000)
         #expect(ready == false)
     }
 
     @Test("EF buckets: balance is the bucket sum; under-allocated buckets keep the computed target")
     func efBucketsUnderComputed() {
         let s = seeded {
-            $0.settings.monthlyExpenses = 3000
+            $0.settings.monthlyExpenses = 300_000   // $3,000/mo
             $0.budget.categories = [
-                cat("SmallEF:medical", .SmallEF, group: "g:ef", balanceTarget: 1000),
-                cat("SmallEF:car", .SmallEF, group: "g:ef", balanceTarget: 500),
+                cat("SmallEF:medical", .SmallEF, group: "g:ef", balanceTarget: 100_000),
+                cat("SmallEF:car", .SmallEF, group: "g:ef", balanceTarget: 50_000),
             ]
-            $0.budget.assignments = [month: ["SmallEF:medical": 800, "SmallEF:car": 500]]
+            $0.budget.assignments = [month: ["SmallEF:medical": 80_000, "SmallEF:car": 50_000]]
         }
-        guard case let .goal(value, max, ready) = progressOf(s, .SmallEF, month: month) else {
+        guard case let .goal(value, max, _, ready) = progressOf(s, .SmallEF, month: month) else {
             Issue.record("expected .goal"); return
         }
-        // Bucket targets (1500) are below one month of expenses (3000): the
-        // flowchart milestone wins, so naming buckets never shrinks the goal.
-        #expect(max == 3000)
-        #expect(value == 1300)
+        // Bucket targets ($1,500) are below one month of expenses ($3,000):
+        // the flowchart milestone wins, so naming buckets never shrinks the goal.
+        #expect(max == 300_000)
+        #expect(value == 130_000)
         #expect(ready == false)
     }
 
     @Test("EF buckets: targets beyond the computed milestone grow the goal")
     func efBucketsOverComputed() {
         let s = seeded {
-            $0.settings.monthlyExpenses = 3000
+            $0.settings.monthlyExpenses = 300_000   // $3,000/mo
             $0.nodes[.BigEF]?.data = .bigEF(BigEFData(targetMonths: 3))
             $0.budget.categories = [
-                cat("BigEF:medical", .BigEF, group: "g:ef", balanceTarget: 6000),
-                cat("BigEF:home", .BigEF, group: "g:ef", balanceTarget: 5000),
+                cat("BigEF:medical", .BigEF, group: "g:ef", balanceTarget: 600_000),
+                cat("BigEF:home", .BigEF, group: "g:ef", balanceTarget: 500_000),
             ]
-            $0.budget.assignments = [month: ["BigEF:medical": 6000, "BigEF:home": 4000]]
+            $0.budget.assignments = [month: ["BigEF:medical": 600_000, "BigEF:home": 400_000]]
         }
-        guard case let .goal(value, max, ready) = progressOf(s, .BigEF, month: month) else {
+        guard case let .goal(value, max, _, ready) = progressOf(s, .BigEF, month: month) else {
             Issue.record("expected .goal"); return
         }
-        // Σ bucket targets (11000) exceeds 3 × 3000: the user's real goal shows.
-        #expect(max == 11000)
-        #expect(value == 10000)
+        // Σ bucket targets ($11,000) exceeds 3 × $3,000: the real goal shows.
+        #expect(max == 1_100_000)
+        #expect(value == 1_000_000)
         #expect(ready == false)
     }
 
@@ -242,37 +242,37 @@ struct ProgressTests {
     func bigEFBucketsNoExpenses() {
         let s = seeded {
             $0.nodes[.BigEF]?.data = .bigEF(BigEFData(targetMonths: 6))
-            $0.budget.categories = [cat("BigEF:car", .BigEF, group: "g:ef", balanceTarget: 4000)]
-            $0.budget.assignments = [month: ["BigEF:car": 4000]]
+            $0.budget.categories = [cat("BigEF:car", .BigEF, group: "g:ef", balanceTarget: 400_000)]
+            $0.budget.assignments = [month: ["BigEF:car": 400_000]]
         }
-        guard case let .goal(value, max, ready) = progressOf(s, .BigEF, month: month) else {
+        guard case let .goal(value, max, _, ready) = progressOf(s, .BigEF, month: month) else {
             Issue.record("expected .goal"); return
         }
-        #expect(max == 4000)
-        #expect(value == 4000)
+        #expect(max == 400_000)
+        #expect(value == 400_000)
         #expect(ready == true)
     }
 
     @Test("BigEF without balance targets keeps the computed goal")
     func bigEFSingleBalance() {
         let s = seeded {
-            $0.settings.monthlyExpenses = 3000
+            $0.settings.monthlyExpenses = 300_000   // $3,000/mo
             $0.nodes[.BigEF]?.data = .bigEF(BigEFData(targetMonths: 6))
             $0.budget.categories = [cat("BigEF", .BigEF, group: "g:ef")]
-            $0.budget.assignments = [month: ["BigEF": 18000]]
+            $0.budget.assignments = [month: ["BigEF": 1_800_000]]
         }
-        guard case let .goal(value, max, ready) = progressOf(s, .BigEF, month: month) else {
+        guard case let .goal(value, max, _, ready) = progressOf(s, .BigEF, month: month) else {
             Issue.record("expected .goal"); return
         }
-        #expect(max == 18000)
-        #expect(value == 18000)
+        #expect(max == 1_800_000)
+        #expect(value == 1_800_000)
         #expect(ready == true)
     }
 
     @Test("IRA is ready at the annual limit")
     func ira() {
         let s = state {
-            $0.nodes[.IRA]?.data = .ira(IRAData(type: .roth, ytdContribution: .manual(7000), annualLimit: 7000))
+            $0.nodes[.IRA]?.data = .ira(IRAData(type: .roth, ytdContribution: .manual(700_000), annualLimit: 700_000))
         }
         #expect(progressOf(s, .IRA).ready == true)
     }
@@ -286,7 +286,7 @@ struct ProgressTests {
             ]
             $0.budget.assignments = [month: ["SavePurchase:down": 15000, "SavePurchase:car": 12000]]
         }
-        guard case let .goal(value, max, ready) = progressOf(s, .SavePurchase, month: month) else {
+        guard case let .goal(value, max, _, ready) = progressOf(s, .SavePurchase, month: month) else {
             Issue.record("expected .goal"); return
         }
         #expect(max == 52000)
@@ -300,7 +300,7 @@ struct ProgressTests {
             $0.budget.categories = [cat("SavePurchase:car", .SavePurchase, group: "g:goals", balanceTarget: 12000)]
             $0.budget.assignments = [month: ["SavePurchase:car": 12000]]
         }
-        guard case let .goal(value, max, ready) = progressOf(s, .SavePurchase, month: month) else {
+        guard case let .goal(value, max, _, ready) = progressOf(s, .SavePurchase, month: month) else {
             Issue.record("expected .goal"); return
         }
         #expect(max == 12000)

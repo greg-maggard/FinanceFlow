@@ -74,7 +74,7 @@ private struct TxnRow: View {
                     VStack(alignment: .trailing, spacing: theme.spacing.xs) {
                         Text(CurrencyFormat.string(txn.amount))
                             .font(theme.typography.callout)
-                            .foregroundStyle(txn.amount > 0 ? theme.colors.success : theme.colors.textPrimary)
+                            .foregroundStyle(txn.amount > .zero ? theme.colors.success : theme.colors.textPrimary)
                         Text(TxnDate.string(txn.date))
                             .font(theme.typography.caption)
                             .foregroundStyle(theme.colors.textTertiary)
@@ -88,10 +88,10 @@ private struct TxnRow: View {
 
     private var title: String {
         if let other = txn.transferAccountId {
-            return txn.amount < 0 ? "Transfer → \(accountName(other))" : "Transfer ← \(accountName(other))"
+            return txn.amount < .zero ? "Transfer → \(accountName(other))" : "Transfer ← \(accountName(other))"
         }
         if let payee = txn.payee, !payee.isEmpty { return payee }
-        return txn.amount > 0 ? "Income" : "Spending"
+        return txn.amount > .zero ? "Income" : "Spending"
     }
 
     private var subtitle: String {

@@ -18,7 +18,7 @@ public struct AppState: Equatable, Sendable {
     public var earnedMedals: [Int]
 
     public init(
-        version: Int = 3,
+        version: Int = 4,
         settings: Settings,
         decisions: [DecisionId: Decision],
         nodes: [NodeId: NodeState],
@@ -41,7 +41,7 @@ public struct AppState: Equatable, Sendable {
         var nodes: [NodeId: NodeState] = [:]
         for id in NodeId.allCases { nodes[id] = NodeState() }
         return AppState(
-            version: 3,
+            version: 4,
             settings: .default,
             decisions: [:],
             nodes: nodes,

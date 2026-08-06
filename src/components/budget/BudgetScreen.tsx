@@ -2,9 +2,9 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
 import { useStore } from "../../state/store";
 import { useUI } from "../../state/uiStore";
-import type { MonthKey } from "../../state/schema";
-import { UNCATEGORIZED_CATEGORY_ID } from "../../state/schema";
-import { assignedAfter, fromCents, snapshot, toCents } from "../../budget/ledger";
+import type { Cents, MonthKey } from "../../state/schema";
+import { UNCATEGORIZED_CATEGORY_ID, cents } from "../../state/schema";
+import { assignedAfter, snapshot } from "../../budget/ledger";
 import { planFundMonth, type FundMonthPlan } from "../../budget/nodeLedger";
 import { ymKey } from "../../state/recurring";
 import { M } from "../../theme/motion";
@@ -51,17 +51,16 @@ function MonthArrow({
   );
 }
 
-function RtaPill({ amount }: { amount: number }) {
-  const cents = Math.round(amount * 100);
+function RtaPill({ amount }: { amount: Cents }) {
   const palette =
-    cents > 0
+    amount > 0
       ? {
           background: "rgba(52, 211, 153, 0.14)",
           border: "1px solid rgba(52, 211, 153, 0.38)",
           color: "#a7f3d0",
           boxShadow: "0 0 24px rgba(52, 211, 153, 0.22)",
         }
-      : cents < 0
+      : amount < 0
         ? {
             background: "rgba(248, 113, 113, 0.12)",
             border: "1px solid rgba(248, 113, 113, 0.38)",
@@ -79,7 +78,7 @@ function RtaPill({ amount }: { amount: number }) {
         Ready to Assign
       </span>
       <span className="text-xl font-semibold tabular-nums">
-        {cents === 0 ? "All assigned" : dollars(amount)}
+        {amount === 0 ? "All assigned" : dollars(amount)}
       </span>
     </div>
   );
@@ -117,7 +116,7 @@ function TodayStrip({
         <StripStat label="On-budget cash" value={onBudgetCash} />
         {category && <StripStat label={category.name} value={category.available} />}
       </div>
-      {Math.round(ahead * 100) !== 0 && (
+      {ahead !== 0 && (
         <div className="mt-2 truncate border-t border-white/5 pt-2 text-[11px] tabular-nums text-white/50">
           {dollars(ahead)} assigned in future months
         </div>
@@ -126,8 +125,8 @@ function TodayStrip({
   );
 }
 
-function StripStat({ label, value }: { label: string; value: number }) {
-  const negative = Math.round(value * 100) < 0;
+function StripStat({ label, value }: { label: string; value: Cents }) {
+  const negative = value < 0;
   return (
     <div className="min-w-0">
       <div className="truncate text-[10px] font-medium uppercase tracking-[0.14em] text-white/50">
@@ -257,12 +256,12 @@ export function BudgetScreen() {
     return { name: cat.name, available: snap.categories[stripCategoryId]?.available ?? 0 };
   }, [budget.categories, stripCategoryId, snap]);
   // "Cash on budget" = every dollar still sitting in an envelope plus what's
-  // unassigned — the two terms `snap` already carries, summed in cents to
-  // stay exact.
+  // unassigned — the two terms `snap` already carries. Both are integer cents,
+  // so the sum is exact.
   const onBudgetCash = useMemo(() => {
-    let cents = toCents(snap.readyToAssign);
-    for (const c of Object.values(snap.categories)) cents += toCents(c.available);
-    return fromCents(cents);
+    let total: number = snap.readyToAssign;
+    for (const c of Object.values(snap.categories)) total += c.available;
+    return cents(total);
   }, [snap]);
 
   // Assignments are keyed per month, so every month opens with every envelope

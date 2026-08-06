@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useStore } from "../state/store";
 import { useUI } from "../state/uiStore";
+import type { Cents } from "../state/schema";
 import { bookIntegrity } from "../budget/ledger";
 import { ymKey } from "../state/recurring";
 import { downloadJson, importJson } from "../state/io";
@@ -158,8 +159,9 @@ function DangerZone() {
   );
 }
 
-const money = (n: number) =>
-  n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+/** Integer cents -> "$1,234.56". */
+const money = (c: Cents) =>
+  (c / 100).toLocaleString("en-US", { style: "currency", currency: "USD" });
 
 function relativeTime(from: number, now: number): string {
   const seconds = Math.max(0, Math.round((now - from) / 1000));
@@ -238,7 +240,7 @@ function IntegrityCheck() {
   const budget = useStore((s) => s.budget);
   const integrity = bookIntegrity(budget, ymKey());
   const ok = integrity.drift === 0;
-  const rows: [string, number][] = [
+  const rows: [string, Cents][] = [
     ["On-budget cash", integrity.onBudgetCash],
     ["Sum of available", integrity.sumAvailable],
     ["Ready to assign", integrity.readyToAssign],

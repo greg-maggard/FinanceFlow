@@ -1,19 +1,31 @@
 import { motion } from "framer-motion";
 import { M } from "../../theme/motion";
 
+/**
+ * `value`/`max` are integer cents when `unit` is "cents" (the default) and
+ * plain percentage points when it is "percent" — the bar fraction is unitless
+ * either way, only the two compact labels below it care. Mirrors `GoalBar`'s
+ * `showCurrency` flag in `ios/FinanceFlow/Components/UIKit.swift`.
+ */
 export function GoalBar({
   value,
   max,
   tint,
   glow,
   caption,
+  unit = "cents",
 }: {
   value: number;
   max: number;
   tint: string;
   glow: string;
   caption?: string;
+  unit?: "cents" | "percent";
 }) {
+  const label = (n: number) =>
+    unit === "cents"
+      ? `$${Math.round(n / 100).toLocaleString()}`
+      : `${Math.round(n).toLocaleString()}%`;
   const safeMax = max > 0 ? max : 1;
   const pct = Math.max(0, Math.min(100, (value / safeMax) * 100));
   const goalNear = pct >= 80;
@@ -70,8 +82,8 @@ export function GoalBar({
         />
       </div>
       <div className="flex justify-between text-[11px] tabular-nums text-white/55">
-        <span>${Math.round(value).toLocaleString()}</span>
-        <span>${Math.round(max).toLocaleString()}</span>
+        <span>{label(value)}</span>
+        <span>{label(max)}</span>
       </div>
     </div>
   );

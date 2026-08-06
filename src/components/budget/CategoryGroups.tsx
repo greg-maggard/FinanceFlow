@@ -2,7 +2,7 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { useStore } from "../../state/store";
 import { useUI } from "../../state/uiStore";
-import type { Category, CategoryGroup, MonthKey, NodeId } from "../../state/schema";
+import type { Category, CategoryGroup, Cents, MonthKey, NodeId } from "../../state/schema";
 import { UNCATEGORIZED_CATEGORY_ID } from "../../state/schema";
 import type { MonthSnapshot } from "../../budget/ledger";
 import { IDENTITY } from "../../theme/identity";
@@ -29,16 +29,15 @@ const GOAL_KINDS: { kind: GoalKind; label: string; hint: string }[] = [
   { kind: "total", label: "Total", hint: "Save up to a total — the bar fills as the balance grows." },
 ];
 
-function availableChipStyle(amount: number): React.CSSProperties {
-  const cents = Math.round(amount * 100);
-  if (cents > 0) {
+function availableChipStyle(amount: Cents): React.CSSProperties {
+  if (amount > 0) {
     return {
       background: "rgba(52, 211, 153, 0.14)",
       color: "#a7f3d0",
       border: "1px solid rgba(52, 211, 153, 0.32)",
     };
   }
-  if (cents < 0) {
+  if (amount < 0) {
     return {
       background: "rgba(248, 113, 113, 0.12)",
       color: "#fca5a5",

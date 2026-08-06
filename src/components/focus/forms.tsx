@@ -25,7 +25,7 @@ import {
 } from "../../budget/nodeLedger";
 import { useUI, type BudgetFocus } from "../../state/uiStore";
 import { ConfirmDelete } from "../budget/CategoryGroups";
-import { InlineAdd } from "../budget/bits";
+import { InlineAdd, dollars } from "../budget/bits";
 
 /**
  * Node forms edit the envelope ledger directly — every dollar field here is
@@ -337,7 +337,7 @@ export function EFEditor({ nodeId }: { nodeId: "SmallEF" | "BigEF" }) {
     <div className="text-xs text-white/55">
       {target > 0 ? (
         <>
-          Target: <span className="font-semibold text-white/85">${target.toLocaleString()}</span>
+          Target: <span className="font-semibold text-white/85">{dollars(target)}</span>
         </>
       ) : (
         "Set monthly expenses in Settings to compute target."
