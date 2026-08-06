@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { Account, BudgetBook, Txn } from "../state/schema";
 import { RTA_CATEGORY_ID, emptyBudgetBook } from "../state/schema";
-import { accountBalance, isOnBudget, monthOf, pairTransfer, snapshot } from "./ledger";
+import {
+  accountBalance,
+  accountBalances,
+  isOnBudget,
+  monthOf,
+  pairTransfer,
+  snapshot,
+} from "./ledger";
 
 let nextId = 0;
 function txn(partial: Omit<Txn, "id" | "source">): Txn {
@@ -40,6 +47,24 @@ describe("helpers", () => {
       ],
     });
     expect(accountBalance(b, "checking")).toBe(0.3);
+  });
+
+  it("computes every account's balance in one pass, matching accountBalance per account", () => {
+    const b = book({
+      transactions: [
+        txn({ accountId: "checking", date: "2026-06-01", amount: 0.1 }),
+        txn({ accountId: "checking", date: "2026-06-02", amount: 0.2 }),
+        txn({ accountId: "savings", date: "2026-06-01", amount: 33.33 }),
+        txn({ accountId: "savings", date: "2026-06-03", amount: -33.34 }),
+        txn({ accountId: "card", date: "2026-06-05", amount: -80.01 }),
+        // "ira" (tracking) gets no transactions and should still show up as 0.
+      ],
+    });
+    const balances = accountBalances(b);
+    for (const account of b.accounts) {
+      expect(balances.get(account.id)).toBe(accountBalance(b, account.id));
+    }
+    expect(balances.get("ira")).toBe(0);
   });
 });
 

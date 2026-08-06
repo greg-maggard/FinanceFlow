@@ -235,18 +235,95 @@ export const useStore = create<Store>((set) => ({
   replaceAll: (state) => set(() => ({ ...state })),
 }));
 
+// Debounced, non-redundant persistence. NumberField and friends commit on
+// every keystroke, and adapter.save() serializes the entire app state, so a
+// naive save-on-every-set() would stringify+setItem the whole document per
+// keystroke. We coalesce bursts (trailing-edge debounce) and skip the write
+// entirely when nothing in the persisted slice actually changed.
+const SAVE_DEBOUNCE_MS = 300;
+
+/** The seven fields that make it into the persisted document, by reference. */
+type PersistedSlice = Pick<
+  AppState,
+  "version" | "settings" | "decisions" | "nodes" | "budget" | "shownCelebrations" | "earnedMedals"
+>;
+
+function toPersistedSlice(s: AppState): PersistedSlice {
+  return {
+    version: s.version,
+    settings: s.settings,
+    decisions: s.decisions,
+    nodes: s.nodes,
+    budget: s.budget,
+    shownCelebrations: s.shownCelebrations,
+    earnedMedals: s.earnedMedals,
+  };
+}
+
+let lastSaved: PersistedSlice | null = null;
+let pending: PersistedSlice | null = null;
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function slicesEqual(a: PersistedSlice, b: PersistedSlice): boolean {
+  return (
+    a.version === b.version &&
+    a.settings === b.settings &&
+    a.decisions === b.decisions &&
+    a.nodes === b.nodes &&
+    a.budget === b.budget &&
+    a.shownCelebrations === b.shownCelebrations &&
+    a.earnedMedals === b.earnedMedals
+  );
+}
+
+function writeNow(slice: PersistedSlice): void {
+  lastSaved = slice;
+  pending = null;
+  if (saveTimer !== null) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  // Optimistic: `lastSaved` is set before the write so the synchronous
+  // dedupe in `scheduleSave` stays synchronous. If the write actually fails
+  // (quota exceeded, Safari private mode), clear the marker so the next
+  // mutation retries instead of being skipped as already-durable.
+  void adapter.save(slice).catch((err) => {
+    lastSaved = null;
+    console.error("[financeflow] persist failed", err);
+  });
+}
+
+/** Force any pending debounced save to write immediately, synchronously. */
+export function flushSave(): void {
+  if (pending && (!lastSaved || !slicesEqual(pending, lastSaved))) {
+    writeNow(pending);
+  } else if (saveTimer !== null) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    pending = null;
+  }
+}
+
+function scheduleSave(slice: PersistedSlice): void {
+  if (lastSaved && slicesEqual(slice, lastSaved)) return;
+  pending = slice;
+  if (saveTimer !== null) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    if (pending) writeNow(pending);
+  }, SAVE_DEBOUNCE_MS);
+}
+
 if (typeof window !== "undefined") {
   useStore.subscribe((s) => {
-    const snapshot: AppState = {
-      version: s.version,
-      settings: s.settings,
-      decisions: s.decisions,
-      nodes: s.nodes,
-      budget: s.budget,
-      shownCelebrations: s.shownCelebrations,
-      earnedMedals: s.earnedMedals,
-    };
-    void adapter.save(snapshot);
+    scheduleSave(toPersistedSlice(s));
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushSave();
+  });
+  window.addEventListener("pagehide", () => {
+    flushSave();
   });
 }
 

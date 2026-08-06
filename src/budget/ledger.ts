@@ -80,6 +80,18 @@ export function accountBalance(book: BudgetBook, accountId: string): number {
   return fromCents(cents);
 }
 
+/** Every account's balance in one pass over `book.transactions`. */
+export function accountBalances(book: BudgetBook): Map<string, number> {
+  const centsByAccount = new Map<string, number>();
+  for (const a of book.accounts) centsByAccount.set(a.id, 0);
+  for (const t of book.transactions) {
+    centsByAccount.set(t.accountId, (centsByAccount.get(t.accountId) ?? 0) + toCents(t.amount));
+  }
+  const balances = new Map<string, number>();
+  for (const [id, cents] of centsByAccount) balances.set(id, fromCents(cents));
+  return balances;
+}
+
 export type CategoryMonth = {
   assigned: number;
   activity: number;

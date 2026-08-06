@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useStore } from "../../state/store";
 import type { Account, AccountKind } from "../../state/schema";
 import { newId } from "../../state/schema";
-import { accountBalance, isOnBudget } from "../../budget/ledger";
+import { accountBalances, isOnBudget } from "../../budget/ledger";
 import { GlassCard } from "../glass/GlassCard";
 import { GlassInput, GlassSelect } from "../glass/GlassInput";
 import { NodeChip } from "./CategoryGroups";
@@ -39,15 +39,22 @@ function AccountRow({ account, balance }: { account: Account; balance: number })
   );
 }
 
-function AccountList({ caption, accounts }: { caption: string; accounts: Account[] }) {
-  const budget = useStore((s) => s.budget);
+function AccountList({
+  caption,
+  accounts,
+  balances,
+}: {
+  caption: string;
+  accounts: Account[];
+  balances: Map<string, number>;
+}) {
   if (accounts.length === 0) return null;
   return (
     <div>
       <div className="text-[10px] uppercase tracking-[0.2em] text-white/35">{caption}</div>
       <div className="divide-y divide-white/5">
         {accounts.map((a) => (
-          <AccountRow key={a.id} account={a} balance={accountBalance(budget, a.id)} />
+          <AccountRow key={a.id} account={a} balance={balances.get(a.id) ?? 0} />
         ))}
       </div>
     </div>
@@ -58,6 +65,10 @@ export function AccountsSection() {
   const budget = useStore((s) => s.budget);
   const accounts = budget.accounts.filter((a) => !a.closed);
   const empty = accounts.length === 0;
+  const balances = useMemo(
+    () => accountBalances(budget),
+    [budget.transactions, budget.accounts],
+  );
 
   // The first account is the whole point of the empty state, so the form
   // starts unfolded there and stays tucked away once accounts exist.
@@ -85,8 +96,16 @@ export function AccountsSection() {
           </p>
         ) : (
           <div className="space-y-3">
-            <AccountList caption="On budget" accounts={accounts.filter((a) => isOnBudget(a.kind))} />
-            <AccountList caption="Off budget" accounts={accounts.filter((a) => !isOnBudget(a.kind))} />
+            <AccountList
+              caption="On budget"
+              accounts={accounts.filter((a) => isOnBudget(a.kind))}
+              balances={balances}
+            />
+            <AccountList
+              caption="Off budget"
+              accounts={accounts.filter((a) => !isOnBudget(a.kind))}
+              balances={balances}
+            />
           </div>
         )}
 

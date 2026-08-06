@@ -1,5 +1,4 @@
-import { motion } from "framer-motion";
-import { useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { useStore } from "../../state/store";
 import type { Account, Txn } from "../../state/schema";
 import { RTA_CATEGORY_ID, newId } from "../../state/schema";
@@ -245,7 +244,11 @@ function AddTxnForm({ accounts }: { accounts: Account[] }) {
   );
 }
 
-function TxnRow({
+// Memoized so a budget mutation elsewhere on the screen (e.g. a keystroke in
+// a category's Assigned field) doesn't re-render every transaction row.
+// Props are memo-friendly: `txn` is a stable object reference per row, and
+// the name Maps are useMemo'd by the parent.
+const TxnRow = memo(function TxnRow({
   txn,
   accountNames,
   categoryNames,
@@ -270,7 +273,7 @@ function TxnRow({
     .join(" · ");
 
   return (
-    <motion.div layout className="flex items-center gap-2 py-2">
+    <div className="flex items-center gap-2 py-2">
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium text-white/90">{title}</div>
         <div className="truncate text-[11px] tabular-nums text-white/45">{sub}</div>
@@ -300,31 +303,54 @@ function TxnRow({
           </button>
         </div>
       </KebabMenu>
-    </motion.div>
+    </div>
   );
-}
+});
+
+// Render this many rows up front; "Show more" reveals another page.
+const PAGE_SIZE = 50;
 
 export function TransactionsSection() {
-  const budget = useStore((s) => s.budget);
-  const accounts = budget.accounts.filter((a) => !a.closed);
+  // Narrowed subscriptions: only the slices this section actually reads, so
+  // a mutation elsewhere in the budget (e.g. an Assigned-field keystroke)
+  // doesn't re-render the whole transaction list. Each call returns a stable
+  // array reference until that slice itself changes, so plain per-slice
+  // selectors are safe here — no fresh-object selector to trip zustand 5's
+  // re-render loop guard.
+  const allTransactions = useStore((s) => s.budget.transactions);
+  const allAccounts = useStore((s) => s.budget.accounts);
+  const allCategories = useStore((s) => s.budget.categories);
+  const accounts = allAccounts.filter((a) => !a.closed);
 
   // Most recent date first; the stable sort keeps insertion order within a day.
   const txns = useMemo(
-    () => [...budget.transactions].sort((a, b) => b.date.localeCompare(a.date)),
-    [budget.transactions],
+    () => [...allTransactions].sort((a, b) => b.date.localeCompare(a.date)),
+    [allTransactions],
   );
   const accountNames = useMemo(
-    () => new Map(budget.accounts.map((a) => [a.id, a.name])),
-    [budget.accounts],
+    () => new Map(allAccounts.map((a) => [a.id, a.name])),
+    [allAccounts],
   );
   const categoryNames = useMemo(
     () =>
       new Map([
         [RTA_CATEGORY_ID, "Ready to Assign"],
-        ...budget.categories.map((c) => [c.id, c.name] as [string, string]),
+        ...allCategories.map((c) => [c.id, c.name] as [string, string]),
       ]),
-    [budget.categories],
+    [allCategories],
   );
+
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  // Keep the user's place. `txns` gets a fresh identity on every add, delete
+  // and edit, so resetting to page 1 here would throw away their scroll
+  // position every time they delete a row — and the delete button lives
+  // inside the rows being collapsed. Only clamp when the list actually got
+  // shorter than what's on screen.
+  useEffect(() => {
+    setVisibleCount((n) => Math.min(n, Math.max(PAGE_SIZE, txns.length)));
+  }, [txns]);
+  const visibleTxns = useMemo(() => txns.slice(0, visibleCount), [txns, visibleCount]);
+  const hasMore = visibleCount < txns.length;
 
   return (
     <GlassCard className="px-5 py-4">
@@ -341,7 +367,7 @@ export function TransactionsSection() {
             <AddTxnForm key={accounts[0].id} accounts={accounts} />
             <div className="h-px bg-gradient-to-r from-transparent via-white/12 to-transparent" />
             <div className="divide-y divide-white/5">
-              {txns.map((t) => (
+              {visibleTxns.map((t) => (
                 <TxnRow
                   key={t.id}
                   txn={t}
@@ -355,6 +381,26 @@ export function TransactionsSection() {
                 </p>
               )}
             </div>
+            {txns.length > 0 && (
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-[11px] text-white/40">
+                  {visibleTxns.length.toLocaleString()} of {txns.length.toLocaleString()}
+                </span>
+                {hasMore && (
+                  <button
+                    type="button"
+                    onClick={() => setVisibleCount((n) => n + PAGE_SIZE)}
+                    className="rounded-full px-3 py-1.5 text-[11px] font-medium text-white/65 hover:text-white/95"
+                    style={{
+                      background: "rgba(255,255,255,0.05)",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                    }}
+                  >
+                    Show more
+                  </button>
+                )}
+              </div>
+            )}
           </>
         )}
       </div>
