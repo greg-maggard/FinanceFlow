@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useStore } from "../state/store";
 import { useUI } from "../state/uiStore";
 import { UNCATEGORIZED_CATEGORY_ID } from "../state/schema";
@@ -13,7 +13,7 @@ function seedAccount(id = "checking", name = "Checking") {
 describe("AddTransactionFab (w2-fastentry)", () => {
   beforeEach(() => {
     useStore.getState().reset();
-    useUI.setState({ lastUsedTxn: null });
+    useUI.setState({ lastUsedTxn: null, view: "budget" });
   });
 
   afterEach(() => {
@@ -145,6 +145,22 @@ describe("AddTransactionFab (w2-fastentry)", () => {
     const budget = useStore.getState().budget;
     expect(budget.transactions[0].amount).toBe(1000);
     expect(screen.getByRole("status")).toHaveTextContent("Added $1,000 to Ready to Assign");
+  });
+
+  it("hides the FAB while the Overview sheet is open, so it never covers the bottom-right node tile", () => {
+    seedAccount();
+    render(<AddTransactionFab />);
+    expect(screen.getByRole("button", { name: "Add transaction" })).toBeInTheDocument();
+
+    act(() => {
+      useUI.setState({ view: "overview" });
+    });
+    expect(screen.queryByRole("button", { name: "Add transaction" })).toBeNull();
+
+    act(() => {
+      useUI.setState({ view: "budget" });
+    });
+    expect(screen.getByRole("button", { name: "Add transaction" })).toBeInTheDocument();
   });
 
   it("closing the sheet with the mouse outside does not save anything", () => {

@@ -414,8 +414,17 @@ public enum NodeLedger {
     /// Idempotent for the rest of the month: once an envelope has held its
     /// target, its need is 0 and it emits no op — running this again does
     /// nothing, whatever has been spent since.
-    public static func planFundMonth(_ book: BudgetBook, month: String) -> FundMonthPlan {
-        let snap = Ledger.snapshot(book, month: month)
+    ///
+    /// `snap` is an optional precomputed `Ledger.snapshot(book, month:)` —
+    /// callers that already have one can pass it through to skip a second
+    /// full ledger pass (web parity: BudgetScreen.tsx finding 8). `nil`
+    /// (the default) computes it exactly as before.
+    public static func planFundMonth(
+        _ book: BudgetBook,
+        month: String,
+        snap precomputed: Ledger.MonthSnapshot? = nil
+    ) -> FundMonthPlan {
+        let snap = precomputed ?? Ledger.snapshot(book, month: month)
         var remaining = max(0, snap.readyToAssign)
 
         var ops = BookOps()

@@ -13,7 +13,7 @@ import { GlassCard } from "../glass/GlassCard";
 import { FundMonthButton, dollars } from "./bits";
 import { CategoryGroups, FUND_GLOW } from "./CategoryGroups";
 import { AccountsSection } from "./AccountsSection";
-import { TransactionsSection, categoryLabel } from "./TransactionsSection";
+import { TransactionsSection } from "./TransactionsSection";
 
 /** Step a "YYYY-MM" key by whole months; Date handles the year rollover. */
 function stepYm(key: MonthKey, delta: number): MonthKey {
@@ -89,29 +89,33 @@ function RtaPill({ amount }: { amount: number }) {
  * The compact "how much can I spend right now" row (w2-today-strip): Ready
  * to Assign, total on-budget cash, and the balance of whichever envelope
  * was last used, so the answer costs zero taps on cold open. `onBudgetCash`
- * and `categoryAvailable` are both derived from the `snap` the caller
+ * and `category.available` are both derived from the `snap` the caller
  * already computed — no second `snapshot()` call. Grid, not flex-wrap, so
  * labels truncate instead of wrapping to a second line on a phone.
+ *
+ * `category` is null when the fallback envelope (last-used, or Uncategorized)
+ * doesn't actually exist in `book.categories` yet — Uncategorized is created
+ * lazily (see `ensureUncategorized`), so a fresh book has no third envelope to
+ * report. Rather than render a dud "Uncategorized $0.00" (finding 9), the
+ * strip falls back to a two-tile layout until a real envelope exists.
  */
 function TodayStrip({
   readyToAssign,
   onBudgetCash,
-  categoryName,
-  categoryAvailable,
+  category,
   ahead,
 }: {
   readyToAssign: number;
   onBudgetCash: number;
-  categoryName: string;
-  categoryAvailable: number;
+  category: { name: string; available: number } | null;
   ahead: number;
 }) {
   return (
     <GlassCard intensity="subtle" className="px-4 py-3">
-      <div className="grid grid-cols-3 gap-3">
+      <div className={`grid gap-3 ${category ? "grid-cols-3" : "grid-cols-2"}`}>
         <StripStat label="Ready to Assign" value={readyToAssign} />
         <StripStat label="On-budget cash" value={onBudgetCash} />
-        <StripStat label={categoryName} value={categoryAvailable} />
+        {category && <StripStat label={category.name} value={category.available} />}
       </div>
       {Math.round(ahead * 100) !== 0 && (
         <div className="mt-2 truncate border-t border-white/5 pt-2 text-[11px] tabular-nums text-white/50">
@@ -234,8 +238,12 @@ export function BudgetScreen() {
 
   // Same fallback the fast-entry FAB uses (w2-fastentry): the last category
   // used for the last-used account, or Uncategorized if that pointer is
-  // stale/missing/hidden — never blank. Both figures below come from `snap`,
-  // already computed above, so this adds no snapshot() call.
+  // stale/missing/hidden — never blank *when a real envelope exists*.
+  // Uncategorized itself is created lazily (`ensureUncategorized`), so on a
+  // fresh book this id can point at a category that doesn't exist yet —
+  // `stripCategory` below is null in that case rather than a dud tile
+  // (finding 9). Both figures come from `snap`, already computed above, so
+  // this adds no snapshot() call.
   const stripCategoryId = useMemo(() => {
     const remembered = lastUsedTxn?.categoryByAccount[lastUsedTxn.accountId];
     if (remembered && budget.categories.some((c) => c.id === remembered && !c.hidden)) {
@@ -243,8 +251,11 @@ export function BudgetScreen() {
     }
     return UNCATEGORIZED_CATEGORY_ID;
   }, [lastUsedTxn, budget.categories]);
-  const stripCategoryName = categoryLabel(budget.categories, stripCategoryId);
-  const stripCategoryAvailable = snap.categories[stripCategoryId]?.available ?? 0;
+  const stripCategory = useMemo(() => {
+    const cat = budget.categories.find((c) => c.id === stripCategoryId);
+    if (!cat) return null;
+    return { name: cat.name, available: snap.categories[stripCategoryId]?.available ?? 0 };
+  }, [budget.categories, stripCategoryId, snap]);
   // "Cash on budget" = every dollar still sitting in an envelope plus what's
   // unassigned — the two terms `snap` already carries, summed in cents to
   // stay exact.
@@ -257,8 +268,10 @@ export function BudgetScreen() {
   // Assignments are keyed per month, so every month opens with every envelope
   // back at zero. The plan is re-derived on each edit purely to answer "is
   // anything still short of its monthly target?" — the tap itself re-plans
-  // against the freshest book.
-  const plan = useMemo(() => planFundMonth(budget, month), [budget, month]);
+  // against the freshest book. `snap` is passed through (finding 8) so this
+  // reuses the snapshot() already computed above instead of running a second
+  // full ledger pass on every keystroke.
+  const plan = useMemo(() => planFundMonth(budget, month, snap), [budget, month, snap]);
   const unmet = plan.underfunded.length > 0 || plan.funding > 0;
   // An untouched month is the real cliff: not a wall of failed goal bars, just
   // a month nobody has funded yet.
@@ -359,8 +372,7 @@ export function BudgetScreen() {
       <TodayStrip
         readyToAssign={snap.readyToAssign}
         onBudgetCash={onBudgetCash}
-        categoryName={stripCategoryName}
-        categoryAvailable={stripCategoryAvailable}
+        category={stripCategory}
         ahead={ahead}
       />
 

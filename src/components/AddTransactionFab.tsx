@@ -142,14 +142,12 @@ function AddTransactionSheet({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-md"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
       onClick={onClose}
     >
       <motion.div
         className="w-full max-w-sm"
         initial={{ scale: 0.94, y: 20, opacity: 0 }}
         animate={{ scale: 1, y: 0, opacity: 1 }}
-        exit={{ scale: 0.94, y: 20, opacity: 0 }}
         transition={{ type: "spring", stiffness: 240, damping: 24 }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -217,6 +215,12 @@ const TOAST_MS = 2600;
 export function AddTransactionFab() {
   const [open, setOpen] = useState(false);
   const [toast, setToast] = useState<SavedTxnInfo | null>(null);
+  // The Overview sheet (z-20) renders a full-bleed node grid; the FAB's own
+  // z-30 circle would otherwise float over its bottom-right tile and make it
+  // partially untappable. Cleanest fix is to not render the FAB at all while
+  // Overview is open, rather than juggle z-index against a sheet meant to
+  // cover the whole screen.
+  const view = useUI((s) => s.view);
 
   const handleSaved = (info: SavedTxnInfo) => {
     setOpen(false);
@@ -226,29 +230,31 @@ export function AddTransactionFab() {
 
   return (
     <>
-      <motion.button
-        type="button"
-        aria-label="Add transaction"
-        onClick={() => setOpen(true)}
-        className="fixed z-30 flex h-14 w-14 items-center justify-center rounded-full text-white/95"
-        style={{
-          right: "1.25rem",
-          bottom: "calc(1.25rem + env(safe-area-inset-bottom))",
-          background: "linear-gradient(135deg, rgba(255,255,255,0.18), rgba(255,255,255,0.06))",
-          backdropFilter: "blur(20px) saturate(180%)",
-          WebkitBackdropFilter: "blur(20px) saturate(180%)",
-          border: "1px solid rgba(255,255,255,0.30)",
-          boxShadow:
-            "inset 0 1px 0 rgba(255,255,255,0.32), 0 10px 30px rgba(0,0,0,0.45), 0 0 32px rgba(255,255,255,0.14)",
-        }}
-        whileHover={{ scale: 1.05, y: -1 }}
-        whileTap={{ scale: 0.94 }}
-        transition={{ type: "spring", stiffness: 260, damping: 24 }}
-      >
-        <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.25">
-          <path d="M12 5v14M5 12h14" strokeLinecap="round" />
-        </svg>
-      </motion.button>
+      {view !== "overview" && (
+        <motion.button
+          type="button"
+          aria-label="Add transaction"
+          onClick={() => setOpen(true)}
+          className="fixed z-30 flex h-14 w-14 items-center justify-center rounded-full text-white/95"
+          style={{
+            right: "1.25rem",
+            bottom: "calc(1.25rem + env(safe-area-inset-bottom))",
+            background: "linear-gradient(135deg, rgba(255,255,255,0.18), rgba(255,255,255,0.06))",
+            backdropFilter: "blur(20px) saturate(180%)",
+            WebkitBackdropFilter: "blur(20px) saturate(180%)",
+            border: "1px solid rgba(255,255,255,0.30)",
+            boxShadow:
+              "inset 0 1px 0 rgba(255,255,255,0.32), 0 10px 30px rgba(0,0,0,0.45), 0 0 32px rgba(255,255,255,0.14)",
+          }}
+          whileHover={{ scale: 1.05, y: -1 }}
+          whileTap={{ scale: 0.94 }}
+          transition={{ type: "spring", stiffness: 260, damping: 24 }}
+        >
+          <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.25">
+            <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+          </svg>
+        </motion.button>
+      )}
 
       {/* Plain conditional, not AnimatePresence: the sheet must be gone from
           the DOM the instant Save (or Close) fires — no exit-animation frame

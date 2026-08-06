@@ -87,9 +87,20 @@ type UIStore = {
  */
 const UI_STORAGE_KEY = "financeflow:ui:v1";
 
-type PersistedUi = { view: ViewMode; focusedId: NodeId | null; lastUsedTxn?: LastUsedTxn };
+/**
+ * The only views a cold open may land on. `overview` is a transient overlay
+ * (see OverviewSheet) and `shelf` has no renderer anywhere in `src/` —
+ * restoring either would silently break the Today strip's 0-tap promise
+ * (w2-today-strip: BudgetScreen only renders when `view === "budget"`), so
+ * neither is ever written to storage, and a persisted value outside this set
+ * (including a stale `shelf`) is coerced to `"budget"` on read. See
+ * w2-persist-view.
+ */
+type RestorableView = "focus" | "budget";
 
-const VALID_VIEWS: ViewMode[] = ["focus", "overview", "shelf", "budget"];
+type PersistedUi = { view: RestorableView; focusedId: NodeId | null; lastUsedTxn?: LastUsedTxn };
+
+const VALID_VIEWS: RestorableView[] = ["focus", "budget"];
 
 function isValidLastUsedTxn(v: unknown): v is LastUsedTxn {
   if (!v || typeof v !== "object") return false;
@@ -119,8 +130,8 @@ function readPersistedUi(): Partial<PersistedUi> {
       focusedId?: unknown;
       lastUsedTxn?: unknown;
     };
-    const view = VALID_VIEWS.includes(parsed.view as ViewMode)
-      ? (parsed.view as ViewMode)
+    const view = VALID_VIEWS.includes(parsed.view as RestorableView)
+      ? (parsed.view as RestorableView)
       : undefined;
     const focusedId = typeof parsed.focusedId === "string" ? (parsed.focusedId as NodeId) : null;
     const lastUsedTxn = isValidLastUsedTxn(parsed.lastUsedTxn) ? parsed.lastUsedTxn : undefined;
@@ -184,6 +195,13 @@ export const useUI = create<UIStore>((set) => ({
   setStaleTab: (message) => set({ staleTab: message }),
 }));
 
+// The most recently seen restorable (`focus`/`budget`) view. Landing on
+// `overview` (or a stale `shelf`) mid-session must not overwrite the real
+// view a cold open should return to — see the `RestorableView` doc comment
+// above — so this only advances when `state.view` is itself restorable, and
+// every write below persists this rather than `state.view` verbatim.
+let restorableView: RestorableView = persistedUi.view ?? "budget";
+
 // Persist view/focusedId/lastUsedTxn on every change (no debounce needed at
 // this write volume — see w2-persist-view, w2-fastentry). Deliberately
 // narrow: only writes when one of the three persisted fields actually
@@ -199,8 +217,9 @@ useUI.subscribe((state, prevState) => {
     state.lastUsedTxn === prevState.lastUsedTxn
   )
     return;
+  if (state.view === "focus" || state.view === "budget") restorableView = state.view;
   writePersistedUi({
-    view: state.view,
+    view: restorableView,
     focusedId: state.focusedId,
     ...(state.lastUsedTxn ? { lastUsedTxn: state.lastUsedTxn } : {}),
   });

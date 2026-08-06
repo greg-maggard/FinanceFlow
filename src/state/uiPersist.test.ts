@@ -18,13 +18,22 @@ describe("uiStore view/focusedId persistence (w2-persist-view)", () => {
     expect(useUI.getState().focusedId).toBeNull();
   });
 
-  it("restores a persisted view and focusedId on load", async () => {
+  it("coerces a persisted 'overview' view to Budget on load (w2-persist-view finding 6): overview is a transient overlay, not a landing view, and restoring it would silently break the Today strip's 0-tap promise", async () => {
     localStorage.setItem(UI_KEY, JSON.stringify({ view: "overview", focusedId: "Rent" }));
 
     const { useUI } = await import("./uiStore");
 
-    expect(useUI.getState().view).toBe("overview");
+    expect(useUI.getState().view).toBe("budget");
+    // focusedId (last-focused-node) still restores even though view didn't.
     expect(useUI.getState().focusedId).toBe("Rent");
+  });
+
+  it("coerces a persisted 'shelf' view to Budget on load: shelf has no renderer anywhere", async () => {
+    localStorage.setItem(UI_KEY, JSON.stringify({ view: "shelf", focusedId: null }));
+
+    const { useUI } = await import("./uiStore");
+
+    expect(useUI.getState().view).toBe("budget");
   });
 
   it("restores a persisted focus-view session with its focused node", async () => {
@@ -39,12 +48,27 @@ describe("uiStore view/focusedId persistence (w2-persist-view)", () => {
   it("writes view and focusedId to their own key on change, separate from the budget document", async () => {
     const { useUI } = await import("./uiStore");
 
+    useUI.getState().setView("focus");
+
+    expect(JSON.parse(localStorage.getItem(UI_KEY)!)).toEqual({
+      view: "focus",
+      focusedId: null,
+    });
+  });
+
+  it("does not persist a transient 'overview' view — the last restorable (focus/budget) view stays on disk instead (w2-persist-view finding 6)", async () => {
+    const { useUI } = await import("./uiStore");
+
+    useUI.getState().setView("focus");
     useUI.getState().setView("overview");
 
     expect(JSON.parse(localStorage.getItem(UI_KEY)!)).toEqual({
-      view: "overview",
+      view: "focus",
       focusedId: null,
     });
+    // The live in-memory view is still "overview" — only the persisted copy
+    // is pinned to the last restorable view.
+    expect(useUI.getState().view).toBe("overview");
   });
 
   it("does not persist one-shot signals (pendingCelebration, pendingMedal, budgetFocus, direction)", async () => {
