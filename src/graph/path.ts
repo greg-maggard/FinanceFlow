@@ -1,7 +1,7 @@
 import type { AppState, NodeId } from "../state/schema";
 import { GRAPH, GRAPH_BY_ID, type GraphNode } from "./flowchart";
 
-export function linearPath(state: AppState): NodeId[] {
+export function linearPath(state: Pick<AppState, "decisions">): NodeId[] {
   const out: NodeId[] = [];
   const visited = new Set<NodeId>();
   let cur: NodeId | null = "Start";
@@ -25,7 +25,7 @@ export function linearPath(state: AppState): NodeId[] {
 }
 
 export function neighbors(
-  state: AppState,
+  state: Pick<AppState, "decisions">,
   id: NodeId,
 ): { prev: NodeId | null; next: NodeId | null } {
   const path = linearPath(state);

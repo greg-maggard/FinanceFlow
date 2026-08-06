@@ -1,16 +1,22 @@
+import { useMemo } from "react";
 import { useStore } from "../state/store";
 import { applyPwaUpdate, useUI } from "../state/uiStore";
 import { downloadJson } from "../state/io";
 import { overallProgress } from "../graph/derive";
 
 export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
-  const state = useStore();
+  // Selector-scoped rather than a bare `useStore()`: this header is always
+  // mounted, so a whole-store subscription would re-render it (and recompute
+  // `overallProgress`) on every keystroke anywhere in the app, including
+  // Budget-screen edits that never touch `nodes`/`decisions`.
+  const nodes = useStore((s) => s.nodes);
+  const decisions = useStore((s) => s.decisions);
   const view = useUI((s) => s.view);
   const setView = useUI((s) => s.setView);
   const saveError = useUI((s) => s.saveError);
   const clearSaveError = useUI((s) => s.clearSaveError);
   const needRefresh = useUI((s) => s.needRefresh);
-  const progress = overallProgress(state);
+  const progress = useMemo(() => overallProgress({ nodes, decisions }), [nodes, decisions]);
 
   return (
     // Header and banner share one fixed wrapper so the banner is pinned
@@ -101,7 +107,7 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
           <span className="text-red-100">{saveError}</span>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => downloadJson(state)}
+              onClick={() => downloadJson(useStore.getState())}
               className="rounded-full px-3 py-1 text-[11px] font-semibold text-white"
               style={{
                 background: "rgba(248,113,113,0.35)",

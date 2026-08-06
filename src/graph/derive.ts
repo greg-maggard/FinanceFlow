@@ -10,7 +10,7 @@ export type Status = "done" | "current" | "upcoming" | "skipped";
 
 export type DerivedStatus = Record<NodeId, Status>;
 
-export function deriveStatus(state: AppState): DerivedStatus {
+export function deriveStatus(state: Pick<AppState, "nodes" | "decisions">): DerivedStatus {
   const status: Partial<Record<NodeId, Status>> = {};
   const visited = new Set<NodeId>();
   let frontier: NodeId[] = [];
@@ -90,7 +90,9 @@ export function deriveStatus(state: AppState): DerivedStatus {
   return status as DerivedStatus;
 }
 
-export function overallProgress(state: AppState): { done: number; total: number; pct: number } {
+export function overallProgress(
+  state: Pick<AppState, "nodes" | "decisions">,
+): { done: number; total: number; pct: number } {
   const status = deriveStatus(state);
   let done = 0;
   let total = 0;
