@@ -1,6 +1,6 @@
 import { useRef } from "react";
 import { useStore } from "../state/store";
-import { useUI } from "../state/uiStore";
+import { applyPwaUpdate, useUI } from "../state/uiStore";
 import { downloadJson, importJson } from "../state/io";
 import { overallProgress } from "../graph/derive";
 
@@ -10,6 +10,7 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
   const setView = useUI((s) => s.setView);
   const saveError = useUI((s) => s.saveError);
   const clearSaveError = useUI((s) => s.clearSaveError);
+  const needRefresh = useUI((s) => s.needRefresh);
   const fileRef = useRef<HTMLInputElement>(null);
   const progress = overallProgress(state);
 
@@ -25,7 +26,10 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
   return (
     // Header and banner share one fixed wrapper so the banner is pinned
     // directly below the header regardless of the header's actual height.
-    <div className="fixed inset-x-0 top-0 z-30 flex flex-col">
+    <div
+      className="fixed inset-x-0 top-0 z-30 flex flex-col"
+      style={{ paddingTop: "env(safe-area-inset-top)" }}
+    >
       <header
         className="flex items-center justify-between px-5 py-3"
         style={{
@@ -164,6 +168,35 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
               ×
             </button>
           </div>
+        </div>
+      )}
+      {needRefresh && (
+        // Non-blocking: an update is ready but the current tab keeps
+        // working normally until the user chooses to reload. See
+        // applyPwaUpdate() in state/uiStore.ts and the registerType:
+        // "prompt" note in vite.config.ts for why this can't be silent.
+        <div
+          role="status"
+          className="flex items-center justify-between gap-3 px-5 py-2 text-[12px]"
+          style={{
+            background: "rgba(12,14,22,0.92)",
+            borderTop: "1px solid rgba(255,255,255,0.14)",
+            borderBottom: "1px solid rgba(255,255,255,0.14)",
+          }}
+        >
+          <span className="text-white/80">
+            Update available — refreshes now, your data is safe
+          </span>
+          <button
+            onClick={applyPwaUpdate}
+            className="rounded-full px-3 py-1 text-[11px] font-semibold text-white"
+            style={{
+              background: "rgba(255,255,255,0.14)",
+              border: "1px solid rgba(255,255,255,0.28)",
+            }}
+          >
+            Refresh
+          </button>
         </div>
       )}
     </div>
