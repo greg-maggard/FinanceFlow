@@ -193,6 +193,86 @@ describe("TransactionsSection", () => {
     expect(bookIntegrity(budget, isoDay().slice(0, 7)).drift).toBe(0);
   });
 
+  it("does not open the editor when Enter is pressed on the kebab button (reviewer repro)", () => {
+    // Old shape: TxnRow's role="button" wrapped the KebabMenu, so a keydown
+    // on the kebab bubbled up and the row's own onKeyDown preventDefault'd +
+    // opened Edit before the kebab ever saw the key. The kebab button is now
+    // a sibling of the row's edit button, not a descendant, so this keydown
+    // has nothing above it to bubble into.
+    seedAccount();
+    useStore.getState().addTxn({
+      id: "t1",
+      accountId: "checking",
+      date: "2024-01-05",
+      payee: "Grocery run",
+      amount: -42.5,
+      categoryId: UNCATEGORIZED_CATEGORY_ID,
+      source: "manual",
+    });
+    render(<TransactionsSection />);
+
+    const kebab = screen.getByRole("button", { name: "Transaction actions" });
+    fireEvent.keyDown(kebab, { key: "Enter" });
+    expect(screen.queryByRole("heading", { name: "Edit transaction" })).toBeNull();
+  });
+
+  it("does not open the editor when Enter is pressed on Delete transaction, and Delete stays reachable (reviewer repro)", () => {
+    seedAccount();
+    useStore.getState().addTxn({
+      id: "t1",
+      accountId: "checking",
+      date: "2024-01-05",
+      payee: "Grocery run",
+      amount: -42.5,
+      categoryId: UNCATEGORIZED_CATEGORY_ID,
+      source: "manual",
+    });
+    render(<TransactionsSection />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Transaction actions" }));
+    const deleteButton = screen.getByRole("button", { name: "Delete transaction" });
+    fireEvent.keyDown(deleteButton, { key: "Enter" });
+    expect(screen.queryByRole("heading", { name: "Edit transaction" })).toBeNull();
+    expect(useStore.getState().budget.transactions).toHaveLength(1);
+
+    // Delete is reachable — its own click handler (which Enter/Space on a
+    // real <button> activates) still deletes the row.
+    fireEvent.click(deleteButton);
+    expect(useStore.getState().budget.transactions).toHaveLength(0);
+  });
+
+  it("refuses to open the editor on a balance-adjustment row, with a clear explanation", () => {
+    seedAccount();
+    // A write-off dated inside August: outstandingAdjustments keys the
+    // unwind window on this date, so it must not be reachable for editing.
+    useStore.getState().addTxn({
+      id: "txn:adjust:food:2024-01-15",
+      accountId: "acct:adjust",
+      date: "2024-01-15",
+      payee: "Balance adjustment",
+      amount: -50,
+      categoryId: "food",
+      source: "manual",
+    });
+    render(<TransactionsSection />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit Balance adjustment" }));
+    expect(
+      screen.getByText(/Balance adjustments can't be edited here/),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Got it" }));
+    expect(screen.queryByText(/Balance adjustments can't be edited here/)).toBeNull();
+
+    // The row was never touched.
+    const budget = useStore.getState().budget;
+    expect(budget.transactions).toHaveLength(1);
+    expect(budget.transactions[0].date).toBe("2024-01-15");
+    expect(budget.transactions[0].accountId).toBe("acct:adjust");
+    expect(bookIntegrity(budget, "2024-01").drift).toBe(0);
+  });
+
   it("renders the empty state with no transactions", () => {
     seedAccount();
     render(<TransactionsSection />);

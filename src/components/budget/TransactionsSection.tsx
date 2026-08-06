@@ -5,6 +5,7 @@ import { useUI } from "../../state/uiStore";
 import type { Account, Category, Txn } from "../../state/schema";
 import { RTA_CATEGORY_ID, UNCATEGORIZED_CATEGORY_ID, newId } from "../../state/schema";
 import { isOnBudget, isoDay } from "../../budget/ledger";
+import { ADJUST_ACCOUNT_ID } from "../../budget/nodeLedger";
 import { GlassCard } from "../glass/GlassCard";
 import { GlassButton } from "../glass/GlassButton";
 import { GlassInput, GlassSelect } from "../glass/GlassInput";
@@ -411,23 +412,22 @@ const TxnRow = memo(function TxnRow({
     .join(" · ");
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={() => onEdit(txn)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onEdit(txn);
-        }
-      }}
-      aria-label={`Edit ${title}`}
-      className="-mx-2 flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 hover:bg-white/5"
-    >
-      <div className="min-w-0 flex-1">
+    <div className="-mx-2 flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-white/5">
+      {/* A real <button>, sibling to the KebabMenu below rather than an
+          ancestor `role="button"` wrapping it — that older shape let the
+          kebab's own keydown bubble up into this row's handler, so Enter on
+          the kebab (or on "Delete transaction") always opened Edit and
+          delete was unreachable by keyboard. Siblings don't intercept each
+          other's keys. */}
+      <button
+        type="button"
+        onClick={() => onEdit(txn)}
+        aria-label={`Edit ${title}`}
+        className="min-w-0 flex-1 cursor-pointer text-left"
+      >
         <div className="truncate text-sm font-medium text-white/90">{title}</div>
         <div className="truncate text-[11px] tabular-nums text-white/45">{sub}</div>
-      </div>
+      </button>
       <span
         className={`text-sm font-semibold tabular-nums ${
           cents < 0 ? "text-red-300/90" : cents > 0 ? "text-emerald-300/90" : "text-white/60"
@@ -458,10 +458,23 @@ const TxnRow = memo(function TxnRow({
 });
 
 /**
- * Hosts AddTxnForm in edit mode for a non-transfer row, or a plain refusal
- * for a transfer leg — editing one leg without its mirror would desync the
- * pair (see store.ts's paired addTransfer/deleteTxn), so this item refuses
- * rather than risk it (spec: "Refusing is acceptable for this item").
+ * Hosts AddTxnForm in edit mode for a normal row, or a plain refusal for a
+ * transfer leg or a machine-generated balance-adjustment row.
+ *
+ * Transfers refuse because editing one leg without its mirror would desync
+ * the pair (see store.ts's paired addTransfer/deleteTxn).
+ *
+ * Balance-adjustment rows (accountId === ADJUST_ACCOUNT_ID) refuse for a
+ * parallel reason: `outstandingAdjustments` finds the write-off to unwind by
+ * filtering on `monthOf(t.date) === month` (nodeLedger.ts), so the date on
+ * this row is load-bearing. Moving it to another month via this form would
+ * strand the adjustment outside the window planBalanceEdit unwinds, and the
+ * next balance edit on that envelope would assign a fresh correction from
+ * Ready to Assign on top of the one that already ran — the user pays for the
+ * same correction twice. Category and amount edits mostly self-heal on the
+ * next balance edit; a cross-month date edit does not, so the whole row is
+ * refused the same way a transfer leg is (spec: "Refusing is acceptable for
+ * this item").
  */
 function EditTxnModal({
   txn,
@@ -473,6 +486,8 @@ function EditTxnModal({
   onClose: () => void;
 }) {
   const isTransfer = Boolean(txn.transferAccountId);
+  const isAdjustment = txn.accountId === ADJUST_ACCOUNT_ID;
+  const isRefused = isTransfer || isAdjustment;
   return (
     <AnimatePresence>
       <motion.div
@@ -493,7 +508,7 @@ function EditTxnModal({
           <GlassCard intensity="strong" className="max-h-[85vh] overflow-y-auto p-6">
             <div className="mb-5 flex items-center justify-between">
               <h2 className="text-lg font-semibold tracking-tight text-white/95">
-                {isTransfer ? "Transfer" : "Edit transaction"}
+                {isTransfer ? "Transfer" : isAdjustment ? "Balance adjustment" : "Edit transaction"}
               </h2>
               <button
                 onClick={onClose}
@@ -503,12 +518,12 @@ function EditTxnModal({
                 ×
               </button>
             </div>
-            {isTransfer ? (
+            {isRefused ? (
               <div className="space-y-4">
                 <p className="text-sm text-white/70">
-                  Transfers can't be edited here — the two linked rows would
-                  drift out of sync. Delete the transfer from its kebab menu
-                  and re-enter it instead.
+                  {isTransfer
+                    ? "Transfers can't be edited here — the two linked rows would drift out of sync. Delete the transfer from its kebab menu and re-enter it instead."
+                    : "Balance adjustments can't be edited here — this row's date is what keeps it inside the month it corrects. Moving it would let the same correction get charged again next time this envelope's balance is fixed. Delete the adjustment from its kebab menu and re-enter the balance edit instead."}
                 </p>
                 <div className="flex justify-end">
                   <GlassButton size="sm" variant="secondary" onClick={onClose}>
