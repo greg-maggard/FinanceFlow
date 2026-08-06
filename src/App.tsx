@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { Component, useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { AmbientBackground } from "./components/AmbientBackground";
 import { TopBar } from "./components/TopBar";
@@ -11,7 +12,7 @@ import { FocusStage } from "./components/focus/FocusStage";
 import { BudgetScreen } from "./components/budget/BudgetScreen";
 import { findCurrentNode } from "./components/focus/advance";
 import { useUI } from "./state/uiStore";
-import { getBootRecovery } from "./state/store";
+import { getBootRecovery, getStoredRaw, suspendPersistence } from "./state/store";
 import { GRAPH_BY_ID } from "./graph/flowchart";
 import { M } from "./theme/motion";
 
@@ -23,7 +24,47 @@ export default function App() {
   if (bootRecovery) {
     return <RecoveryScreen message={bootRecovery.message} raw={bootRecovery.raw} />;
   }
-  return <AppShell />;
+  return (
+    <AppErrorBoundary>
+      <AppShell />
+    </AppErrorBoundary>
+  );
+}
+
+type BoundaryState = { error: Error | null };
+
+/**
+ * F10 belt-and-braces: migrate()'s structural validation catches a claimed
+ * v3 document that's missing or mistyped a required container, but it can't
+ * exhaustively rule out every shape that crashes something deeper in render
+ * (a category referencing a group that isn't there, for instance). Rather
+ * than a bare white screen with no way out, fall back to the same
+ * RecoveryScreen the boot-time guard uses, and suspend persistence so the
+ * crash can't get written back over the original bytes.
+ */
+export class AppErrorBoundary extends Component<{ children: ReactNode }, BoundaryState> {
+  state: BoundaryState = { error: null };
+
+  static getDerivedStateFromError(error: Error): BoundaryState {
+    return { error };
+  }
+
+  componentDidCatch(error: Error): void {
+    suspendPersistence();
+    console.error("[financeflow] AppShell crashed after boot", error);
+  }
+
+  render(): ReactNode {
+    if (this.state.error) {
+      return (
+        <RecoveryScreen
+          message={`FinanceFlow hit an error and can't continue: ${this.state.error.message}`}
+          raw={getStoredRaw() ?? ""}
+        />
+      );
+    }
+    return this.props.children;
+  }
 }
 
 function AppShell() {

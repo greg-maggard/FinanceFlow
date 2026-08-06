@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { NodeId } from "./schema";
 import type { Direction } from "../theme/motion";
+import { flushSave } from "./store";
 
 export type ViewMode = "focus" | "overview" | "shelf" | "budget";
 
@@ -85,5 +86,10 @@ export function setPwaUpdateHandler(fn: (reloadPage?: boolean) => Promise<void>)
 }
 
 export function applyPwaUpdate(): void {
+  // F13: this is the one reload the app triggers itself, so it costs
+  // nothing to flush deterministically rather than rely on flushSave()'s
+  // visibilitychange/pagehide wiring firing reliably before the new service
+  // worker takes over (untested territory on, e.g., iOS standalone PWAs).
+  flushSave();
   void pwaUpdateFn?.(true);
 }

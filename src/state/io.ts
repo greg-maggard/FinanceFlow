@@ -41,12 +41,47 @@ export function migrate(input: unknown, now: Date = new Date()): AppState {
     throw new Error("Not a FinanceFlow document.");
   }
   const obj = input as { version?: number };
-  if (obj.version === 3) return obj as AppState;
+  if (obj.version === 3) {
+    // A `version: 3` tag alone proves nothing about the payload behind it —
+    // see F10 in the wave-1 review: casting here unvalidated let a bare
+    // `{"version":3}` boot with an active (and immediately overwriting)
+    // persistence subscription, and a doc missing `budget.assignments`
+    // white-screened with no recovery route. Validate structurally and
+    // throw so loadInitial()'s catch routes to RecoveryScreen instead.
+    const err = invalidV3Reason(obj);
+    if (err) throw new Error(`Stored document isn't a valid FinanceFlow document: ${err}`);
+    return obj as AppState;
+  }
   if (obj.version === 2) return migrateV2(obj as unknown as V2State, now);
   if (obj.version === 1) return migrateV2(migrateV1(obj as unknown as V1State, now), now);
   // Never silently reset: a document from a newer (or unknown) version must
   // surface as an error the caller can show, not vanish into a fresh state.
   throw new Error(`Unsupported FinanceFlow version: ${String(obj.version)}.`);
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/**
+ * Structural check for a `{version: 3}` document, run before it's cast to
+ * `AppState`. Returns a human-readable reason it's invalid, or `null` when
+ * it's shaped correctly enough to trust. Intentionally shallow (container
+ * types, not every field of every row) — deep enough to catch the failure
+ * modes a hand-edited or truncated document actually produces.
+ */
+function invalidV3Reason(obj: Record<string, unknown>): string | null {
+  if (!isPlainObject(obj.settings)) return "missing settings.";
+  if (!isPlainObject(obj.decisions)) return "missing decisions.";
+  if (!isPlainObject(obj.nodes)) return "missing nodes.";
+  const budget = obj.budget;
+  if (!isPlainObject(budget)) return "missing its budget.";
+  if (!Array.isArray(budget.accounts)) return "budget is missing accounts.";
+  if (!Array.isArray(budget.transactions)) return "budget is missing transactions.";
+  if (!Array.isArray(budget.groups)) return "budget is missing groups.";
+  if (!Array.isArray(budget.categories)) return "budget is missing categories.";
+  if (!isPlainObject(budget.assignments)) return "budget is missing assignments.";
+  return null;
 }
 
 // ---------------------------------------------------------------------------

@@ -85,6 +85,46 @@ describe("migrate", () => {
     expect(() => migrate("nope")).toThrow();
     expect(() => migrate(null)).toThrow();
   });
+
+  // F10: a `version: 3` tag alone must not be enough to reach the cast —
+  // see wave1-review.md cases A and B, reproduced directly against migrate().
+  describe("structural validation of a claimed v3 document (F10)", () => {
+    it("case A: rejects a bare {version:3} with nothing else", () => {
+      expect(() => migrate({ version: 3 })).toThrow(/settings|budget/i);
+    });
+
+    it("case B: rejects a v3 document missing budget.assignments", () => {
+      const s = makeInitialState() as any;
+      delete s.budget.assignments;
+      expect(() => migrate(s)).toThrow(/assignments/i);
+    });
+
+    it("rejects a v3 document whose budget.transactions isn't an array", () => {
+      const s = makeInitialState() as any;
+      s.budget.transactions = "not-an-array";
+      expect(() => migrate(s)).toThrow(/transactions/i);
+    });
+
+    it("rejects a v3 document missing settings/decisions/nodes", () => {
+      const base = makeInitialState() as any;
+      const noSettings = { ...base };
+      delete noSettings.settings;
+      expect(() => migrate(noSettings)).toThrow(/settings/i);
+
+      const noDecisions = { ...base };
+      delete noDecisions.decisions;
+      expect(() => migrate(noDecisions)).toThrow(/decisions/i);
+
+      const noNodes = { ...base };
+      delete noNodes.nodes;
+      expect(() => migrate(noNodes)).toThrow(/nodes/i);
+    });
+
+    it("still lets a well-formed v3 document through unmodified", () => {
+      const s = makeInitialState();
+      expect(migrate(s)).toEqual(s);
+    });
+  });
 });
 
 describe("v1 -> v3 chain", () => {
