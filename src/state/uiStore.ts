@@ -58,9 +58,65 @@ type UIStore = {
   setStaleTab: (message: string) => void;
 };
 
+/**
+ * Persists only `view` and `focusedId` — where the user is, not budget
+ * data — under a key separate from the budget document (STORAGE_KEY in
+ * store.ts) so it never rides that migration chain. Everything else on
+ * UIStore is a one-shot signal (celebrations, medals, budgetFocus,
+ * direction) that would misfire if replayed on reload, so none of it is
+ * persisted here.
+ */
+const UI_STORAGE_KEY = "financeflow:ui:v1";
+
+type PersistedUi = { view: ViewMode; focusedId: NodeId | null };
+
+const VALID_VIEWS: ViewMode[] = ["focus", "overview", "shelf", "budget"];
+
+/**
+ * Best-effort read of the persisted slice. Deliberately permissive: this is
+ * cosmetic state, not the budget document, so any shape trouble (missing
+ * key, corrupt JSON, a stale enum value from a since-renamed ViewMode)
+ * just falls back to the caller's defaults rather than blocking boot the
+ * way store.ts's RecoveryScreen does for real data. A `focusedId` that's
+ * merely the wrong *shape* is caught here; one that's a well-formed but
+ * no-longer-valid NodeId (e.g. after a graph change) is App.tsx's job to
+ * catch, since only it has the graph to check against.
+ */
+function readPersistedUi(): Partial<PersistedUi> {
+  if (typeof localStorage === "undefined") return {};
+  const raw = localStorage.getItem(UI_STORAGE_KEY);
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as { view?: unknown; focusedId?: unknown };
+    const view = VALID_VIEWS.includes(parsed.view as ViewMode)
+      ? (parsed.view as ViewMode)
+      : undefined;
+    const focusedId = typeof parsed.focusedId === "string" ? (parsed.focusedId as NodeId) : null;
+    return { view, focusedId };
+  } catch {
+    return {};
+  }
+}
+
+function writePersistedUi(slice: PersistedUi): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(UI_STORAGE_KEY, JSON.stringify(slice));
+  } catch {
+    // Best-effort: this is cosmetic UI position, not the budget document —
+    // silently drop on quota exceeded / private-mode storage errors rather
+    // than surfacing the saveError banner store.ts uses for real data loss.
+  }
+}
+
+const persistedUi = readPersistedUi();
+
 export const useUI = create<UIStore>((set) => ({
-  view: "focus",
-  focusedId: null,
+  // First-ever launch (nothing persisted) lands on Budget, the daily
+  // surface; the flowchart (`focus`) is the monthly one. A returning user
+  // lands wherever they left, via persistedUi below.
+  view: persistedUi.view ?? "budget",
+  focusedId: persistedUi.focusedId ?? null,
   direction: "none",
   soundOn: false,
   pendingCelebration: null,
@@ -87,6 +143,16 @@ export const useUI = create<UIStore>((set) => ({
   // load (i.e. a reload) — see the `staleTab` doc comment above.
   setStaleTab: (message) => set({ staleTab: message }),
 }));
+
+// Persist view/focusedId on every change (no debounce needed at this write
+// volume — see w2-persist-view). Deliberately narrow: only writes when one
+// of the two persisted fields actually changed, so the frequent one-shot
+// signals (pendingCelebration, pendingMedal, budgetFocus, ...) that also
+// live on this store don't trigger a write, and are never persisted.
+useUI.subscribe((state, prevState) => {
+  if (state.view === prevState.view && state.focusedId === prevState.focusedId) return;
+  writePersistedUi({ view: state.view, focusedId: state.focusedId });
+});
 
 // The Workbox-provided reload trigger (from virtual:pwa-register's
 // registerSW) is a function, not serializable UI state, so it lives here as
