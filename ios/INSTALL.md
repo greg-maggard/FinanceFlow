@@ -64,12 +64,25 @@ This ensures your budget data survives accidental deletion or device loss (assum
 
 iOS is currently in Wave 1 of the FinanceFlow roadmap:
 - ✅ Simulator builds and runs clean
-- ✅ FinanceFlowKit domain tests maintain parity with web ledger math (117+ tests)
+- ✅ FinanceFlowKit domain tests maintain parity with web ledger math (184 tests as of the Wave 3 decision below)
 - ⛔ No daily-use installation (web PWA is the book of record)
-- ⛔ No sync between iOS and web (Wave 3 decision)
+- ⛔ No sync between iOS and web (Wave 3 decision — see below)
 - ⛔ No iOS-only UI enhancements
 
-The Wave 3 platform decision will determine whether iOS becomes a full co-equal citizen (with sync, conflict resolution, and UI parity) or remains a read-only reference implementation.
+### Wave 3 platform decision (recorded 2026-08-06): NOT YET — stay on web
+
+**Decision: iOS does NOT become the daily driver at this time. Web PWA remains the sole book of record. iOS stays a read-only-in-practice parity guard.**
+
+The w3-ios-decision spec is explicit that this call is only to be made "after Greg has used the web PWA daily for two to three weeks" of real elapsed time, because running both platforms without sync means two silently diverging budgets and this app has no drift detection. Checking the actual commit history at decision time: the entire Wave 2 web-ergonomics set (FAB add-transaction, edit-in-place, fund-this-month, today-strip, persist-view) and the entire Wave 3 set to date (backup-key, schema v4, Plaid snapshot import, search/undo) landed in one continuous session on the morning of 2026-08-06 — commits minutes apart, not days apart. Zero calendar days of Greg actually living in the web PWA have elapsed since those ergonomics existed to live in. The precondition for an affirmative decision is factually unmet, regardless of how good the iOS build otherwise is, so the answer is no by default rather than yes by inference.
+
+This is not a quality verdict against iOS. Everything in the "yes" case for the spec still checks out as of this date and remains true for whenever this is revisited:
+- Builds clean, signing pre-wired to a free personal team (`ios/project.yml:45`, team `GJ3G9V9Q8Z`).
+- Persistence is genuinely ahead of web's: atomic writes to a single `state.json` (`FileStorageAdapter.swift`), 500ms debounced autosave serialized behind any in-flight save (`AppStore.swift`), flush on `scenePhase` background (`FinanceFlowApp.swift`), corrupt-file quarantine instead of clobbering (`AppStore.swift`), and Documents-directory inclusion in standard iCloud/Finder device backups.
+- The one disqualifier is unchanged: free provisioning means an installed device build stops launching roughly weekly until rebuilt from a tethered Mac. That's a $99/yr Apple Developer enrollment away from being fixed, whenever it's worth fixing.
+
+**Re-decide when:** Greg has put real, spaced-out daily use on the web PWA — actual calendar days, not commits in the same sitting — for two to three weeks. At that point, re-run this same item: if the web ergonomics (FAB add, edit-in-place, fund-this-month, today-strip) have held up as the daily flow, do the one-time migration + paid-enrollment + ergonomics-port sequence from the item spec. Until then, do not install this on a phone as a second live ledger.
+
+FinanceFlowKit tests stay green throughout as the parity guard this decision keeps them for: `cd ios/FinanceFlowKit && swift test`.
 
 ## Troubleshooting
 
