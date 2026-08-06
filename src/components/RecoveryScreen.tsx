@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import { importJson } from "../state/io";
 import { adapter } from "../state/store";
+import { readLatestBackup } from "../state/storage";
 
 interface RecoveryScreenProps {
   message: string;
@@ -32,7 +33,34 @@ export function RecoveryScreen({ message, raw }: RecoveryScreenProps) {
   const [confirming, setConfirming] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+  const [restoringBackup, setRestoringBackup] = useState(false);
+  const [backupError, setBackupError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // w3-backup-key: read fresh at render time (not memoized) — cheap, and
+  // this component only ever renders on the recovery/crash path, never in
+  // a hot loop. `backup` is null whenever no rolling backup has been
+  // promoted yet (e.g. the very first day of use, or a version that never
+  // had one) — see storage.ts's maybePromoteBackup/readLatestBackup.
+  const backup = readLatestBackup();
+
+  // Same shape as handleImportFile below: run the backup's raw bytes
+  // through the real parse+migrate path, write straight through the
+  // storage adapter (persistence is suspended for this session, so
+  // replaceAll alone would never reach localStorage), then reload.
+  async function handleRestoreBackup(): Promise<void> {
+    if (!backup) return;
+    setBackupError(null);
+    setRestoringBackup(true);
+    try {
+      const state = importJson(backup.raw);
+      await adapter.save(state);
+      window.location.reload();
+    } catch (err) {
+      setBackupError((err as Error).message);
+      setRestoringBackup(false);
+    }
+  }
 
   // F11: without this, recovering meant download-then-erase-then-reload-
   // then-import-from-Settings — a scary multi-step flow at the worst
@@ -137,6 +165,38 @@ export function RecoveryScreen({ message, raw }: RecoveryScreenProps) {
             </p>
           )}
         </div>
+
+        {backup && (
+          <div style={{ borderTop: "1px solid rgba(255,255,255,0.15)", paddingBottom: "1.5rem" }}>
+            <p style={{ opacity: 0.7, fontSize: "0.9rem", margin: "1.25rem 0 0.75rem" }}>
+              FinanceFlow also keeps a backup on this device, saved{" "}
+              {new Date(backup.at).toLocaleString()}. Restoring replaces the stored data with
+              that backup.
+            </p>
+            <button
+              type="button"
+              disabled={restoringBackup}
+              onClick={() => void handleRestoreBackup()}
+              style={{
+                padding: "0.6rem 1.2rem",
+                background: "transparent",
+                color: "rgba(255,255,255,0.9)",
+                border: "1px solid rgba(255,255,255,0.3)",
+                borderRadius: "0.375rem",
+                fontWeight: 600,
+                cursor: restoringBackup ? "default" : "pointer",
+                opacity: restoringBackup ? 0.6 : 1,
+              }}
+            >
+              {restoringBackup ? "Restoring…" : "Restore yesterday's backup"}
+            </button>
+            {backupError && (
+              <p style={{ color: "rgba(255,140,140,0.9)", fontSize: "0.85rem", marginTop: "0.6rem" }}>
+                {backupError}
+              </p>
+            )}
+          </div>
+        )}
 
         <div style={{ borderTop: "1px solid rgba(255,255,255,0.15)", paddingTop: "1.25rem" }}>
           {!confirming ? (

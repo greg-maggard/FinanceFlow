@@ -5,6 +5,7 @@ import { useUI } from "../state/uiStore";
 import { bookIntegrity } from "../budget/ledger";
 import { ymKey } from "../state/recurring";
 import { downloadJson, importJson } from "../state/io";
+import { readLatestBackup } from "../state/storage";
 import { GlassCard } from "./glass/GlassCard";
 import { FieldLabel } from "./glass/GlassInput";
 import { NumberField } from "./glass/NumberField";
@@ -200,6 +201,35 @@ function LastSaved() {
 }
 
 /**
+ * "Last backup" read-out (w3-backup-key), next to LastSaved above. Reads
+ * storage.ts's rolling backup key directly — there's no reactive store slice
+ * for it (promotion is a side effect of the persistence write path, not a
+ * store mutation) — so it's re-read on the same 5s tick LastSaved uses,
+ * which is frequent enough to reflect a promotion that happens to land while
+ * Settings is open without needing dedicated plumbing for a value that only
+ * ever changes at most once per 24h.
+ */
+function LastBackup() {
+  const [now, setNow] = useState(() => Date.now());
+  const [backupAt, setBackupAt] = useState(() => readLatestBackup()?.at ?? null);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setNow(Date.now());
+      setBackupAt(readLatestBackup()?.at ?? null);
+    }, 5000);
+    return () => clearInterval(id);
+  }, []);
+
+  return (
+    <div className="flex items-baseline justify-between gap-4 text-[11px] text-white/45">
+      <span>Last backup</span>
+      <span className="tabular-nums">{backupAt ? relativeTime(backupAt, now) : "none yet"}</span>
+    </div>
+  );
+}
+
+/**
  * Conservation-of-money read-out. Every dollar in an on-budget account must be
  * sitting in an envelope, waiting in Ready-to-Assign, or spent outside the
  * budget — a non-zero drift means the book invented or lost money.
@@ -341,6 +371,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                 </div>
                 <IntegrityCheck />
                 <LastSaved />
+                <LastBackup />
                 <DangerZone />
               </div>
             </GlassCard>
