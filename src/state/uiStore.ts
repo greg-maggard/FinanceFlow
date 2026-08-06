@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { NodeId } from "./schema";
+import type { BudgetBook, NodeId, Txn } from "./schema";
 import type { Direction } from "../theme/motion";
 import { flushSave } from "./store";
 
@@ -9,6 +9,21 @@ export type PendingCelebration = { id: NodeId; onPath: boolean };
 
 /** Where a cross-navigation jump into the Budget screen should land. */
 export type BudgetFocus = { categoryId?: string; accountId?: string };
+
+/**
+ * What a five-second undo toast (w3-search-undo, see UndoToast.tsx) is
+ * holding. A transaction delete parks the exact removed row(s) — a
+ * transfer's two legs come back together. A category delete reassigns
+ * transactions and merges monthly assignments, so nothing narrower than the
+ * entire pre-delete book slice round-trips byte-for-byte; that slice is
+ * captured by the caller (CategoryGroups) before deleteCategory runs.
+ * Deliberately in-memory only — never persisted, never written to the
+ * document as a tombstone. It's either restored before the toast expires,
+ * or it's gone for good.
+ */
+export type PendingUndo =
+  | { kind: "txn"; message: string; txns: Txn[] }
+  | { kind: "category"; message: string; budget: BudgetBook };
 
 /**
  * Fast-entry memory (w2-fastentry): the account and, per account, the
@@ -57,6 +72,10 @@ type UIStore = {
    *  Drives the non-blocking update banner in TopBar; see setPwaUpdateHandler
    *  below for how the reload itself is triggered. */
   needRefresh: boolean;
+  /** Non-null while a delete's five-second undo window is open; null once
+   *  it's accepted, expired, or superseded by a newer delete. See
+   *  PendingUndo and UndoToast.tsx. */
+  pendingUndo: PendingUndo | null;
   setView: (v: ViewMode) => void;
   setFocus: (id: NodeId | null, direction?: Direction) => void;
   openInBudget: (target: BudgetFocus) => void;
@@ -74,6 +93,7 @@ type UIStore = {
   setLastSaved: (at: number) => void;
   setNeedRefresh: (v: boolean) => void;
   setStaleTab: (message: string) => void;
+  setPendingUndo: (u: PendingUndo | null) => void;
 };
 
 /**
@@ -170,6 +190,7 @@ export const useUI = create<UIStore>((set) => ({
   lastSavedAt: null,
   staleTab: null,
   needRefresh: false,
+  pendingUndo: null,
   setView: (v) => set({ view: v }),
   setFocus: (id, direction = "none") => set({ focusedId: id, direction, view: "focus" }),
   openInBudget: (target) => set({ view: "budget", budgetFocus: target }),
@@ -193,6 +214,7 @@ export const useUI = create<UIStore>((set) => ({
   // Once set, this never gets cleared by anything short of a fresh module
   // load (i.e. a reload) — see the `staleTab` doc comment above.
   setStaleTab: (message) => set({ staleTab: message }),
+  setPendingUndo: (u) => set({ pendingUndo: u }),
 }));
 
 // The most recently seen restorable (`focus`/`budget`) view. Landing on

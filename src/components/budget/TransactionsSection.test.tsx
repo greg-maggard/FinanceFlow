@@ -1,9 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useStore } from "../../state/store";
+import { useUI } from "../../state/uiStore";
 import { UNCATEGORIZED_CATEGORY_ID } from "../../state/schema";
 import { bookIntegrity, isoDay } from "../../budget/ledger";
 import { TransactionsSection } from "./TransactionsSection";
+import { UndoToast } from "../UndoToast";
 
 function seedAccount() {
   useStore.getState().addAccount({
@@ -31,6 +33,7 @@ function seedTxns(count: number) {
 describe("TransactionsSection", () => {
   beforeEach(() => {
     useStore.getState().reset();
+    useUI.setState({ pendingUndo: null });
   });
 
   afterEach(() => {
@@ -380,5 +383,190 @@ describe("TransactionsSection", () => {
     expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
     // No count indicator when the list is empty.
     expect(screen.queryByText(/^0 of/)).toBeNull();
+  });
+
+  // w3-search-undo: a payee text filter and a category filter, applied
+  // before paging so they reach the full history, not just the visible page.
+  describe("search and filter", () => {
+    it("filters the full transaction history by payee, not just the current page", () => {
+      seedAccount();
+      seedTxns(120); // "Payee 0".."Payee 119", none of which contain "special"
+      useStore.getState().addTxn({
+        id: "special",
+        accountId: "checking",
+        date: "2024-01-15",
+        payee: "Very Special Coffee Co",
+        amount: -999,
+        source: "manual",
+      });
+      render(<TransactionsSection />);
+
+      // Beyond page 1 (50 rows) and not currently rendered.
+      expect(screen.queryByText("Very Special Coffee Co")).toBeNull();
+
+      fireEvent.change(screen.getByLabelText("Search transactions by payee"), {
+        target: { value: "special" },
+      });
+
+      // Case-insensitive substring match found it despite paging.
+      expect(screen.getByText("Very Special Coffee Co")).toBeInTheDocument();
+      expect(screen.getByText("1 of 1")).toBeInTheDocument();
+      expect(screen.queryByText(/^Payee \d+$/)).toBeNull();
+    });
+
+    it("filters by a real category via the shared category filter", () => {
+      seedAccount();
+      useStore.getState().addGroup("Everyday");
+      const groupId = useStore.getState().budget.groups[0].id;
+      useStore.getState().addCategory(groupId, "Coffee Shops");
+      const coffeeId = useStore.getState().budget.categories[0].id;
+      useStore.getState().addTxn({
+        id: "c1",
+        accountId: "checking",
+        date: "2024-01-05",
+        payee: "Roasters",
+        amount: -400,
+        categoryId: coffeeId,
+        source: "manual",
+      });
+      useStore.getState().addTxn({
+        id: "c2",
+        accountId: "checking",
+        date: "2024-01-06",
+        payee: "Bookstore",
+        amount: -1200,
+        categoryId: coffeeId,
+        source: "manual",
+      });
+      useStore.getState().addTxn({
+        id: "u1",
+        accountId: "checking",
+        date: "2024-01-07",
+        payee: "Misc",
+        amount: -300,
+        categoryId: UNCATEGORIZED_CATEGORY_ID,
+        source: "manual",
+      });
+      render(<TransactionsSection />);
+
+      expect(screen.getByText("Misc")).toBeInTheDocument();
+      fireEvent.change(screen.getByLabelText("Filter by category"), {
+        target: { value: coffeeId },
+      });
+
+      expect(screen.getByText("Roasters")).toBeInTheDocument();
+      expect(screen.getByText("Bookstore")).toBeInTheDocument();
+      expect(screen.queryByText("Misc")).toBeNull();
+    });
+  });
+
+  // w3-search-undo: deleting a transaction is now a single tap (the old
+  // two-tap arming — if it were ever here — is gone); a five-second undo
+  // toast is the safety net instead.
+  describe("delete undo", () => {
+    function renderWithToast() {
+      render(
+        <>
+          <TransactionsSection />
+          <UndoToast />
+        </>,
+      );
+    }
+
+    it("deletes on a single tap and shows an undo toast; accepting undo restores the exact row, id included, with drift 0 throughout", () => {
+      seedAccount();
+      useStore.getState().addTxn({
+        id: "t1",
+        accountId: "checking",
+        date: "2024-01-05",
+        payee: "Grocery run",
+        amount: -4250,
+        categoryId: UNCATEGORIZED_CATEGORY_ID,
+        source: "manual",
+      });
+      renderWithToast();
+      expect(bookIntegrity(useStore.getState().budget, "2024-01").drift).toBe(0);
+
+      fireEvent.click(screen.getByRole("button", { name: "Transaction actions" }));
+      // Single tap — no arming/"tap again" step in between.
+      fireEvent.click(screen.getByRole("button", { name: "Delete transaction" }));
+
+      expect(useStore.getState().budget.transactions).toHaveLength(0);
+      expect(bookIntegrity(useStore.getState().budget, "2024-01").drift).toBe(0);
+      expect(screen.getByText('Deleted "Grocery run"')).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+
+      const budget = useStore.getState().budget;
+      expect(budget.transactions).toHaveLength(1);
+      expect(budget.transactions[0].id).toBe("t1");
+      expect(budget.transactions[0].payee).toBe("Grocery run");
+      expect(bookIntegrity(budget, "2024-01").drift).toBe(0);
+      // Accepted — nothing left pending (framer-motion's exit animation keeps
+      // the toast's own DOM node around briefly, so the state, not the DOM,
+      // is the reliable signal that undo has been consumed).
+      expect(useUI.getState().pendingUndo).toBeNull();
+    });
+
+    it("restores both legs of a deleted transfer together", () => {
+      seedAccount();
+      useStore.getState().addAccount({
+        id: "savings",
+        name: "Savings",
+        kind: "savings",
+        source: "manual",
+      });
+      useStore.getState().addTransfer({
+        from: "checking",
+        to: "savings",
+        amount: 5000,
+        date: "2024-01-05",
+      });
+      renderWithToast();
+      expect(useStore.getState().budget.transactions).toHaveLength(2);
+
+      // Both legs render their own row, each with its own kebab — either
+      // one's "Delete transfer" removes the pair together.
+      fireEvent.click(screen.getAllByRole("button", { name: "Transaction actions" })[0]);
+      fireEvent.click(screen.getByRole("button", { name: "Delete transfer" }));
+
+      expect(useStore.getState().budget.transactions).toHaveLength(0);
+      expect(screen.getByText("Transfer deleted")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+
+      const budget = useStore.getState().budget;
+      expect(budget.transactions).toHaveLength(2);
+      expect(budget.transactions.every((t) => Math.abs(t.amount) === 5000)).toBe(true);
+      expect(bookIntegrity(budget, "2024-01").drift).toBe(0);
+    });
+
+    it("auto-dismisses the undo toast after five seconds without restoring anything", () => {
+      vi.useFakeTimers();
+      seedAccount();
+      useStore.getState().addTxn({
+        id: "t1",
+        accountId: "checking",
+        date: "2024-01-05",
+        payee: "Grocery run",
+        amount: -4250,
+        categoryId: UNCATEGORIZED_CATEGORY_ID,
+        source: "manual",
+      });
+      renderWithToast();
+
+      fireEvent.click(screen.getByRole("button", { name: "Transaction actions" }));
+      fireEvent.click(screen.getByRole("button", { name: "Delete transaction" }));
+      expect(useUI.getState().pendingUndo).not.toBeNull();
+
+      act(() => {
+        vi.advanceTimersByTime(5000);
+      });
+
+      expect(useUI.getState().pendingUndo).toBeNull();
+      expect(useStore.getState().budget.transactions).toHaveLength(0);
+      vi.useRealTimers();
+    });
   });
 });

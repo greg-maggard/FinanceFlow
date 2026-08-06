@@ -43,7 +43,17 @@ type Store = AppState & {
   updateAccount: (account: Account) => void;
   addTxn: (txn: Txn) => void;
   updateTxn: (txn: Txn) => void;
-  deleteTxn: (id: string) => void;
+  /** Returns the removed row(s) — a transfer's two legs come back together —
+   *  so a caller can park them for a w3-search-undo toast instead of the
+   *  delete being silently unrecoverable. Empty array when `id` wasn't found
+   *  (a no-op set, matching the old void behavior for callers that ignore
+   *  the return). */
+  deleteTxn: (id: string) => Txn[];
+  /** Re-inserts previously-removed rows (w3-search-undo's undo action). The
+   *  rows still carry their original categoryId, and that envelope already
+   *  existed when they were deleted, so this never needs to materialize
+   *  Uncategorized the way addTxn/updateTxn do. */
+  restoreTxns: (txns: Txn[]) => void;
   addTransfer: (args: {
     from: string;
     to: string;
@@ -56,6 +66,12 @@ type Store = AppState & {
   addCategory: (groupId: string, name: string) => void;
   updateCategory: (category: Category) => void;
   deleteCategory: (id: string, reassignTo: string) => void;
+  /** Drops in a whole prior `budget` slice verbatim — deleteCategory's
+   *  w3-search-undo restore path. It reassigns transactions and merges
+   *  monthly assignments, so nothing narrower than the entire pre-delete
+   *  slice round-trips byte-for-byte; the caller captures that slice before
+   *  calling deleteCategory and hands it back here on undo. */
+  restoreBudget: (budget: AppState["budget"]) => void;
   applyBookOps: (ops: BookOps) => void;
   reset: () => void;
   replaceAll: (state: AppState) => void;
@@ -210,19 +226,27 @@ export const useStore = create<Store>((set) => ({
         },
       };
     }),
-  deleteTxn: (id) =>
+  deleteTxn: (id) => {
+    let removed: Txn[] = [];
     set((s) => {
       const txn = s.budget.transactions.find((t) => t.id === id);
       if (!txn) return {};
       // A transfer's two rows live and die together.
       const ids = new Set([id, ...(txn.transferPairId ? [txn.transferPairId] : [])]);
+      removed = s.budget.transactions.filter((t) => ids.has(t.id));
       return {
         budget: {
           ...s.budget,
           transactions: s.budget.transactions.filter((t) => !ids.has(t.id)),
         },
       };
-    }),
+    });
+    return removed;
+  },
+  restoreTxns: (txns) =>
+    set((s) => ({
+      budget: { ...s.budget, transactions: [...s.budget.transactions, ...txns] },
+    })),
   addTransfer: (args) =>
     set((s) => {
       const pair = pairTransfer(s.budget.accounts, args);
@@ -337,6 +361,7 @@ export const useStore = create<Store>((set) => ({
         },
       };
     }),
+  restoreBudget: (budget) => set(() => ({ budget })),
   reset: () => set(() => ({ ...makeInitialState() })),
   replaceAll: (state) => set(() => ({ ...state })),
 }));

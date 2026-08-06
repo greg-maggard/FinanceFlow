@@ -8,6 +8,7 @@ import { OverviewSheet } from "./components/OverviewSheet";
 import { CelebrationLayer } from "./components/CelebrationLayer";
 import { RecoveryScreen } from "./components/RecoveryScreen";
 import { StaleTabBanner } from "./components/StaleTabBanner";
+import { UndoToast } from "./components/UndoToast";
 import { AddTransactionFab } from "./components/AddTransactionFab";
 import { FocusStage } from "./components/focus/FocusStage";
 import { BudgetScreen } from "./components/budget/BudgetScreen";
@@ -127,6 +128,9 @@ function AppShell() {
       {/* Persistent across every view (w2-fastentry) — mounted at shell level
           rather than per-view so navigating never hides it. */}
       <AddTransactionFab />
+      {/* w3-search-undo: mounted at shell level like the FAB above, so a
+          delete from any screen shows the same five-second undo toast. */}
+      <UndoToast />
       <StaleTabBanner />
     </div>
   );
