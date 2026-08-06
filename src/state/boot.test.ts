@@ -138,6 +138,51 @@ describe("loadInitial recovery (boot path)", () => {
     expect(localStorage.getItem(KEY)).toBe(raw);
   });
 
+  // F7 (wave-3): the v4 passthrough handed the parsed object straight to the
+  // store, so `writeSeq` — a persistence-internal counter — and any other stray
+  // key booted into live state and out through exportJson, until the first
+  // mutation's toPersistedSlice quietly dropped them again.
+  it("boots a v4 document with stray top-level keys clean, and exports without them", async () => {
+    const doc = { ...(makeInitialState() as any), writeSeq: 7, leftover: "hello" };
+    localStorage.setItem(KEY, JSON.stringify(doc));
+
+    const { getBootRecovery, useStore } = await import("./store");
+    const { exportJson } = await import("./io");
+
+    expect(getBootRecovery()).toBeNull();
+    const state = useStore.getState() as any;
+    expect(state.version).toBe(4);
+    expect(state.writeSeq).toBeUndefined();
+    expect(state.leftover).toBeUndefined();
+
+    const json = exportJson(state);
+    expect(json).not.toMatch(/writeSeq/);
+    expect(json).not.toMatch(/leftover/);
+  });
+
+  // F5c (wave-3): a document with a non-object row used to be normalized into a
+  // different, wrong document — `categories: [7]` became a category with no
+  // id/groupId/order — and the debounced write put that garbage over the
+  // original. iOS threw and preserved the file; the web must too.
+  it("routes a document with a malformed category row to recovery, bytes intact", async () => {
+    const raw = JSON.stringify({
+      ...(makeInitialState() as any),
+      budget: { ...makeInitialState().budget, categories: [7] },
+    });
+    localStorage.setItem(KEY, raw);
+
+    const { getBootRecovery } = await import("./store");
+
+    const recovery = getBootRecovery();
+    expect(recovery).not.toBeNull();
+    expect(recovery?.raw).toBe(raw);
+    expect(recovery?.message).toMatch(/categories\[0\]/);
+
+    expect(localStorage.getItem(KEY)).toBe(raw);
+    await new Promise((r) => setTimeout(r, 350));
+    expect(localStorage.getItem(KEY)).toBe(raw);
+  });
+
   it("F10 case B: routes a v4 document missing budget.assignments to recovery", async () => {
     const state = makeInitialState() as any;
     delete state.budget.assignments;

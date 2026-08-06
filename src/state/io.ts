@@ -14,9 +14,11 @@ import type {
 } from "./schema";
 import {
   DEFAULT_SETTINGS,
+  NODE_IDS,
   RTA_CATEGORY_ID,
   UNCATEGORIZED_CATEGORY_ID,
   centsFromDollars,
+  emptyNodeState,
   ensureUncategorized,
 } from "./schema";
 import { ymKey } from "./recurring";
@@ -52,7 +54,23 @@ export function migrate(input: unknown, now: Date = new Date()): AppState {
     // throw so loadInitial()'s catch routes to RecoveryScreen instead.
     const err = invalidBookReason(obj);
     if (err) throw new Error(`Stored document isn't a valid FinanceFlow document: ${err}`);
-    return obj as AppState;
+    // Project the seven known top-level fields rather than returning the parsed
+    // object itself. Returning it whole carried every unknown key straight into
+    // the store — including `writeSeq`, a persistence-internal counter — where
+    // `exportJson` then wrote them into user-facing backup files, until the
+    // first mutation's `toPersistedSlice` silently dropped them again (so two
+    // exports of the "same" document differed). Swift's decoder ignores unknown
+    // keys, so projecting here is also what makes the round trip symmetric.
+    const v4 = obj as unknown as AppState;
+    return {
+      version: 4,
+      settings: v4.settings,
+      decisions: v4.decisions,
+      nodes: v4.nodes,
+      budget: v4.budget,
+      shownCelebrations: v4.shownCelebrations ?? [],
+      earnedMedals: v4.earnedMedals ?? [],
+    };
   }
   // v3 and v4 are structurally identical — only the units differ — so the same
   // shallow validation guards the v3 document before it is walked.
@@ -77,9 +95,19 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 /**
  * Structural check for a v3/v4 document, run before it's cast or walked.
  * Returns a human-readable reason it's invalid, or `null` when it's shaped
- * correctly enough to trust. Intentionally shallow (container types, not every
- * field of every row) — deep enough to catch the failure modes a hand-edited
- * or truncated document actually produces.
+ * correctly enough to trust. Still shallow in the sense that it does not check
+ * every *field* of every row — but it does check that every row IS a row, and
+ * that every assignment table IS a table.
+ *
+ * That last part is not pedantry. Without it a damaged document was silently
+ * normalized into a different, wrong document: `categories: [7]` became a
+ * category with no `id`, `groupId` or `order`, and
+ * `assignments: {"2026-06": [1, 2]}` became `{"0": 100, "1": 200}` — array
+ * indices reinterpreted as category ids — and the result was written back over
+ * the original within one debounce, leaving the D7 backup as the only copy of
+ * the user's book. Swift throws on all of these and quarantines the file, so
+ * rejecting here is both the safe answer and the cross-platform one: a document
+ * this damaged goes to RecoveryScreen with its bytes intact.
  */
 function invalidBookReason(obj: Record<string, unknown>): string | null {
   if (!isPlainObject(obj.settings)) return "missing settings.";
@@ -92,6 +120,15 @@ function invalidBookReason(obj: Record<string, unknown>): string | null {
   if (!Array.isArray(budget.groups)) return "budget is missing groups.";
   if (!Array.isArray(budget.categories)) return "budget is missing categories.";
   if (!isPlainObject(budget.assignments)) return "budget is missing assignments.";
+
+  for (const table of ["accounts", "transactions", "groups", "categories"] as const) {
+    const rows = budget[table] as unknown[];
+    const bad = rows.findIndex((row) => !isPlainObject(row));
+    if (bad !== -1) return `budget.${table}[${bad}] isn't a record.`;
+  }
+  for (const [month, table] of Object.entries(budget.assignments as Record<string, unknown>)) {
+    if (!isPlainObject(table)) return `budget.assignments["${month}"] isn't a record.`;
+  }
   return null;
 }
 
@@ -105,19 +142,29 @@ function invalidBookReason(obj: Record<string, unknown>): string | null {
 // counts (`targetMonths`, `targetAge`, `order`), dates, ids and enums are NOT
 // money and are copied through untouched.
 
-/** Optional money: `undefined` stays `undefined` rather than becoming 0. */
-function optCents(d: number | undefined): Cents | undefined {
-  return d === undefined ? undefined : centsFromDollars(d);
+/**
+ * Optional money: absent stays absent rather than becoming 0. `null` counts as
+ * absent — a hand-edited document (or one written by a tool that spells a
+ * cleared field as `null`) has no value to convert, and `null * 100` is 0,
+ * which would invent a zero the user never entered. Swift's `decodeIfPresent`
+ * already reads `null` as "no value", so this is also what keeps the two
+ * platforms reading the same bytes the same way.
+ */
+function optCents(d: number | null | undefined): Cents | undefined {
+  return d == null ? undefined : centsFromDollars(d);
 }
 
 /**
  * Required money with a fallback: a hand-edited v3 document missing one of the
  * annual limits used to carry `undefined` through untouched. Converting that
  * would produce `NaN`, which serializes as `null` and quietly destroys the
- * field, so fall back to the v4 default instead.
+ * field, so fall back to the v4 default instead. (Swift used to answer the same
+ * input by throwing `keyNotFound`, which quarantined the entire book over one
+ * absent scalar; it now defaults exactly like this.) `null` takes the fallback
+ * for the same reason `optCents` treats it as absent.
  */
-function requiredCents(d: number | undefined, fallback: Cents): Cents {
-  return d === undefined ? fallback : centsFromDollars(d);
+function requiredCents(d: number | null | undefined, fallback: Cents): Cents {
+  return d == null ? fallback : centsFromDollars(d);
 }
 
 function migrateV3(v3: V3State): AppState {
@@ -175,12 +222,26 @@ function migrateV3(v3: V3State): AppState {
  * The three node payloads that carry money (IRA, HSA, College). `Match` and
  * `Increase401k` are percentages only (D8) and `BigEF` is a month count, so
  * those ride through untouched; `College.targetAge` is an age, not money.
+ *
+ * The table is materialized over every `NodeId`, exactly as Swift's legacy
+ * decoder does (`LegacyDocument.swift:536`), so a sparse v3 document produces
+ * the same 32-node v4 document on both platforms instead of 4 here and 32
+ * there. It also removes a real crash on the sparse path: `deriveStatus`
+ * (`src/graph/derive.ts`) reads `state.nodes[cur].completed` unguarded and
+ * threw on the first absent node, white-screening into the error boundary on a
+ * document iOS rendered fine. Unknown ids are dropped for the same reason
+ * Swift drops them (it only walks `NodeId.allCases`).
  */
 function migrateNodesToV4(
   v3Nodes: Record<NodeId, V3NodeState>,
 ): Record<NodeId, NodeState> {
   const nodes = {} as Record<NodeId, NodeState>;
-  for (const [id, legacy] of Object.entries(v3Nodes) as [NodeId, V3NodeState][]) {
+  for (const id of NODE_IDS) {
+    const legacy = (v3Nodes ?? {})[id];
+    if (!legacy || typeof legacy !== "object") {
+      nodes[id] = emptyNodeState();
+      continue;
+    }
     const { data, ...rest } = legacy;
     const node: NodeState = { ...rest };
     if (data !== undefined) {

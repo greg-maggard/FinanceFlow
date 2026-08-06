@@ -1,0 +1,60 @@
+{
+  "_comment": "A damaged v3 document: a month's assignment table is an array instead of a categoryId -> dollars record. Web used to reinterpret the array indices as category ids ({\"0\": ..., \"1\": ...}); Swift threw. Both must reject it.",
+  "version": 3,
+  "settings": {
+    "monthlyExpenses": 4000,
+    "preTaxIncome": 120000,
+    "iraAnnualLimit": 7000,
+    "hsaSelfLimit": 4300,
+    "hsaFamilyLimit": 8550
+  },
+  "decisions": {
+    "Q_Match": null,
+    "Q_HighDebt": null,
+    "Q_ModDebt": null,
+    "Q_Purchase": null,
+    "Q_15pct": null,
+    "Q_401k": null,
+    "Q_HSA": null,
+    "Q_College": null,
+    "Q_Early": null,
+    "Q_Goals": null
+  },
+  "nodes": {
+    "Start": {
+      "completed": true,
+      "notes": ""
+    }
+  },
+  "budget": {
+    "accounts": [
+      {
+        "id": "checking",
+        "name": "Checking",
+        "kind": "checking",
+        "source": "manual"
+      }
+    ],
+    "transactions": [],
+    "groups": [
+      {
+        "id": "g:bills",
+        "name": "Bills",
+        "order": 0
+      }
+    ],
+    "categories": [
+      {
+        "id": "food",
+        "groupId": "g:bills",
+        "name": "Food",
+        "order": 0
+      }
+    ],
+    "assignments": {
+      "2026-06": [1, 2]
+    }
+  },
+  "shownCelebrations": [],
+  "earnedMedals": []
+}

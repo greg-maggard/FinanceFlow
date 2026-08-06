@@ -53,7 +53,14 @@ struct SharedMigrationFixtureTests {
             try JSONSerialization.jsonObject(with: try fixture("v4-expected.json")) as? [String: Any]
         )
 
-        for key in ["budget", "settings"] {
+        // `nodes` is compared here too, and that is deliberate: while this loop
+        // covered only budget+settings, the "identical v4 documents" guarantee
+        // was quietly scoped to two subtrees, and the platforms genuinely
+        // differed outside them — Swift backfilled every `NodeId` (32 nodes
+        // from this 4-node fixture) while web emitted only the nodes the input
+        // carried. Web now backfills the same way, and this key is what keeps
+        // it that way.
+        for key in ["budget", "settings", "nodes"] {
             let actual = try #require(actualDoc[key] as? NSDictionary, "\(key)")
             let expected = try #require(expectedDoc[key] as? NSDictionary, "\(key)")
             #expect(actual == expected, "\(key) diverged from the committed v4 image")
@@ -102,6 +109,111 @@ struct SharedMigrationFixtureTests {
             let integrity = Ledger.bookIntegrity(out.budget, month: month)
             #expect(integrity.unbudgetedSpending == .zero, "\(month)")
             #expect(integrity.drift == .zero, "\(month)")
+        }
+    }
+
+    /// The node table this platform has always materialized in full. Pinned
+    /// here because web now does the same and `nodes` is inside the byte
+    /// comparison above — the two facts have to move together.
+    @Test("every NodeId is present after migrating a sparse v3 document")
+    func nodeTableIsBackfilled() throws {
+        let out = try IO.importJSON(try fixture("v3-nasty.json"))
+
+        #expect(out.nodes.count == NodeId.allCases.count)
+        for id in NodeId.allCases {
+            #expect(out.nodes[id] != nil, "\(id)")
+        }
+        #expect(out.node(.Options) == NodeState())
+    }
+}
+
+/// F5 (wave-3): the §7 guarantee held for well-formed input and broke on
+/// hostile input — the same bytes produced different books on the two
+/// platforms. Each fixture below is committed next to `v3-nasty.json` and the
+/// identical assertions run in `src/state/io.test.ts`.
+@Suite("Cross-platform determinism on hostile v3 input (F5)")
+struct HostileMigrationFixtureTests {
+
+    private func fixture(_ name: String) throws -> Data {
+        var url = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { url.deleteLastPathComponent() }
+        return try Data(contentsOf: url.appendingPathComponent("fixtures/migration/\(name)"))
+    }
+
+    /// (a) Money outside the range `Int` cents can hold. This platform has
+    /// always clamped; web had no ceiling at all, so `"amount": 1e17` became
+    /// 10000000000000000000 cents there and `.zero` here.
+    @Test("out-of-Int64-range money clamps to zero everywhere it appears")
+    func outOfRangeMoneyClamps() throws {
+        let out = try IO.importJSON(try fixture("v3-out-of-range.json"))
+        let byID = Dictionary(uniqueKeysWithValues: out.budget.transactions.map { ($0.id, $0) })
+
+        #expect(byID["t-over"]?.amount == .zero)     // 1e17 dollars -> 1e19 cents
+        #expect(byID["t-under"]?.amount == .zero)    // -1e17 dollars
+        // 92233720368547758.08 scales to EXACTLY 2⁶³ — one past Int.max, the
+        // value that used to trap the process (see MoneyBoundsTests).
+        #expect(byID["t-edge"]?.amount == .zero)
+        // The clamp is not over-broad: 5e16 dollars is 5e18 cents, which fits.
+        #expect(byID["t-large-ok"]?.amount == Money(cents: 5_000_000_000_000_000_000))
+
+        #expect(out.settings.monthlyExpenses == .zero)
+        #expect(out.budget.categories.first { $0.id == "food" }?.monthlyTarget == .zero)
+        #expect(out.budget.assignments["2026-06"]?["food"] == .zero)
+        #expect(out.node(.College).data?.college?.monthlyContribution == .zero)
+        #expect(out.node(.College).data?.college?.targetAge == 18)
+    }
+
+    /// (b) A document missing the required contribution limits. Decoding used
+    /// to throw `keyNotFound`, and `quarantineAndReset` answered that by
+    /// replacing the user's entire book with empty state over one absent
+    /// scalar. Web substituted the v4 default and migrated the book; that is
+    /// the behaviour worth keeping, so this side now matches it.
+    @Test("a missing contribution limit takes the v4 default instead of failing the document")
+    func missingRequiredSettingDefaults() throws {
+        let out = try IO.importJSON(try fixture("v3-out-of-range.json"))
+
+        #expect(out.settings.iraAnnualLimit == Money(cents: 700_000))
+        #expect(out.settings.hsaSelfLimit == Money(cents: 430_000))
+        #expect(out.settings.hsaFamilyLimit == Money(cents: 855_000))
+        // An explicit `null` is "no value" on both sides: web used to convert it
+        // to 0 cents (`null * 100`) while this decoder read it as absent.
+        #expect(out.settings.preTaxIncome == nil)
+        // And the book itself survived, which is the whole point.
+        #expect(out.budget.transactions.count == 4)
+        #expect(out.nodes.count == NodeId.allCases.count)
+    }
+
+    /// A limit that is present but the wrong *type* is corruption, not an
+    /// omission, and still fails the document on both platforms.
+    @Test("a malformed contribution limit still throws")
+    func malformedRequiredSettingThrows() throws {
+        let raw = """
+        {"version": 3,
+         "settings": { "iraAnnualLimit": "seven thousand" },
+         "decisions": {}, "nodes": {},
+         "budget": { "accounts": [], "categories": [], "groups": [],
+           "transactions": [], "assignments": {} }}
+        """
+        #expect(throws: (any Error).self) {
+            _ = try IO.importString(raw)
+        }
+    }
+
+    /// (c) Malformed rows. This platform has always thrown (so the file is
+    /// quarantined intact); web silently normalized the garbage into a
+    /// *different* document — `categories: [7]` became a category with no
+    /// id/groupId/order — and wrote it back over the original.
+    @Test("a non-object row is rejected, not normalized")
+    func malformedRowsAreRejected() throws {
+        #expect(throws: (any Error).self) {
+            _ = try IO.importJSON(try fixture("v3-malformed-rows.json"))
+        }
+    }
+
+    @Test("a non-object assignment table is rejected, not reinterpreted")
+    func malformedAssignmentsAreRejected() throws {
+        #expect(throws: (any Error).self) {
+            _ = try IO.importJSON(try fixture("v3-malformed-assignments.json"))
         }
     }
 }

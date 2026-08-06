@@ -1,9 +1,19 @@
 import { describe, expect, it } from "vitest";
 import v3Nasty from "../../fixtures/migration/v3-nasty.json";
 import v4Expected from "../../fixtures/migration/v4-expected.json";
-import { UNCATEGORIZED_CATEGORY_ID, makeInitialState } from "./schema";
+import v3OutOfRange from "../../fixtures/migration/v3-out-of-range.json";
+import v3MalformedRows from "../../fixtures/migration/v3-malformed-rows.json";
+import v3MalformedAssignments from "../../fixtures/migration/v3-malformed-assignments.json";
+import {
+  NODE_IDS,
+  UNCATEGORIZED_CATEGORY_ID,
+  centsFromDollars,
+  emptyNodeState,
+  makeInitialState,
+} from "./schema";
 import { exportJson, importJson, migrate } from "./io";
 import { accountBalance, bookIntegrity, snapshot } from "../budget/ledger";
+import { deriveStatus } from "../graph/derive";
 
 const NOW = new Date(2026, 5, 10); // 2026-06-10 local
 
@@ -605,5 +615,188 @@ describe("cross-platform migration fixture (money-migration-v4.md §7)", () => {
       expect(integrity.unbudgetedSpending, month).toBe(0);
       expect(integrity.drift, month).toBe(0);
     }
+  });
+
+  // The §7 image is only as strong as the keys it covers. `nodes` used to be
+  // outside it, and the platforms genuinely differed there: Swift's legacy
+  // decoder materializes every NodeId, web emitted only the nodes the input
+  // carried. Both sides now backfill, and both fixture tests compare `nodes`.
+  it("backfills the whole node table, matching Swift's NodeId.allCases", () => {
+    const out = migrate(read(v3Nasty));
+
+    expect(Object.keys(out.nodes).sort()).toEqual([...NODE_IDS].sort());
+    expect(Object.keys(out.nodes)).toHaveLength(32);
+    // The nodes the input carried are untouched by the backfill...
+    expect(out.nodes.Rent).toEqual({
+      completed: false,
+      notes: "due on the 1st",
+      monthlyChecks: { "2026-05": true },
+    });
+    // ...and the ones it didn't arrive empty, exactly as a fresh document's do.
+    expect(out.nodes.Options).toEqual(emptyNodeState());
+  });
+
+  it("survives deriveStatus on a v3 document with a sparse node table", () => {
+    const sparse = read(v3Nasty);
+    sparse.nodes = { Start: { completed: true, notes: "" } };
+
+    const out = migrate(sparse);
+
+    // Before the backfill this threw on the first absent node (derive.ts reads
+    // `state.nodes[cur].completed` unguarded), white-screening into App.tsx's
+    // error boundary on a document iOS rendered fine.
+    expect(() => deriveStatus(out)).not.toThrow();
+    expect(deriveStatus(out).Rent).toBeDefined();
+  });
+
+  it("drops node ids it doesn't know, exactly as Swift's keyed decode does", () => {
+    const stray = read(v3Nasty);
+    stray.nodes.NotANode = { completed: true, notes: "from the future" };
+
+    expect(Object.keys(migrate(stray).nodes)).toHaveLength(32);
+    expect((migrate(stray).nodes as Record<string, unknown>).NotANode).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F5 (wave-3): the §7 "identical by construction" claim held for well-formed
+// input and broke on hostile input — the same bytes produced different books on
+// the two platforms. These three fixtures are committed alongside v3-nasty and
+// the identical assertions run in `SharedMigrationFixtureTests.swift`.
+
+describe("cross-platform determinism on hostile v3 input (F5)", () => {
+  const read = (fixture: unknown) => JSON.parse(JSON.stringify(fixture));
+
+  // (a) Money outside the range Swift's Int64 cents can hold. Web had no
+  // ceiling at all, so `"amount": 1e17` migrated to 10000000000000000000 cents
+  // here and 0 on iOS.
+  it("clamps every out-of-Int64-range amount to zero, as Money.fromDollars does", () => {
+    const out = migrate(read(v3OutOfRange));
+    const amount = (id: string) => out.budget.transactions.find((t) => t.id === id)?.amount;
+
+    expect(amount("t-over")).toBe(0); // 1e17 dollars -> 1e19 cents, past Int64
+    expect(amount("t-under")).toBe(0); // -1e17 dollars, past Int64 the other way
+    // 92233720368547758.08 scales to EXACTLY 2^63, which is one past Int.max —
+    // the value that made Swift's `Int(_:)` trap before the bound went strict.
+    expect(amount("t-edge")).toBe(0);
+    // The clamp is not over-broad: a large value that still fits rides through.
+    expect(amount("t-large-ok")).toBe(5_000_000_000_000_000_000);
+
+    // Same rule everywhere money appears, not just on transactions.
+    expect(out.settings.monthlyExpenses).toBe(0);
+    expect(out.budget.categories.find((c) => c.id === "food")?.monthlyTarget).toBe(0);
+    expect(out.budget.assignments["2026-06"].food).toBe(0);
+    expect((out.nodes.College.data as { monthlyContribution: number }).monthlyContribution).toBe(0);
+  });
+
+  it("pins the exact Int64 boundary in centsFromDollars", () => {
+    // Bounds copied from Money.swift: the low one is inclusive (-2^63 is an
+    // exactly representable Int), the high one is strict (Double(Int.max)
+    // rounds UP to 2^63, which no Int can hold).
+    expect(centsFromDollars(-(2 ** 63) / 100)).toBe(-(2 ** 63));
+    expect(centsFromDollars(2 ** 63 / 100)).toBe(0);
+    expect(centsFromDollars(1e17)).toBe(0);
+    expect(centsFromDollars(-1e17)).toBe(0);
+    expect(centsFromDollars(Infinity)).toBe(0);
+    expect(centsFromDollars(-Infinity)).toBe(0);
+    expect(centsFromDollars(NaN)).toBe(0);
+    // Ordinary money is untouched by the new guard.
+    expect(centsFromDollars(-12.345)).toBe(-1234);
+    expect(centsFromDollars(1234567.89)).toBe(123_456_789);
+  });
+
+  // (b) A missing required limit. Swift threw `keyNotFound` and quarantined the
+  // entire book; web defaulted and migrated. Defaulting wins: the limits are
+  // IRS figures the app ships a default for, and blanking a user's ledger over
+  // one absent scalar is not a trade anyone would take.
+  it("defaults the contribution limits the document omits instead of failing", () => {
+    const out = migrate(read(v3OutOfRange));
+
+    expect(out.settings.iraAnnualLimit).toBe(700_000);
+    expect(out.settings.hsaSelfLimit).toBe(430_000);
+    expect(out.settings.hsaFamilyLimit).toBe(855_000);
+    // An explicit `null` is "no value", not zero dollars — `null * 100` used to
+    // migrate a cleared field into a 0 the user never entered, while Swift's
+    // decodeIfPresent read the same bytes as absent.
+    expect(out.settings.preTaxIncome).toBeUndefined();
+    // And the book itself survived, which is the whole point.
+    expect(out.budget.transactions).toHaveLength(4);
+  });
+
+  // (c) Malformed rows. Web silently normalized garbage into a *different*
+  // document and wrote it back over the original within one debounce.
+  it("rejects a non-object row instead of normalizing it into a blank record", () => {
+    expect(() => migrate(read(v3MalformedRows))).toThrow(/categories\[0\]/);
+  });
+
+  it("rejects a non-object assignment table instead of reading indices as ids", () => {
+    expect(() => migrate(read(v3MalformedAssignments))).toThrow(/assignments\["2026-06"\]/);
+  });
+
+  it("rejects a non-object row in every table it walks, at v3 and at v4", () => {
+    for (const table of ["accounts", "transactions", "groups", "categories"] as const) {
+      const v4 = makeInitialState() as any;
+      v4.budget[table] = [null];
+      expect(() => migrate(v4), table).toThrow(new RegExp(`${table}\\[0\\]`));
+
+      const v3 = read(v3MalformedRows);
+      v3.budget.categories = [];
+      v3.budget[table] = ["garbage"];
+      expect(() => migrate(v3), table).toThrow(new RegExp(`${table}\\[0\\]`));
+    }
+  });
+
+  it("still accepts empty tables and a book with no assignments at all", () => {
+    const s = makeInitialState();
+    expect(() => migrate(s)).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F7 (wave-3): the v4 passthrough returned the parsed object itself, so every
+// unknown top-level key rode into the store and out through exportJson —
+// including `writeSeq`, a persistence-internal counter that has no business in
+// a user-facing backup file. Swift's decoder ignores unknown keys, so this was
+// a round-trip asymmetry too.
+
+describe("v4 passthrough projects only the seven known fields (F7)", () => {
+  const withStrays = () => ({
+    ...(makeInitialState() as any),
+    writeSeq: 7,
+    leftover: "hello",
+  });
+
+  it("drops unknown top-level keys instead of carrying them into the store", () => {
+    const out = migrate(withStrays()) as any;
+
+    expect(Object.keys(out).sort()).toEqual(
+      ["budget", "decisions", "earnedMedals", "nodes", "settings", "shownCelebrations", "version"],
+    );
+    expect(out.writeSeq).toBeUndefined();
+    expect(out.leftover).toBeUndefined();
+    // Everything that IS known is passed through untouched.
+    expect(out).toEqual(makeInitialState());
+  });
+
+  it("keeps them out of exportJson", () => {
+    const json = exportJson(migrate(withStrays()));
+
+    expect(json).not.toMatch(/writeSeq/);
+    expect(json).not.toMatch(/leftover/);
+    // An export taken before the first mutation and one taken after it are now
+    // the same bytes; they used to differ, because toPersistedSlice dropped the
+    // strays on the first save.
+    expect(JSON.parse(json)).toEqual(makeInitialState());
+  });
+
+  it("supplies the two optional lists when a v4 document omits them", () => {
+    const doc = makeInitialState() as any;
+    delete doc.shownCelebrations;
+    delete doc.earnedMedals;
+
+    const out = migrate(doc);
+
+    expect(out.shownCelebrations).toEqual([]);
+    expect(out.earnedMedals).toEqual([]);
   });
 });

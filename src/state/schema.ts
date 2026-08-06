@@ -49,14 +49,24 @@ export const cents = (n: number): Cents => n as Cents;
  * -1235 — do not substitute a round-half-away-from-zero rule on either side).
  */
 export function centsFromDollars(dollars: number): Cents {
+  const scaled = Math.floor(dollars * 100 + 0.5);
   // A JSON document cannot spell NaN or Infinity, but it CAN spell a literal
   // too large for a double (`1e400` parses as Infinity). Migration must never
   // turn unreadable input into a NaN that then serializes as `null` and eats
   // the field — clamp to zero, which is at least a number the ledger can
-  // reason about. The Swift mirror does the same, where an unguarded
-  // `Int(...)` conversion would trap instead.
-  if (!Number.isFinite(dollars)) return cents(0);
-  return cents(Math.floor(dollars * 100 + 0.5));
+  // reason about.
+  //
+  // The range check is the *same* guard, not an extra one: Swift's cents are
+  // `Int` (64-bit), so `Money.fromDollars` clamps anything outside Int64 to
+  // zero. A JS `number` has no such ceiling, so without this a hostile
+  // `"amount": 1e17` migrated to `10000000000000000000` on web and `0` on iOS
+  // — the same bytes, two different books. Bounds are copied from Swift
+  // literally, including the strict upper one: `Double(Int.max)` rounds UP to
+  // 2⁶³, which `Int(_:)` cannot represent (it traps), so 2⁶³ itself is out of
+  // range on BOTH platforms. `Double(Int.min)` is exactly -2⁶³ and IS
+  // representable, so that side is inclusive.
+  if (!Number.isFinite(scaled) || scaled < -(2 ** 63) || scaled >= 2 ** 63) return cents(0);
+  return cents(scaled);
 }
 
 export type SourcedNumber = {
@@ -297,19 +307,26 @@ export function emptyNodeState(): NodeState {
   return { completed: false, notes: "" };
 }
 
+/**
+ * Every `NodeId`, in flowchart order — the web mirror of Swift's
+ * `NodeId.allCases`. Anything that materializes a full node table (a fresh
+ * document, the v3→v4 migration's backfill) walks this list, so the two
+ * platforms cannot disagree about which nodes a document contains.
+ */
+export const NODE_IDS: readonly NodeId[] = [
+  "Start", "Rent", "Food", "Essential", "Income", "Health", "MinDebt",
+  "SmallEF", "NonEssential", "BigEF",
+  "Q_Match", "Match",
+  "Q_HighDebt", "HighDebt", "Q_ModDebt", "ModDebt",
+  "IRA", "Q_Purchase", "SavePurchase",
+  "Q_15pct", "Q_401k", "Increase401k", "SelfEmp",
+  "Q_HSA", "HSA", "Q_College", "College", "Options",
+  "Q_Early", "Early", "Q_Goals", "Goals",
+];
+
 export function makeInitialState(): AppState {
-  const ids: NodeId[] = [
-    "Start", "Rent", "Food", "Essential", "Income", "Health", "MinDebt",
-    "SmallEF", "NonEssential", "BigEF",
-    "Q_Match", "Match",
-    "Q_HighDebt", "HighDebt", "Q_ModDebt", "ModDebt",
-    "IRA", "Q_Purchase", "SavePurchase",
-    "Q_15pct", "Q_401k", "Increase401k", "SelfEmp",
-    "Q_HSA", "HSA", "Q_College", "College", "Options",
-    "Q_Early", "Early", "Q_Goals", "Goals",
-  ];
   const nodes = {} as Record<NodeId, NodeState>;
-  for (const id of ids) nodes[id] = emptyNodeState();
+  for (const id of NODE_IDS) nodes[id] = emptyNodeState();
   return {
     version: 4,
     settings: { ...DEFAULT_SETTINGS },
