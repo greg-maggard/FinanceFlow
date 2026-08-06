@@ -49,7 +49,12 @@ describe("BudgetScreen: fund this month", () => {
     expect(screen.getByText("Nothing assigned yet this month")).toBeTruthy();
     expect(screen.queryByText("Monthly target")).toBeNull();
 
+    // The tap asks first, naming the total and the envelope count.
     fireEvent.click(screen.getAllByRole("button", { name: "Fund this month" })[0]);
+    expect(screen.getByText("Move $1,600 into 2 envelopes?")).toBeTruthy();
+    expect(snapshot(useStore.getState().budget, MONTH).readyToAssign).toBe(2000);
+
+    fireEvent.click(screen.getByRole("button", { name: "Move $1,600" }));
 
     const snap = snapshot(useStore.getState().budget, MONTH);
     const byName = Object.fromEntries(
@@ -62,17 +67,71 @@ describe("BudgetScreen: fund this month", () => {
     // The month is funded: the prompt gives way to the bars it replaced.
     expect(screen.queryByText("Nothing assigned yet this month")).toBeNull();
     expect(screen.getAllByText("Monthly target")).toHaveLength(2);
-    // Nothing left to fund, so the button retires rather than lying.
+    // Nothing left to fund, so the button retires rather than lying — but the
+    // receipt stays: a four-figure move must never happen silently.
     expect(screen.queryByRole("button", { name: "Fund this month" })).toBeNull();
+    expect(screen.getByText("Funded 2 envelopes, $1,600 moved")).toBeTruthy();
+  });
+
+  it("cancelling the confirmation moves nothing", () => {
+    seed(2000);
+    render(<BudgetScreen />);
+    fireEvent.click(screen.getAllByRole("button", { name: "Fund this month" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByText("Move $1,600 into 2 envelopes?")).toBeNull();
+    expect(useStore.getState().budget.assignments[MONTH]).toBeUndefined();
+    expect(snapshot(useStore.getState().budget, MONTH).readyToAssign).toBe(2000);
+    expect(screen.getAllByRole("button", { name: "Fund this month" }).length).toBeGreaterThan(0);
   });
 
   it("reports what the money did not cover", () => {
     seed(1300);
     render(<BudgetScreen />);
     fireEvent.click(screen.getAllByRole("button", { name: "Fund this month" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Move $1,300" }));
 
-    expect(screen.getByText("Funded 1 of 2 envelopes — $300 short")).toBeTruthy();
+    expect(screen.getByText("Funded 2 envelopes, $1,300 moved — $300 still short")).toBeTruthy();
     expect(snapshot(useStore.getState().budget, MONTH).readyToAssign).toBe(0);
+    expect(bookIntegrity(useStore.getState().budget, MONTH).drift).toBe(0);
+  });
+
+  it("with nothing to move there is nothing to confirm — it just says so", () => {
+    seed(0);
+    render(<BudgetScreen />);
+    fireEvent.click(screen.getAllByRole("button", { name: "Fund this month" })[0]);
+
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(
+      screen.getByText("Nothing to move — Ready to Assign is empty, $1,600 still short"),
+    ).toBeTruthy();
+    expect(useStore.getState().budget.assignments[MONTH]).toBeUndefined();
+  });
+
+  it("spending a funded envelope down does not re-arm the button", () => {
+    seed(2000);
+    render(<BudgetScreen />);
+    fireEvent.click(screen.getAllByRole("button", { name: "Fund this month" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Move $1,600" }));
+    expect(screen.queryByRole("button", { name: "Fund this month" })).toBeNull();
+
+    const groceries = useStore.getState().budget.categories.find((c) => c.name === "Groceries")!;
+    useStore.getState().addTxn({
+      id: "spend",
+      accountId: "checking",
+      date: `${MONTH}-25`,
+      payee: "Market",
+      amount: -400,
+      categoryId: groceries.id,
+      source: "manual",
+    });
+
+    // The envelope is empty, but the month's contribution was already made —
+    // offering the tap again would refund every dollar spent.
+    const snap = snapshot(useStore.getState().budget, MONTH);
+    expect(snap.categories[groceries.id]!.available).toBe(0);
+    expect(screen.queryByRole("button", { name: "Fund this month" })).toBeNull();
+    expect(snap.readyToAssign).toBe(400);
     expect(bookIntegrity(useStore.getState().budget, MONTH).drift).toBe(0);
   });
 });

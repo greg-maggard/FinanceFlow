@@ -364,13 +364,20 @@ export type FundShortfall = {
   short: number;
 };
 
+/**
+ * What one tap of "Fund this month" would do — described as a *plan*, before
+ * anything is applied. Every count here answers "what is about to happen",
+ * which is what a confirmation dialog has to state out loud.
+ */
 export type FundMonthPlan = {
   ops: BookOps;
   /** Envelopes carrying a positive monthly target. */
   targeted: number;
-  /** Of those, how many stand at or above target once `ops` are applied. */
-  funded: number;
-  /** The rest, in book order — what the UI reports. */
+  /** Of those, how many this plan actually moves money into. */
+  funding: number;
+  /** Dollars this plan moves out of Ready to Assign — Σ of the ops' increases. */
+  total: number;
+  /** Envelopes the money ran out before filling, in book order. */
   underfunded: FundShortfall[];
   /** Σ of `underfunded[].short`. */
   shortfall: number;
@@ -383,10 +390,19 @@ export type FundMonthPlan = {
  * field at zero — without this, funding ~15 envelopes is ~15 manual number
  * entries on the 1st of every month, forever.
  *
- * The need is measured against AVAILABLE, not assigned: money carried over
- * from last month already covers the target, so a month-ahead user is never
- * asked to fund the same envelope twice, and an envelope holding half its
- * target is topped up by exactly the difference.
+ * The need is measured against what the envelope HELD for the month —
+ * `available - activity`, i.e. carryover + assigned — which is the same
+ * quantity `recurringTotals` calls funded. One definition of "funded for month
+ * M", used by both, so the Focus card and this button can never disagree:
+ *
+ * - Money carried in from last month already covers the target, so a
+ *   month-ahead user is never asked to fund the same envelope twice.
+ * - Spending *from* an envelope during the month does not re-open its need.
+ *   This is a once-a-month contribution, not a refill-to-target that stays
+ *   armed all month and quietly re-funds every dollar spent.
+ * - An envelope overspent this month asks for its target and no more; the
+ *   overspend is the sweep's business (a negative available never carries), not
+ *   something to top up past target out of Ready to Assign.
  *
  * Categories are walked in the book's declared order — `book.categories` as
  * stored, which is a deterministic total order on both platforms — each taking
@@ -395,8 +411,9 @@ export type FundMonthPlan = {
  * nothing to hand out) and this action can never drive it negative. Whatever
  * the money ran out before reaching is reported, not silently skipped.
  *
- * Idempotent: once an envelope's available equals its target its need is 0 and
- * it emits no op, so running this twice in a row does nothing the second time.
+ * Idempotent for the rest of the month: once an envelope has held its target,
+ * its need is 0 and it emits no op — running this again does nothing, whatever
+ * has been spent since.
  */
 export function planFundMonth(book: BudgetBook, month: MonthKey): FundMonthPlan {
   const snap = snapshot(book, month);
@@ -406,13 +423,18 @@ export function planFundMonth(book: BudgetBook, month: MonthKey): FundMonthPlan 
   const underfunded: FundShortfall[] = [];
   let targeted = 0;
   let shortfallC = 0;
+  let totalC = 0;
 
   for (const cat of book.categories) {
     const targetC = toCents(cat.monthlyTarget ?? 0);
     if (targetC <= 0) continue;
     targeted += 1;
     const m = snap.categories[cat.id] ?? { assigned: 0, activity: 0, available: 0 };
-    const needC = Math.max(0, targetC - toCents(m.available));
+    // What the envelope held for the month: carryover + assigned. Carryover is
+    // never negative (`snapshot` sweeps a month-end hole into Ready to Assign
+    // instead of carrying it), so this is >= 0 and needs no clamp.
+    const heldC = toCents(m.available) - toCents(m.activity);
+    const needC = Math.max(0, targetC - heldC);
     if (needC === 0) continue;
     const giveC = Math.min(needC, remainingC);
     if (giveC > 0) {
@@ -422,6 +444,7 @@ export function planFundMonth(book: BudgetBook, month: MonthKey): FundMonthPlan 
         amount: fromCents(toCents(m.assigned) + giveC),
       });
       remainingC -= giveC;
+      totalC += giveC;
     }
     if (giveC < needC) {
       underfunded.push({ categoryId: cat.id, name: cat.name, short: fromCents(needC - giveC) });
@@ -434,7 +457,8 @@ export function planFundMonth(book: BudgetBook, month: MonthKey): FundMonthPlan 
   return {
     ops,
     targeted,
-    funded: targeted - underfunded.length,
+    funding: setAssignments.length,
+    total: fromCents(totalC),
     underfunded,
     shortfall: fromCents(shortfallC),
   };

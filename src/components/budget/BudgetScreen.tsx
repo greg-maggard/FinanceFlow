@@ -1,13 +1,14 @@
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
 import { useStore } from "../../state/store";
 import { useUI } from "../../state/uiStore";
 import type { MonthKey } from "../../state/schema";
 import { UNCATEGORIZED_CATEGORY_ID } from "../../state/schema";
 import { assignedAfter, fromCents, snapshot, toCents } from "../../budget/ledger";
-import { planFundMonth } from "../../budget/nodeLedger";
+import { planFundMonth, type FundMonthPlan } from "../../budget/nodeLedger";
 import { ymKey } from "../../state/recurring";
 import { M } from "../../theme/motion";
+import { GlassButton } from "../glass/GlassButton";
 import { GlassCard } from "../glass/GlassCard";
 import { FundMonthButton, dollars } from "./bits";
 import { CategoryGroups, FUND_GLOW } from "./CategoryGroups";
@@ -139,6 +140,87 @@ function StripStat({ label, value }: { label: string; value: number }) {
   );
 }
 
+function envelopes(n: number): string {
+  return `${n} ${n === 1 ? "envelope" : "envelopes"}`;
+}
+
+/**
+ * What the fund actually did, in one line — rendered on every tap, success
+ * included. A one-tap action that moves money silently is the thing the user
+ * cannot check afterwards; this is the receipt.
+ */
+function fundReport(plan: FundMonthPlan): string {
+  if (plan.funding === 0) {
+    return plan.shortfall > 0
+      ? `Nothing to move — Ready to Assign is empty, ${dollars(plan.shortfall)} still short`
+      : "Every target is already funded — nothing to move";
+  }
+  const moved = `Funded ${envelopes(plan.funding)}, ${dollars(plan.total)} moved`;
+  return plan.shortfall > 0 ? `${moved} — ${dollars(plan.shortfall)} still short` : moved;
+}
+
+/**
+ * Say what is about to move before it moves. Shared by both Fund buttons (the
+ * month header's and the untouched-month prompt's) so the confirmation is not
+ * a property of which button you happened to tap.
+ */
+function FundMonthDialog({
+  plan,
+  onConfirm,
+  onCancel,
+}: {
+  plan: FundMonthPlan;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <AnimatePresence>
+      <motion.div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-md"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={onCancel}
+      >
+        <motion.div
+          className="w-full max-w-sm"
+          initial={{ scale: 0.94, y: 20, opacity: 0 }}
+          animate={{ scale: 1, y: 0, opacity: 1 }}
+          exit={{ scale: 0.94, y: 20, opacity: 0 }}
+          transition={{ type: "spring", stiffness: 240, damping: 24 }}
+          onClick={(e) => e.stopPropagation()}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Fund this month"
+        >
+          <GlassCard intensity="strong" className="space-y-4 p-6">
+            <h2 className="text-lg font-semibold tracking-tight text-white/95">
+              Fund this month
+            </h2>
+            <p className="text-sm text-white/75">
+              Move {dollars(plan.total)} into {envelopes(plan.funding)}?
+            </p>
+            {plan.shortfall > 0 && (
+              <p className="text-xs text-white/55">
+                Ready to Assign runs out first — {dollars(plan.shortfall)} of this
+                month's targets stays unfunded.
+              </p>
+            )}
+            <div className="flex justify-end gap-2">
+              <GlassButton size="sm" variant="secondary" onClick={onCancel}>
+                Cancel
+              </GlassButton>
+              <GlassButton size="sm" variant="yes" onClick={onConfirm}>
+                Move {dollars(plan.total)}
+              </GlassButton>
+            </div>
+          </GlassCard>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
 export function BudgetScreen() {
   const budget = useStore((s) => s.budget);
   const budgetFocus = useUI((s) => s.budgetFocus);
@@ -177,24 +259,27 @@ export function BudgetScreen() {
   // anything still short of its monthly target?" — the tap itself re-plans
   // against the freshest book.
   const plan = useMemo(() => planFundMonth(budget, month), [budget, month]);
-  const unmet = plan.underfunded.length > 0 || (plan.ops.setAssignments?.length ?? 0) > 0;
+  const unmet = plan.underfunded.length > 0 || plan.funding > 0;
   // An untouched month is the real cliff: not a wall of failed goal bars, just
   // a month nobody has funded yet.
   const untouched = Object.keys(budget.assignments[month] ?? {}).length === 0;
   const [report, setReport] = useState<{ month: MonthKey; text: string } | null>(null);
+  // The plan the confirmation dialog is describing — re-planned at tap time,
+  // so what the dialog states is exactly what Confirm will apply.
+  const [pending, setPending] = useState<FundMonthPlan | null>(null);
 
-  const fundMonth = () => {
-    const s = useStore.getState();
-    const fresh = planFundMonth(s.budget, month);
-    if (fresh.ops.setAssignments?.length) s.applyBookOps(fresh.ops);
-    setReport(
-      fresh.underfunded.length > 0
-        ? {
-            month,
-            text: `Funded ${fresh.funded} of ${fresh.targeted} envelopes — ${dollars(fresh.shortfall)} short`,
-          }
-        : null,
-    );
+  const applyFund = (fresh: FundMonthPlan) => {
+    if (fresh.ops.setAssignments?.length) useStore.getState().applyBookOps(fresh.ops);
+    setReport({ month, text: fundReport(fresh) });
+    setPending(null);
+  };
+
+  // Both Fund buttons land here. Nothing to move means nothing to confirm —
+  // go straight to the report rather than opening a "Move $0?" dialog.
+  const requestFund = () => {
+    const fresh = planFundMonth(useStore.getState().budget, month);
+    if (fresh.funding === 0) applyFund(fresh);
+    else setPending(fresh);
   };
 
   // Cross-navigation landing: scroll the requested row into view and pulse it
@@ -253,11 +338,13 @@ export function BudgetScreen() {
               <RtaPill amount={snap.readyToAssign} />
             </div>
           </div>
-          {/* Both retire the moment every target is met — a button that would
-              do nothing, and a shortfall line that is no longer true. */}
-          {unmet && (
+          {/* The button retires the moment every target is met — it would do
+              nothing. The report does NOT: a successful fund empties the need
+              and would otherwise take its own receipt down with it, leaving a
+              tap that moved four figures with no trace on screen. */}
+          {(unmet || (report !== null && report.month === month)) && (
             <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-white/5 pt-3">
-              <FundMonthButton onClick={fundMonth} />
+              {unmet && <FundMonthButton onClick={requestFund} />}
               {report && report.month === month && (
                 <span className="text-xs tabular-nums text-white/55">{report.text}</span>
               )}
@@ -286,7 +373,7 @@ export function BudgetScreen() {
           month={month}
           snap={snap}
           untouched={untouched && unmet}
-          onFundMonth={fundMonth}
+          onFundMonth={requestFund}
         />
       </motion.section>
 
@@ -305,6 +392,14 @@ export function BudgetScreen() {
       >
         <TransactionsSection />
       </motion.section>
+
+      {pending && (
+        <FundMonthDialog
+          plan={pending}
+          onConfirm={() => applyFund(pending)}
+          onCancel={() => setPending(null)}
+        />
+      )}
     </div>
   );
 }
