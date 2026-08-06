@@ -8,6 +8,7 @@ import { SettingsModal } from "./components/SettingsModal";
 import { OverviewSheet } from "./components/OverviewSheet";
 import { CelebrationLayer } from "./components/CelebrationLayer";
 import { RecoveryScreen } from "./components/RecoveryScreen";
+import { StaleTabBanner } from "./components/StaleTabBanner";
 import { FocusStage } from "./components/focus/FocusStage";
 import { BudgetScreen } from "./components/budget/BudgetScreen";
 import { findCurrentNode } from "./components/focus/advance";
@@ -120,6 +121,7 @@ function AppShell() {
       </AnimatePresence>
       <CelebrationLayer />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <StaleTabBanner />
     </div>
   );
 }
