@@ -42,17 +42,40 @@ describe("progressOf recurring nodes", () => {
   });
 
   it("exact-cents sums meet the target with no floating-point drift", () => {
-    // As raw doubles, assigned 0.7 + 0.1 == 0.7999999999999999, a hair below
-    // the target 0.4 + 0.4 == 0.8 — the ledger's integer-cents arithmetic
-    // makes both sides exactly 0.8, so plain `>=` is enough.
+    // As raw doubles, 0.7 + 0.1 == 0.7999999999999999 — a hair below 0.8 on
+    // both sides of the comparison. The ledger's integer-cents arithmetic
+    // makes target and funded exactly 0.8, so plain `>=` is enough.
     const s = seeded((s) => {
       s.budget.categories = [
-        cat({ id: "Food:a", nodeId: "Food", monthlyTarget: 0.4 }),
-        cat({ id: "Food:b", nodeId: "Food", monthlyTarget: 0.4 }),
+        cat({ id: "Food:a", nodeId: "Food", monthlyTarget: 0.7 }),
+        cat({ id: "Food:b", nodeId: "Food", monthlyTarget: 0.1 }),
       ];
       s.budget.assignments = { [MONTH]: { "Food:a": 0.7, "Food:b": 0.1 } };
     });
     expect(progressOf(s, "Food", MONTH)).toEqual({ kind: "goal", value: 0.8, max: 0.8, ready: true });
+  });
+
+  it("a target met entirely by carryover reads ready with nothing assigned", () => {
+    // Month-ahead budgeting: May's assignment carries into June untouched.
+    const s = seeded((s) => {
+      s.budget.transactions = [
+        txn({ accountId: "checking", date: "2026-05-01", amount: 100000, categoryId: RTA_CATEGORY_ID }),
+      ];
+      s.budget.categories = [cat({ id: "Rent:base", nodeId: "Rent", monthlyTarget: 1800 })];
+      s.budget.assignments = { "2026-05": { "Rent:base": 1800 } };
+    });
+    expect(progressOf(s, "Rent", MONTH)).toEqual({ kind: "goal", value: 1800, max: 1800, ready: true });
+  });
+
+  it("one over-stuffed envelope cannot cover an empty sibling in the same node", () => {
+    const s = seeded((s) => {
+      s.budget.categories = [
+        cat({ id: "Rent:base", nodeId: "Rent", monthlyTarget: 1500 }),
+        cat({ id: "Rent:parking", nodeId: "Rent", monthlyTarget: 200 }),
+      ];
+      s.budget.assignments = { [MONTH]: { "Rent:base": 1700 } };
+    });
+    expect(progressOf(s, "Rent", MONTH)).toEqual({ kind: "goal", value: 1500, max: 1700, ready: false });
   });
 
   it("keeps today's zero-target behavior: none, ready", () => {

@@ -89,7 +89,22 @@ export function nodeRows(book: BudgetBook, snap: MonthSnapshot, nodeId: NodeId):
   });
 }
 
-/** Recurring node: target = Σ monthly targets, funded = Σ assigned this month. */
+/**
+ * Recurring node: target = Σ monthly targets, funded = Σ what each envelope
+ * actually held for the month, capped at that envelope's target.
+ *
+ * A bills node asks "is this month's bill covered?", and money that already
+ * left the envelope paying that bill still counts. Since
+ * `available = carryIn + assigned + activity`, the money that sat in the
+ * envelope during the month is `available - activity` — which counts a
+ * carried-over balance, so budgeting a month ahead (assign in July, spend in
+ * August) no longer reads as unfunded. Clamped at zero so an envelope already
+ * in the hole before the month started can't lend negative funding.
+ *
+ * The per-category `min(target, …)` matters because target and funded are both
+ * summed across the node's categories: without it one over-stuffed envelope
+ * would mask an empty sibling inside the same node.
+ */
 export function recurringTotals(
   book: BudgetBook,
   snap: MonthSnapshot,
@@ -98,8 +113,10 @@ export function recurringTotals(
   let targetC = 0;
   let fundedC = 0;
   for (const row of nodeRows(book, snap, nodeId)) {
-    targetC += toCents(row.category.monthlyTarget ?? 0);
-    fundedC += toCents(row.assigned);
+    const catTargetC = toCents(row.category.monthlyTarget ?? 0);
+    const heldC = Math.max(0, toCents(row.available) - toCents(row.activity));
+    targetC += catTargetC;
+    fundedC += Math.min(catTargetC, heldC);
   }
   return { target: fromCents(targetC), funded: fromCents(fundedC) };
 }

@@ -85,7 +85,21 @@ public enum NodeLedger {
         }
     }
 
-    /// Recurring node: target = Σ monthly targets, funded = Σ assigned this month.
+    /// Recurring node: target = Σ monthly targets, funded = Σ what each
+    /// envelope actually held for the month, capped at that envelope's target.
+    ///
+    /// A bills node asks "is this month's bill covered?", and money that
+    /// already left the envelope paying that bill still counts. Since
+    /// `available = carryIn + assigned + activity`, the money that sat in the
+    /// envelope during the month is `available - activity` — which counts a
+    /// carried-over balance, so budgeting a month ahead (assign in July, spend
+    /// in August) no longer reads as unfunded. Clamped at zero so an envelope
+    /// already in the hole before the month started can't lend negative
+    /// funding.
+    ///
+    /// The per-category `min(target, …)` matters because target and funded are
+    /// both summed across the node's categories: without it one over-stuffed
+    /// envelope would mask an empty sibling inside the same node.
     public static func recurringTotals(
         _ book: BudgetBook,
         _ snap: Ledger.MonthSnapshot,
@@ -94,8 +108,10 @@ public enum NodeLedger {
         var target: Decimal = 0
         var funded: Decimal = 0
         for row in nodeRows(book, snap, nodeId) {
-            target += row.category.monthlyTarget ?? 0
-            funded += row.assigned
+            let catTarget = row.category.monthlyTarget ?? 0
+            let held = max(0, row.available - row.activity)
+            target += catTarget
+            funded += min(catTarget, held)
         }
         return (target, funded)
     }
