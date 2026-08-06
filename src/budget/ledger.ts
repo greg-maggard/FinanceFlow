@@ -113,9 +113,12 @@ export type MonthSnapshot = {
  * - available = positive carryover from the prior month + assigned + activity.
  * - A month-end *negative* available does not follow the category: it resets
  *   to zero and debits the next month's Ready-to-Assign instead.
- * - Ready-to-Assign = RTA inflows through this month, minus dollars assigned
- *   in ANY month (assigning ahead can't double-spend a dollar), minus
- *   overspending swept from earlier months.
+ * - Ready-to-Assign is cumulative *through the viewed month*: RTA inflows
+ *   through this month, minus dollars assigned in this month and every month
+ *   before it, minus overspending swept from earlier months. All three terms
+ *   run through `month` and no further, so viewing a past month reports the
+ *   number that month actually had. Dollars parked in future months are not
+ *   subtracted here — see `assignedAfter`.
  */
 export function snapshot(book: BudgetBook, month: MonthKey): MonthSnapshot {
   const onBudget = new Set(
@@ -142,9 +145,6 @@ export function snapshot(book: BudgetBook, month: MonthKey): MonthSnapshot {
   let inflowToDateC = 0;
   let sweptOverspendC = 0;
   let assignedAllC = 0;
-  for (const table of Object.values(book.assignments)) {
-    for (const v of Object.values(table)) assignedAllC += toCents(v);
-  }
 
   const carryC = new Map<string, number>();
   let categories: Record<string, CategoryMonth> = {};
@@ -180,6 +180,7 @@ export function snapshot(book: BudgetBook, month: MonthKey): MonthSnapshot {
     }
 
     inflowToDateC += inflowC.get(m) ?? 0;
+    for (const v of Object.values(assignedM)) assignedAllC += toCents(v);
     if (m === month) categories = snap;
     else sweptOverspendC += overspendM;
   }
@@ -189,6 +190,21 @@ export function snapshot(book: BudgetBook, month: MonthKey): MonthSnapshot {
     readyToAssign: fromCents(inflowToDateC - assignedAllC - sweptOverspendC),
     categories,
   };
+}
+
+/**
+ * Dollars assigned in months strictly after `month` — money already parked in
+ * the future. Ready-to-Assign deliberately ignores it (it belongs to those
+ * months, not this one), so surface it beside the RTA figure to keep
+ * assigning-ahead visible rather than silently double-spendable.
+ */
+export function assignedAfter(book: BudgetBook, month: MonthKey): number {
+  let cents = 0;
+  for (const [m, table] of Object.entries(book.assignments)) {
+    if (m <= month) continue;
+    for (const v of Object.values(table)) cents += toCents(v);
+  }
+  return fromCents(cents);
 }
 
 export type BookIntegrity = {
@@ -203,8 +219,9 @@ export type BookIntegrity = {
  * The conservation-of-money invariant, made machine-checkable.
  *
  * `snapshot()` builds each category's `available` from assignments plus
- * categorized activity, and Ready-to-Assign from inflows minus everything
- * assigned minus swept overspending. Summing those definitions across all
+ * categorized activity, and Ready-to-Assign from inflows minus assignments
+ * minus swept overspending — every term cumulative through the viewed month.
+ * Summing those definitions across all
  * categories collapses to:
  *
  *   Sigma available + readyToAssign + unbudgetedSpending === Sigma on-budget cash

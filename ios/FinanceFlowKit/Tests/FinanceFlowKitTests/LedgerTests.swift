@@ -55,15 +55,50 @@ struct LedgerTests {
         #expect(Ledger.accountBalance(b, "checking") == Decimal(string: "0.3")!)
     }
 
-    @Test("computes RTA from inflows minus every assignment, even future ones")
-    func rtaSubtractsFutureAssignments() {
+    @Test("computes RTA from inflows and assignments through the viewed month")
+    func rtaCountsAssignmentsThroughViewedMonth() {
         let b = makeBook(
             transactions: [txn("checking", "2026-06-01", 1000, category: Ledger.rtaCategoryID)],
             assignments: ["2026-06": ["groceries": 600], "2026-07": ["groceries": 50]]
         )
         let june = Ledger.snapshot(b, month: "2026-06")
-        #expect(june.readyToAssign == 350)
+        #expect(june.readyToAssign == 400)
         #expect(june.categories["groceries"] == .init(assigned: 600, activity: 0, available: 600))
+    }
+
+    @Test("carries RTA cumulatively: a balanced month reads the same viewed later")
+    func rtaIsCumulativeThroughViewedMonth() {
+        let b = makeBook(
+            transactions: [
+                txn("checking", "2026-06-01", 1000, category: Ledger.rtaCategoryID),
+                txn("checking", "2026-07-01", 100, category: Ledger.rtaCategoryID),
+            ],
+            assignments: ["2026-06": ["groceries": 100], "2026-07": ["groceries": 100]]
+        )
+        #expect(Ledger.snapshot(b, month: "2026-06").readyToAssign == 900)
+        #expect(Ledger.snapshot(b, month: "2026-07").readyToAssign == 900)
+    }
+
+    @Test("shows a negative RTA in the month you over-assigned ahead into")
+    func rtaGoesNegativeWhenYouReachAnOverAssignedMonth() {
+        let b = makeBook(
+            transactions: [txn("checking", "2026-06-01", 100, category: Ledger.rtaCategoryID)],
+            assignments: ["2026-07": ["groceries": 250]]
+        )
+        #expect(Ledger.snapshot(b, month: "2026-06").readyToAssign == 100)
+        #expect(Ledger.snapshot(b, month: "2026-07").readyToAssign == -150)
+    }
+
+    @Test("reports dollars parked in months after the viewed one")
+    func assignedAfterSumsFutureMonths() {
+        let b = makeBook(assignments: [
+            "2026-06": ["groceries": 100],
+            "2026-07": ["groceries": 50],
+            "2026-08": ["groceries": Decimal(string: "25.50")!],
+        ])
+        #expect(Ledger.assignedAfter(b, month: "2026-06") == Decimal(string: "75.50")!)
+        #expect(Ledger.assignedAfter(b, month: "2026-07") == Decimal(string: "25.50")!)
+        #expect(Ledger.assignedAfter(b, month: "2026-08") == 0)
     }
 
     @Test("rolls positive available forward across months")
@@ -251,6 +286,36 @@ struct LedgerTests {
         let i = Ledger.bookIntegrity(b, month: "2026-06")
         #expect(i.onBudgetCash == 200)
         #expect(i.drift == 0)
+    }
+
+    @Test("bookIntegrity keeps conservation exact when dollars are assigned into future months")
+    func integrityWithFutureAssignments() {
+        let b = makeBook(
+            transactions: [txn("checking", "2026-06-01", 1000, category: Ledger.rtaCategoryID)],
+            assignments: ["2026-06": ["food": 300], "2026-07": ["food": 200]]
+        )
+        // Assigning ahead moves no cash, so June must still balance to the cent.
+        #expect(Ledger.bookIntegrity(b, month: "2026-06").drift == 0)
+    }
+
+    @Test("bookIntegrity holds across a six-month history, month by month")
+    func integritySixMonthHistory() {
+        let months = ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06"]
+        var transactions: [Txn] = []
+        var assignments: [String: [String: Decimal]] = [:]
+        let food = Decimal(string: "450.37")!
+        for m in months {
+            transactions.append(txn("checking", "\(m)-01", Decimal(string: "1650.37")!, category: Ledger.rtaCategoryID))
+            transactions.append(txn("checking", "\(m)-14", -1200, category: "rent"))
+            transactions.append(txn("card", "\(m)-18", -food, category: "food"))
+            assignments[m] = ["rent": 1200, "food": food]
+        }
+        let b = makeBook(transactions: transactions, assignments: assignments)
+        // Every month funds itself exactly, so RTA is zero whichever month you view.
+        for m in months {
+            #expect(Ledger.bookIntegrity(b, month: m).readyToAssign == 0)
+        }
+        #expect(Ledger.bookIntegrity(b, month: "2026-06").drift == 0)
     }
 
     @Test("bookIntegrity stays exact on cent-level amounts that would drift as floats")

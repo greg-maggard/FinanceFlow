@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useStore } from "../../state/store";
 import { useUI } from "../../state/uiStore";
 import type { MonthKey } from "../../state/schema";
-import { snapshot } from "../../budget/ledger";
+import { assignedAfter, snapshot } from "../../budget/ledger";
 import { ymKey } from "../../state/recurring";
 import { M } from "../../theme/motion";
 import { GlassCard } from "../glass/GlassCard";
@@ -88,6 +88,9 @@ export function BudgetScreen() {
   const [month, setMonth] = useState<MonthKey>(() => ymKey());
   // Live-derived: any edit to the book lands here on the next render.
   const snap = useMemo(() => snapshot(budget, month), [budget, month]);
+  // Ready-to-Assign stops at the viewed month, so dollars parked further out
+  // are invisible to it — call them out rather than let them look unspent.
+  const ahead = useMemo(() => assignedAfter(budget, month), [budget, month]);
 
   // Cross-navigation landing: scroll the requested row into view and pulse it
   // in the funding green for ~2s. The request is consumed up front so the
@@ -141,7 +144,14 @@ export function BudgetScreen() {
                 onClick={() => setMonth(stepYm(month, 1))}
               />
             </div>
-            <RtaPill amount={snap.readyToAssign} />
+            <div className="flex flex-col items-end gap-1">
+              <RtaPill amount={snap.readyToAssign} />
+              {Math.round(ahead * 100) !== 0 && (
+                <span className="pr-1 text-[11px] tabular-nums text-white/50">
+                  {dollars(ahead)} assigned in future months
+                </span>
+              )}
+            </div>
           </div>
         </GlassCard>
       </motion.div>

@@ -4,6 +4,7 @@ import { RTA_CATEGORY_ID, emptyBudgetBook } from "../state/schema";
 import {
   accountBalance,
   accountBalances,
+  assignedAfter,
   bookIntegrity,
   isOnBudget,
   monthOf,
@@ -70,7 +71,7 @@ describe("helpers", () => {
 });
 
 describe("snapshot", () => {
-  it("computes RTA from inflows minus every assignment, even future ones", () => {
+  it("computes RTA from inflows and assignments through the viewed month", () => {
     const b = book({
       transactions: [
         txn({ accountId: "checking", date: "2026-06-01", amount: 1000, categoryId: RTA_CATEGORY_ID }),
@@ -81,8 +82,44 @@ describe("snapshot", () => {
       },
     });
     const june = snapshot(b, "2026-06");
-    expect(june.readyToAssign).toBe(350);
+    expect(june.readyToAssign).toBe(400);
     expect(june.categories.groceries).toEqual({ assigned: 600, activity: 0, available: 600 });
+  });
+
+  it("carries RTA cumulatively: a balanced month reads the same viewed later", () => {
+    const b = book({
+      transactions: [
+        txn({ accountId: "checking", date: "2026-06-01", amount: 1000, categoryId: RTA_CATEGORY_ID }),
+        txn({ accountId: "checking", date: "2026-07-01", amount: 100, categoryId: RTA_CATEGORY_ID }),
+      ],
+      assignments: { "2026-06": { groceries: 100 }, "2026-07": { groceries: 100 } },
+    });
+    expect(snapshot(b, "2026-06").readyToAssign).toBe(900);
+    expect(snapshot(b, "2026-07").readyToAssign).toBe(900);
+  });
+
+  it("shows a negative RTA in the month you over-assigned ahead into", () => {
+    const b = book({
+      transactions: [
+        txn({ accountId: "checking", date: "2026-06-01", amount: 100, categoryId: RTA_CATEGORY_ID }),
+      ],
+      assignments: { "2026-07": { groceries: 250 } },
+    });
+    expect(snapshot(b, "2026-06").readyToAssign).toBe(100);
+    expect(snapshot(b, "2026-07").readyToAssign).toBe(-150);
+  });
+
+  it("reports dollars parked in months after the viewed one", () => {
+    const b = book({
+      assignments: {
+        "2026-06": { groceries: 100 },
+        "2026-07": { groceries: 50 },
+        "2026-08": { groceries: 25.5 },
+      },
+    });
+    expect(assignedAfter(b, "2026-06")).toBe(75.5);
+    expect(assignedAfter(b, "2026-07")).toBe(25.5);
+    expect(assignedAfter(b, "2026-08")).toBe(0);
   });
 
   it("rolls positive available forward across months", () => {
@@ -281,6 +318,32 @@ describe("bookIntegrity", () => {
     const i = bookIntegrity(b, "2026-06");
     expect(i.onBudgetCash).toBe(200);
     expect(i.drift).toBe(0);
+  });
+
+  it("keeps conservation exact when dollars are assigned into future months", () => {
+    const b = book({
+      transactions: [
+        txn({ accountId: "checking", date: "2026-06-01", amount: 1000, categoryId: RTA_CATEGORY_ID }),
+      ],
+      assignments: { "2026-06": { food: 300 }, "2026-07": { food: 200 } },
+    });
+    // Assigning ahead moves no cash, so June must still balance to the cent.
+    expect(bookIntegrity(b, "2026-06").drift).toBe(0);
+  });
+
+  it("holds across a six-month history, month by month", () => {
+    const months = ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06"];
+    const b = book({
+      transactions: months.flatMap((m) => [
+        txn({ accountId: "checking", date: `${m}-01`, amount: 1650.37, categoryId: RTA_CATEGORY_ID }),
+        txn({ accountId: "checking", date: `${m}-14`, amount: -1200, categoryId: "rent" }),
+        txn({ accountId: "card", date: `${m}-18`, amount: -450.37, categoryId: "food" }),
+      ]),
+      assignments: Object.fromEntries(months.map((m) => [m, { rent: 1200, food: 450.37 }])),
+    });
+    // Every month funds itself exactly, so RTA is zero whichever month you view.
+    for (const m of months) expect(bookIntegrity(b, m).readyToAssign).toBe(0);
+    expect(bookIntegrity(b, "2026-06").drift).toBe(0);
   });
 
   it("stays exact on cent-level amounts that would drift as floats", () => {

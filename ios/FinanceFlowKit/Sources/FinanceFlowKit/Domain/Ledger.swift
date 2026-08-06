@@ -111,9 +111,12 @@ public enum Ledger {
     /// - available = positive carryover from the prior month + assigned + activity.
     /// - A month-end *negative* available does not follow the category: it
     ///   resets to zero and debits the next month's Ready-to-Assign instead.
-    /// - Ready-to-Assign = RTA inflows through this month, minus dollars
-    ///   assigned in ANY month (assigning ahead can't double-spend a dollar),
-    ///   minus overspending swept from earlier months.
+    /// - Ready-to-Assign is cumulative *through the viewed month*: RTA inflows
+    ///   through this month, minus dollars assigned in this month and every
+    ///   month before it, minus overspending swept from earlier months. All
+    ///   three terms run through `month` and no further, so viewing a past
+    ///   month reports the number that month actually had. Dollars parked in
+    ///   future months are not subtracted here — see `assignedAfter`.
     public static func snapshot(_ book: BudgetBook, month: String) -> MonthSnapshot {
         let onBudget = Set(book.accounts.filter { isOnBudget($0.kind) }.map(\.id))
 
@@ -132,10 +135,6 @@ public enum Ledger {
         }
 
         var assignedAll: Decimal = 0
-        for table in book.assignments.values {
-            for value in table.values { assignedAll += value }
-        }
-
         var inflowToDate: Decimal = 0
         var sweptOverspend: Decimal = 0
         var carry: [String: Decimal] = [:]
@@ -166,6 +165,7 @@ public enum Ledger {
             }
 
             inflowToDate += inflowByMonth[m] ?? 0
+            for value in assignedM.values { assignedAll += value }
             if m == month {
                 categories = snap
             } else {
@@ -178,6 +178,19 @@ public enum Ledger {
             readyToAssign: inflowToDate - assignedAll - sweptOverspend,
             categories: categories
         )
+    }
+
+    /// Dollars assigned in months strictly after `month` — money already
+    /// parked in the future. Ready-to-Assign deliberately ignores it (it
+    /// belongs to those months, not this one), so surface it beside the RTA
+    /// figure to keep assigning-ahead visible rather than silently
+    /// double-spendable. Mirrors `assignedAfter` in `src/budget/ledger.ts`.
+    public static func assignedAfter(_ book: BudgetBook, month: String) -> Decimal {
+        var total: Decimal = 0
+        for (m, table) in book.assignments where m > month {
+            for value in table.values { total += value }
+        }
+        return total
     }
 
     public struct BookIntegrity: Equatable, Sendable {
@@ -205,8 +218,9 @@ public enum Ledger {
     /// The conservation-of-money invariant, made machine-checkable.
     ///
     /// `snapshot` builds each category's `available` from assignments plus
-    /// categorized activity, and Ready-to-Assign from inflows minus everything
-    /// assigned minus swept overspending. Summing those definitions across all
+    /// categorized activity, and Ready-to-Assign from inflows minus
+    /// assignments minus swept overspending — every term cumulative through
+    /// the viewed month. Summing those definitions across all
     /// categories collapses to:
     ///
     ///     Sigma available + readyToAssign + unbudgetedSpending == Sigma on-budget cash
