@@ -149,7 +149,13 @@ public final class AppStore {
     }
 
     public func addTxn(_ txn: Txn) {
-        mutate { $0.budget.transactions.append(txn) }
+        mutate { state in
+            // First spend with no envelope of its own brings the catch-all into being.
+            if txn.categoryId == BudgetBook.uncategorizedCategoryID {
+                state.budget.ensureUncategorized()
+            }
+            state.budget.transactions.append(txn)
+        }
     }
 
     public func updateTxn(_ txn: Txn) {
@@ -249,19 +255,38 @@ public final class AppStore {
         }
     }
 
-    /// Deleting never loses money: the category's transactions stay
-    /// (uncategorized) and its assignments vanish, so those dollars flow back
-    /// to Ready-to-Assign. Mirrors `deleteCategory` in store.ts.
-    public func deleteCategory(_ id: String) {
+    /// Both of a deleted envelope's terms move together: its transactions and
+    /// every month's assigned dollars land on `reassignTo`. Because activity and
+    /// funding arrive at the same envelope, assigned-through and activity-through
+    /// are invariant, so Sigma available and Ready-to-Assign are invariant and
+    /// `Ledger.bookIntegrity().drift` stays 0 by construction. (Dropping the
+    /// assignments — "returning them to Ready-to-Assign" — conjured the spent
+    /// dollars instead.) An envelope no transaction ever touched has no activity
+    /// to carry, so there is nothing to keep together: its assignments are simply
+    /// released back to Ready-to-Assign, which is money-preserving precisely
+    /// because activity is 0. Mirrors `deleteCategory` in store.ts.
+    public func deleteCategory(_ id: String, reassignTo: String) {
+        // The catch-all itself is not deletable — there would be nowhere to put
+        // what it holds.
+        guard id != BudgetBook.uncategorizedCategoryID, id != reassignTo else { return }
         mutate { state in
+            let carriesActivity = state.budget.transactions.contains { $0.categoryId == id }
+            if carriesActivity && reassignTo == BudgetBook.uncategorizedCategoryID {
+                state.budget.ensureUncategorized()
+            }
             state.budget.categories.removeAll { $0.id == id }
             for i in state.budget.transactions.indices
             where state.budget.transactions[i].categoryId == id {
-                state.budget.transactions[i].categoryId = nil
+                state.budget.transactions[i].categoryId = reassignTo
             }
             for month in Array(state.budget.assignments.keys) {
-                guard var table = state.budget.assignments[month], table[id] != nil else { continue }
+                guard var table = state.budget.assignments[month],
+                      let moved = table[id] else { continue }
                 table[id] = nil
+                if carriesActivity {
+                    let merged = (table[reassignTo] ?? 0) + moved
+                    table[reassignTo] = merged == 0 ? nil : merged
+                }
                 state.budget.assignments[month] = table.isEmpty ? nil : table
             }
         }

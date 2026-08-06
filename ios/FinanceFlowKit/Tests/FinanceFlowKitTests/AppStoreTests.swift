@@ -115,7 +115,7 @@ struct AppStoreTests {
         #expect(Ledger.bookIntegrity(store.state.budget, month: "2026-06").drift == 0)
     }
 
-    @Test("deleteCategory uncategorizes its transactions and returns assignments to RTA")
+    @Test("deleteCategory moves transactions and money to the chosen envelope")
     func deleteCategoryCleansUp() {
         let store = AppStore(storage: MemoryStorageAdapter())
         store.addAccount(Account(id: "checking", name: "Checking", kind: .checking))
@@ -128,17 +128,90 @@ struct AppStoreTests {
         store.assign(month: "2026-06", categoryID: catID, amount: 100)
         #expect(Ledger.snapshot(store.state.budget, month: "2026-06").readyToAssign == 900)
 
-        store.deleteCategory(catID)
+        store.deleteCategory(catID, reassignTo: BudgetBook.uncategorizedCategoryID)
+        #expect(store.state.budget.categories.map(\.id) == [BudgetBook.uncategorizedCategoryID])
+        #expect(
+            store.state.budget.transactions.first { $0.id == "t2" }?.categoryId
+                == BudgetBook.uncategorizedCategoryID
+        )
+        // Activity and funding land in the same envelope, so both terms are
+        // invariant — nothing vanished and nothing appeared.
+        #expect(Ledger.snapshot(store.state.budget, month: "2026-06").readyToAssign == 900)
+        #expect(
+            Ledger.snapshot(store.state.budget, month: "2026-06")
+                .categories[BudgetBook.uncategorizedCategoryID]?.available == 60
+        )
+        #expect(Ledger.bookIntegrity(store.state.budget, month: "2026-06").drift == 0)
+    }
+
+    @Test("deleteCategory returns a never-spent envelope's assignments to Ready-to-Assign")
+    func deleteCategoryWithNoTransactions() {
+        let store = AppStore(storage: MemoryStorageAdapter())
+        store.addAccount(Account(id: "checking", name: "Checking", kind: .checking))
+        store.addGroup(name: "Bills")
+        let groupID = store.state.budget.groups[0].id
+        store.addCategory(groupID: groupID, name: "Typo")
+        let catID = store.state.budget.categories[0].id
+        store.addTxn(Txn(id: "t1", accountId: "checking", date: "2026-06-01", amount: 1000, categoryId: Ledger.rtaCategoryID))
+        store.assign(month: "2026-06", categoryID: catID, amount: 100)
+        #expect(Ledger.snapshot(store.state.budget, month: "2026-06").readyToAssign == 900)
+
+        store.deleteCategory(catID, reassignTo: BudgetBook.uncategorizedCategoryID)
+
+        // No activity to carry, so there is nothing to keep the funding with:
+        // the dollars go back to the pool, and no catch-all envelope is
+        // conjured up.
         #expect(store.state.budget.categories.isEmpty)
-        #expect(store.state.budget.transactions.first { $0.id == "t2" }?.categoryId == nil)
         #expect(store.state.budget.assignments.isEmpty)
-        // The deleted envelope's dollars are back in the pool — nothing vanished.
         #expect(Ledger.snapshot(store.state.budget, month: "2026-06").readyToAssign == 1000)
-        // FIXME(w1-bug3): drift stays 0 here only because the $40 spend,
-        // orphaned by the delete, lands in the unbudgetedSpending residual —
-        // cash is conserved but the dollars left the envelope system
-        // unnoticed. The invariant holds; tightening what happens to orphaned
-        // activity is bug 3.
+        #expect(Ledger.bookIntegrity(store.state.budget, month: "2026-06").drift == 0)
+    }
+
+    @Test("an expense saved with no envelope of its own lands in a real Uncategorized envelope")
+    func uncategorizedSpendStaysInsideTheEnvelopeSystem() {
+        let store = AppStore(storage: MemoryStorageAdapter())
+        store.addAccount(Account(id: "checking", name: "Checking", kind: .checking))
+        store.addTxn(Txn(id: "t1", accountId: "checking", date: "2026-06-01", amount: 1000, categoryId: Ledger.rtaCategoryID))
+        // What TxnFormSheet now writes when the picker was never touched.
+        store.addTxn(Txn(
+            id: "t2", accountId: "checking", date: "2026-06-05", amount: -40,
+            categoryId: BudgetBook.uncategorizedCategoryID
+        ))
+
+        // Visible, assignable, and outside every node's math.
+        let category = store.state.budget.categories.first { $0.id == BudgetBook.uncategorizedCategoryID }
+        #expect(category?.name == "Uncategorized")
+        #expect(category?.nodeId == nil)
+        #expect(store.state.budget.groups.contains { $0.id == BudgetBook.systemGroupID })
+
+        let integrity = Ledger.bookIntegrity(store.state.budget, month: "2026-06")
+        // The spend is in an envelope, not in the residual.
+        #expect(integrity.unbudgetedSpending == 0)
+        #expect(integrity.drift == 0)
+        #expect(
+            Ledger.snapshot(store.state.budget, month: "2026-06")
+                .categories[BudgetBook.uncategorizedCategoryID]?.available == -40
+        )
+    }
+
+    @Test("deleteCategory refuses to delete the Uncategorized envelope")
+    func deleteUncategorizedIsNoOp() {
+        let store = AppStore(storage: MemoryStorageAdapter())
+        store.addAccount(Account(id: "checking", name: "Checking", kind: .checking))
+        store.addTxn(Txn(
+            id: "t1", accountId: "checking", date: "2026-06-05", amount: -25,
+            categoryId: BudgetBook.uncategorizedCategoryID
+        ))
+        // Saving into it is what created it.
+        #expect(store.state.budget.categories.map(\.id) == [BudgetBook.uncategorizedCategoryID])
+
+        store.deleteCategory(BudgetBook.uncategorizedCategoryID, reassignTo: "anything")
+
+        #expect(store.state.budget.categories.map(\.id) == [BudgetBook.uncategorizedCategoryID])
+        #expect(
+            store.state.budget.transactions.first { $0.id == "t1" }?.categoryId
+                == BudgetBook.uncategorizedCategoryID
+        )
         #expect(Ledger.bookIntegrity(store.state.budget, month: "2026-06").drift == 0)
     }
 

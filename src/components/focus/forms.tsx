@@ -253,10 +253,7 @@ export function RecurringEditor({ nodeId }: { nodeId: RecurringNodeId }) {
               budgetTarget={{ categoryId: row.category.id }}
               drop={i === 0 ? "down" : "up"}
               menu={
-                <ConfirmDelete
-                  name={row.category.name || "item"}
-                  onDelete={() => useStore.getState().deleteCategory(row.category.id)}
-                />
+                <ConfirmDelete cat={row.category} name={row.category.name || "item"} />
               }
             >
               <div className="grid grid-cols-2 gap-2">
@@ -419,10 +416,7 @@ export function EFEditor({ nodeId }: { nodeId: "SmallEF" | "BigEF" }) {
             budgetTarget={{ categoryId: row.category.id }}
             drop={i === 0 ? "down" : "up"}
             menu={
-              <ConfirmDelete
-                name={row.category.name || "bucket"}
-                onDelete={() => useStore.getState().deleteCategory(row.category.id)}
-              />
+              <ConfirmDelete cat={row.category} name={row.category.name || "bucket"} />
             }
           >
             <div className="grid grid-cols-2 gap-2">
@@ -643,10 +637,7 @@ export function GoalEditor({ nodeId }: { nodeId: "SavePurchase" | "Goals" }) {
           budgetTarget={{ categoryId: row.category.id }}
           drop={i === 0 ? "down" : "up"}
           menu={
-            <ConfirmDelete
-              name={row.category.name || "goal"}
-              onDelete={() => useStore.getState().deleteCategory(row.category.id)}
-            />
+            <ConfirmDelete cat={row.category} name={row.category.name || "goal"} />
           }
         >
           <div className="grid grid-cols-2 gap-2">

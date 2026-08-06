@@ -166,6 +166,49 @@ export type MonthKey = string;
 /** Reserved category id for inflows that fund Ready-to-Assign. */
 export const RTA_CATEGORY_ID = "rta";
 
+/** The group that holds envelopes the app owns rather than the user. */
+export const SYSTEM_GROUP_ID = "g:system";
+/**
+ * The catch-all envelope. Every on-budget outflow has to land somewhere: money
+ * with no envelope leaves the accounts without leaving any category, which is
+ * exactly the leak `bookIntegrity`'s `unbudgetedSpending` residual measures.
+ * This is a real, visible, assignable category — it just carries no `nodeId`,
+ * so `linkedCategories` keeps it out of every flowchart node's math.
+ */
+export const UNCATEGORIZED_CATEGORY_ID = "cat:uncategorized";
+/** Sorts the system group and its envelope after anything the user makes. */
+const SYSTEM_ORDER = 999_999;
+
+/**
+ * Materialize the system group + Uncategorized envelope if they aren't there
+ * yet, returning the book unchanged when they are. Created lazily on first
+ * need (a delete that reassigns into it, a transaction saved into it) so an
+ * untouched book stays free of rows the user never asked for — which is also
+ * why this needs no schema version bump or migration.
+ */
+export function ensureUncategorized(book: BudgetBook): BudgetBook {
+  const hasGroup = book.groups.some((g) => g.id === SYSTEM_GROUP_ID);
+  const hasCategory = book.categories.some((c) => c.id === UNCATEGORIZED_CATEGORY_ID);
+  if (hasGroup && hasCategory) return book;
+  return {
+    ...book,
+    groups: hasGroup
+      ? book.groups
+      : [...book.groups, { id: SYSTEM_GROUP_ID, name: "System", order: SYSTEM_ORDER }],
+    categories: hasCategory
+      ? book.categories
+      : [
+          ...book.categories,
+          {
+            id: UNCATEGORIZED_CATEGORY_ID,
+            groupId: SYSTEM_GROUP_ID,
+            name: "Uncategorized",
+            order: SYSTEM_ORDER,
+          },
+        ],
+  };
+}
+
 export type BudgetBook = {
   accounts: Account[];
   transactions: Txn[];

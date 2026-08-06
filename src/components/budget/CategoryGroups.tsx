@@ -3,10 +3,11 @@ import { motion } from "framer-motion";
 import { useStore } from "../../state/store";
 import { useUI } from "../../state/uiStore";
 import type { Category, CategoryGroup, MonthKey, NodeId } from "../../state/schema";
+import { UNCATEGORIZED_CATEGORY_ID } from "../../state/schema";
 import type { MonthSnapshot } from "../../budget/ledger";
 import { IDENTITY } from "../../theme/identity";
 import { GlassCard } from "../glass/GlassCard";
-import { GlassInput } from "../glass/GlassInput";
+import { GlassInput, GlassSelect } from "../glass/GlassInput";
 import { NumberField } from "../glass/NumberField";
 import { GoalBar } from "../glass/GoalBar";
 import { KebabMenu } from "../glass/KebabMenu";
@@ -200,7 +201,7 @@ function CategoryRow({
             >
               Edit name &amp; goal
             </button>
-            <ConfirmDelete name={cat.name} onDelete={() => useStore.getState().deleteCategory(cat.id)} />
+            <ConfirmDelete cat={cat} />
           </div>
         </KebabMenu>
       </div>
@@ -217,22 +218,74 @@ function CategoryRow({
   );
 }
 
-/** Two-tap delete: arming explains where the money goes before committing. */
-export function ConfirmDelete({ name, onDelete }: { name: string; onDelete: () => void }) {
+/**
+ * Two-tap delete: arming says where the money goes before committing.
+ *
+ * An envelope with spending can't just be dropped — its transactions and its
+ * assigned dollars have to move together, or the delete conjures the spent
+ * money back into Ready to Assign. So arming asks which envelope receives
+ * both, defaulting to Uncategorized. An envelope no transaction ever touched
+ * has no activity to carry, so there is nothing to choose: it deletes outright
+ * and its assignments return to Ready to Assign — the common case of throwing
+ * away a mistake.
+ */
+export function ConfirmDelete({ cat, name }: { cat: Category; name?: string }) {
+  const transactions = useStore((s) => s.budget.transactions);
+  const categories = useStore((s) => s.budget.categories);
   const [armed, setArmed] = useState(false);
+  const [target, setTarget] = useState(UNCATEGORIZED_CATEGORY_ID);
+
+  // The catch-all holds what other envelopes hand off; it has nowhere to go.
+  if (cat.id === UNCATEGORIZED_CATEGORY_ID) return null;
+
+  const label = name || cat.name;
+  const hasTxns = transactions.some((t) => t.categoryId === cat.id);
+  const choices = [...categories]
+    .filter((c) => c.id !== cat.id && !c.hidden)
+    .sort((a, b) => a.order - b.order);
+  // Created lazily, so offer it even before it exists — picking it makes it.
+  const knowsUncategorized = choices.some((c) => c.id === UNCATEGORIZED_CATEGORY_ID);
+
   return (
     <div className="space-y-1.5">
-      {armed && (
-        <p className="text-[11px] text-white/45">
-          Transactions stay, uncategorized; assigned dollars return to Ready to Assign.
-        </p>
-      )}
+      {armed &&
+        (hasTxns ? (
+          <>
+            <p className="text-[11px] text-white/45">
+              Move {label}&rsquo;s transactions and money to…
+            </p>
+            <GlassSelect
+              aria-label={`Move ${label}'s transactions and money to`}
+              value={target}
+              onChange={(e) => setTarget(e.target.value)}
+            >
+              {!knowsUncategorized && (
+                <option value={UNCATEGORIZED_CATEGORY_ID}>Uncategorized</option>
+              )}
+              {choices.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </GlassSelect>
+          </>
+        ) : (
+          <p className="text-[11px] text-white/45">
+            Nothing was ever spent here — its assigned dollars return to Ready to Assign.
+          </p>
+        ))}
       <button
         type="button"
-        onClick={() => (armed ? onDelete() : setArmed(true))}
+        onClick={() =>
+          armed
+            ? useStore
+                .getState()
+                .deleteCategory(cat.id, hasTxns ? target : UNCATEGORIZED_CATEGORY_ID)
+            : setArmed(true)
+        }
         className="w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-red-300 hover:bg-red-500/10"
       >
-        {armed ? "Tap again to confirm" : `Delete ${name}`}
+        {armed ? (hasTxns ? `Move & delete ${label}` : "Tap again to confirm") : `Delete ${label}`}
       </button>
     </div>
   );

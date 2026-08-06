@@ -63,9 +63,17 @@ private struct RecurringForm: View {
             titleVisibility: .visible,
             presenting: pendingDelete
         ) { category in
-            Button("Delete", role: .destructive) { store.deleteCategory(category.id) }
-        } message: { _ in
-            Text("Its transactions stay, uncategorized, and assigned dollars return to Ready to Assign.")
+            Button("Delete", role: .destructive) {
+                store.deleteCategory(category.id, reassignTo: BudgetBook.uncategorizedCategoryID)
+            }
+        } message: { category in
+            // Spending and funding have to move together, or the delete
+            // conjures the spent dollars back into Ready to Assign.
+            Text(
+                store.state.budget.transactions.contains { $0.categoryId == category.id }
+                    ? "Its transactions and its assigned dollars both move to Uncategorized — Ready to Assign doesn't change."
+                    : "Nothing was ever spent here — its assigned dollars return to Ready to Assign."
+            )
         }
     }
 
@@ -328,9 +336,17 @@ private struct EFBucketEditor: View {
             titleVisibility: .visible,
             presenting: pendingDelete
         ) { category in
-            Button("Delete", role: .destructive) { store.deleteCategory(category.id) }
-        } message: { _ in
-            Text("Its transactions stay, uncategorized, and assigned dollars return to Ready to Assign.")
+            Button("Delete", role: .destructive) {
+                store.deleteCategory(category.id, reassignTo: BudgetBook.uncategorizedCategoryID)
+            }
+        } message: { category in
+            // Spending and funding have to move together, or the delete
+            // conjures the spent dollars back into Ready to Assign.
+            Text(
+                store.state.budget.transactions.contains { $0.categoryId == category.id }
+                    ? "Its transactions and its assigned dollars both move to Uncategorized — Ready to Assign doesn't change."
+                    : "Nothing was ever spent here — its assigned dollars return to Ready to Assign."
+            )
         }
     }
 

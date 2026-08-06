@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { adapter, flushSave, useStore } from "./store";
+import { UNCATEGORIZED_CATEGORY_ID } from "./schema";
 import { useUI } from "./uiStore";
 import { bookIntegrity, snapshot } from "../budget/ledger";
 import { ADJUST_ACCOUNT_ID, planBalanceEdit } from "../budget/nodeLedger";
@@ -97,7 +98,7 @@ describe("a failed save surfaces in the UI", () => {
 });
 
 describe("deleteCategory", () => {
-  it("uncategorizes its transactions and returns its assignments to RTA", () => {
+  it("moves transactions and money to the chosen envelope", () => {
     const s = useStore.getState();
     s.reset();
     s.addAccount({ id: "checking", name: "Checking", kind: "checking", source: "manual" });
@@ -124,18 +125,74 @@ describe("deleteCategory", () => {
     s.assign("2026-06", catId, 100);
     expect(snapshot(useStore.getState().budget, "2026-06").readyToAssign).toBe(900);
 
-    useStore.getState().deleteCategory(catId);
+    useStore.getState().deleteCategory(catId, UNCATEGORIZED_CATEGORY_ID);
 
     const budget = useStore.getState().budget;
+    expect(budget.categories.map((c) => c.id)).toEqual([UNCATEGORIZED_CATEGORY_ID]);
+    expect(budget.transactions.find((t) => t.id === "t2")?.categoryId).toBe(
+      UNCATEGORIZED_CATEGORY_ID,
+    );
+    // Activity and funding land in the same envelope, so both terms are
+    // invariant — nothing vanished and nothing appeared.
+    expect(snapshot(budget, "2026-06").readyToAssign).toBe(900);
+    expect(snapshot(budget, "2026-06").categories[UNCATEGORIZED_CATEGORY_ID].available).toBe(60);
+    expect(bookIntegrity(budget, "2026-06").drift).toBe(0);
+  });
+
+  it("returns the assignments of a never-spent envelope to Ready-to-Assign", () => {
+    const s = useStore.getState();
+    s.reset();
+    s.addAccount({ id: "checking", name: "Checking", kind: "checking", source: "manual" });
+    s.addGroup("Bills");
+    const groupId = useStore.getState().budget.groups[0].id;
+    s.addCategory(groupId, "Typo");
+    const catId = useStore.getState().budget.categories[0].id;
+    s.addTxn({
+      id: "t1",
+      accountId: "checking",
+      date: "2026-06-01",
+      amount: 1000,
+      categoryId: "rta",
+      source: "manual",
+    });
+    s.assign("2026-06", catId, 100);
+    expect(snapshot(useStore.getState().budget, "2026-06").readyToAssign).toBe(900);
+
+    useStore.getState().deleteCategory(catId, UNCATEGORIZED_CATEGORY_ID);
+
+    const budget = useStore.getState().budget;
+    // No activity to carry, so there is nothing to keep the funding with: the
+    // dollars go back to the pool, and no catch-all envelope is conjured up.
     expect(budget.categories).toEqual([]);
-    expect(budget.transactions.find((t) => t.id === "t2")?.categoryId).toBeUndefined();
     expect(budget.assignments).toEqual({});
-    // The deleted envelope's dollars are back in the pool — nothing vanished.
     expect(snapshot(budget, "2026-06").readyToAssign).toBe(1000);
-    // FIXME(w1-bug3): drift stays 0 here only because the $40 spend, orphaned
-    // by the delete, lands in the unbudgetedSpending residual — cash is
-    // conserved but the dollars left the envelope system unnoticed. The
-    // invariant holds; tightening what happens to orphaned activity is bug 3.
+    expect(bookIntegrity(budget, "2026-06").drift).toBe(0);
+  });
+
+  it("refuses to delete the Uncategorized envelope", () => {
+    const s = useStore.getState();
+    s.reset();
+    s.addAccount({ id: "checking", name: "Checking", kind: "checking", source: "manual" });
+    s.addTxn({
+      id: "t1",
+      accountId: "checking",
+      date: "2026-06-05",
+      amount: -25,
+      categoryId: UNCATEGORIZED_CATEGORY_ID,
+      source: "manual",
+    });
+    // Saving into it is what created it.
+    expect(
+      useStore.getState().budget.categories.map((c) => c.id),
+    ).toEqual([UNCATEGORIZED_CATEGORY_ID]);
+
+    useStore.getState().deleteCategory(UNCATEGORIZED_CATEGORY_ID, "anything");
+
+    const budget = useStore.getState().budget;
+    expect(budget.categories.map((c) => c.id)).toEqual([UNCATEGORIZED_CATEGORY_ID]);
+    expect(budget.transactions.find((t) => t.id === "t1")?.categoryId).toBe(
+      UNCATEGORIZED_CATEGORY_ID,
+    );
     expect(bookIntegrity(budget, "2026-06").drift).toBe(0);
   });
 });

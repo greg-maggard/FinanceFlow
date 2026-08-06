@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import { useStore } from "../../state/store";
 import type { Account, Txn } from "../../state/schema";
-import { RTA_CATEGORY_ID, newId } from "../../state/schema";
+import { RTA_CATEGORY_ID, UNCATEGORIZED_CATEGORY_ID, newId } from "../../state/schema";
 import { isOnBudget, isoDay } from "../../budget/ledger";
 import { GlassCard } from "../glass/GlassCard";
 import { GlassButton } from "../glass/GlassButton";
@@ -69,9 +69,16 @@ function AccountSelect({
 function CategorySelect({ value, onChange }: { value: string; onChange: (id: string) => void }) {
   const budget = useStore((s) => s.budget);
   const groups = [...budget.groups].sort((a, b) => a.order - b.order);
+  // The catch-all envelope is created lazily, so offer it even before it's in
+  // the book — choosing it (or saving an expense with nothing else picked) is
+  // what brings it into being.
+  const knowsUncategorized = budget.categories.some((c) => c.id === UNCATEGORIZED_CATEGORY_ID);
   return (
     <GlassSelect value={value} onChange={(e) => onChange(e.target.value)}>
       <option value="">— No category —</option>
+      {!knowsUncategorized && (
+        <option value={UNCATEGORIZED_CATEGORY_ID}>Uncategorized</option>
+      )}
       {groups.map((g) => (
         <optgroup key={g.id} label={g.name}>
           {budget.categories
@@ -96,7 +103,10 @@ function AddTxnForm({ accounts }: { accounts: Account[] }) {
   const [date, setDate] = useState(isoDay());
   const [payee, setPayee] = useState("");
   const [amount, setAmount] = useState(0);
-  const [categoryId, setCategoryId] = useState("");
+  // Pre-selected so an expense can never be saved with no envelope at all —
+  // money that leaves an account with no category leaves the envelope system
+  // entirely (see bookIntegrity's unbudgetedSpending residual).
+  const [categoryId, setCategoryId] = useState(UNCATEGORIZED_CATEGORY_ID);
 
   const kindOf = (id: string) => accounts.find((a) => a.id === id)?.kind;
   const fromKind = kindOf(fromId);
@@ -131,7 +141,8 @@ function AddTxnForm({ accounts }: { accounts: Account[] }) {
         date,
         payee: payee.trim() || undefined,
         amount: mode === "expense" ? -magnitude : magnitude,
-        categoryId: mode === "income" ? RTA_CATEGORY_ID : categoryId || undefined,
+        categoryId:
+          mode === "income" ? RTA_CATEGORY_ID : categoryId || UNCATEGORIZED_CATEGORY_ID,
         source: "manual",
       });
     }

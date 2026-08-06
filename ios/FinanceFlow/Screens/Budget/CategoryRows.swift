@@ -287,3 +287,130 @@ private struct CategoryRow: View {
         .accessibilityHidden(true)
     }
 }
+
+/// Delete affordance for an envelope, shared by every screen that can delete
+/// one. Deleting has to move BOTH of the envelope's terms — its transactions
+/// and every month's assigned dollars — to one other envelope, or the delete
+/// conjures the spent money back into Ready to Assign. So a spent envelope
+/// asks where they go, defaulting to Uncategorized. An envelope no transaction
+/// ever touched has no activity to carry and nothing to choose: it just
+/// confirms, and its assignments return to Ready to Assign.
+struct DeleteCategoryButton: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var theme
+    let category: BudgetCategory
+    /// Runs after the delete lands — e.g. to dismiss the enclosing sheet.
+    var onDelete: () -> Void = {}
+
+    @State private var confirming = false
+
+    var body: some View {
+        // The catch-all holds what other envelopes hand off; it has nowhere to go.
+        if category.id != BudgetBook.uncategorizedCategoryID {
+            Button {
+                confirming = true
+            } label: {
+                Label("Delete category", systemImage: "trash")
+                    .font(theme.typography.callout)
+                    .foregroundStyle(theme.colors.danger)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Delete \(category.name)")
+            .sheet(isPresented: $confirming) {
+                DeleteCategorySheet(category: category, onDelete: onDelete)
+                    .presentationDetents([.medium])
+                    .presentationDragIndicator(.visible)
+            }
+        }
+    }
+}
+
+/// The confirm step: pick the envelope that receives the transactions and the
+/// assigned dollars together, then commit.
+private struct DeleteCategorySheet: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var theme
+    @Environment(\.dismiss) private var dismiss
+    let category: BudgetCategory
+    var onDelete: () -> Void
+
+    @State private var reassignTo = BudgetBook.uncategorizedCategoryID
+
+    private var book: BudgetBook { store.state.budget }
+
+    private var hasTransactions: Bool {
+        book.transactions.contains { $0.categoryId == category.id }
+    }
+
+    /// Every other visible envelope, plus Uncategorized — which is created
+    /// lazily, so it is offered even before it exists in the book.
+    private var choices: [BudgetCategory] {
+        var list = book.categories
+            .filter { $0.id != category.id && $0.hidden != true }
+            .sorted { ($0.order, $0.name) < ($1.order, $1.name) }
+        if !list.contains(where: { $0.id == BudgetBook.uncategorizedCategoryID }) {
+            list.append(BudgetCategory(
+                id: BudgetBook.uncategorizedCategoryID,
+                groupId: BudgetBook.systemGroupID,
+                name: "Uncategorized",
+                order: BudgetBook.systemOrder
+            ))
+        }
+        return list
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: theme.spacing.lg) {
+                    if hasTransactions {
+                        Text("Move \(category.name)'s transactions and money to…")
+                            .font(theme.typography.callout)
+                            .foregroundStyle(theme.colors.textPrimary)
+                        HStack {
+                            FieldLabel(text: "Envelope")
+                            Spacer()
+                            Picker("Envelope", selection: $reassignTo) {
+                                ForEach(choices) { choice in
+                                    Text(choice.name).tag(choice.id)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .tint(theme.colors.primary)
+                            .accessibilityLabel("Move \(category.name)'s transactions and money to")
+                        }
+                        Text("Spending and funding move together, so Ready to Assign doesn't change.")
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.textSecondary)
+                    } else {
+                        Text("Nothing was ever spent here — its assigned dollars return to Ready to Assign.")
+                            .font(theme.typography.callout)
+                            .foregroundStyle(theme.colors.textPrimary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(theme.spacing.lg)
+            }
+            .background(theme.materials.sheet)
+            .scrollContentBackground(.hidden)
+            .navigationTitle("Delete \(category.name)?")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }.foregroundStyle(theme.colors.textSecondary)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(hasTransactions ? "Move & delete" : "Delete") {
+                        store.deleteCategory(
+                            category.id,
+                            reassignTo: hasTransactions ? reassignTo : BudgetBook.uncategorizedCategoryID
+                        )
+                        dismiss()
+                        onDelete()
+                    }
+                    .foregroundStyle(theme.colors.danger)
+                }
+            }
+        }
+    }
+}
