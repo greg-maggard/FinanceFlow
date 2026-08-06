@@ -52,8 +52,4 @@ FinanceFlow *is* the budget now.
 - **`StorageAdapter` interface** (`src/state/storage.ts`) — only
   `LocalStorageAdapter` ships today. A future `RemoteStorageAdapter` for
   Supabase or similar drops in without touching the store.
-- **`BalanceProvider` interface** (`src/integrations/balanceProvider.ts`) —
-  only `ManualProvider` is wired. Per-field `source: "manual" | "plaid" |
-  "ynab"` attribution is already in the schema, so a future Plaid provider
-  can populate fields without schema churn.
 - **`AppState.version`** is in place for forward migrations.
