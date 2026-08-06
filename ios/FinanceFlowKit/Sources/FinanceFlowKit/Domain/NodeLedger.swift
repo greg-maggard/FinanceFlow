@@ -230,12 +230,43 @@ public enum NodeLedger {
         return Account(id: collegeAccountID, name: "529 Plan", kind: .tracking, nodeId: .College)
     }
 
+    /// The envelope's outstanding write-offs for a month, newest first.
+    ///
+    /// Total order is `(date DESC, id DESC)` and must be implemented
+    /// identically here and in `nodeLedger.ts`: the two engines have to unwind
+    /// the SAME row or a book that round-trips through export/import diverges
+    /// between platforms. `.literal` keeps the string comparison code-unit
+    /// exact, matching JavaScript's `<`.
+    private static func outstandingAdjustments(
+        _ book: BudgetBook,
+        month: String,
+        categoryID: String
+    ) -> [Txn] {
+        book.transactions
+            .filter {
+                $0.accountId == adjustAccountID
+                    && $0.categoryId == categoryID
+                    && Ledger.monthOf(date: $0.date) == month
+                    && $0.amount < 0
+            }
+            .sorted { a, b in
+                if a.date != b.date {
+                    return a.date.compare(b.date, options: .literal) == .orderedDescending
+                }
+                return a.id.compare(b.id, options: .literal) == .orderedDescending
+            }
+    }
+
     /// Make an envelope's available equal `newAvailable`, expressed in honest
-    /// ledger operations. Raising first unwinds any same-day adjustment toward
-    /// zero, then assigns more this month. Lowering un-assigns toward zero
-    /// first; the remainder becomes ONE coalesced same-day "Balance
-    /// adjustment" transaction on the Adjustments account. Absolute-targeted
-    /// and keyed by deterministic txn id, so per-keystroke edits self-correct.
+    /// ledger operations. Raising first unwinds this month's outstanding
+    /// write-offs newest-first — correcting yesterday's typo today must give
+    /// the money back, not burn a second helping of Ready to Assign — and only
+    /// the residual assigns more this month. Unwinding stops at the month
+    /// boundary: a prior-month write-off crosses the carry clamp, where the
+    /// effect on this month's available is no longer 1:1. Lowering un-assigns
+    /// toward zero first; the remainder becomes ONE coalesced same-day
+    /// "Balance adjustment" transaction on the Adjustments account, keyed by
+    /// deterministic txn id so per-keystroke edits self-correct.
     public static func planBalanceEdit(
         _ book: BudgetBook,
         month: String,
@@ -255,14 +286,15 @@ public enum NodeLedger {
         let assigned = entry.assigned
 
         if delta > 0 {
-            if let existingAdj, existingAdj.amount < 0 {
-                let unwind = min(delta, -existingAdj.amount)
-                if existingAdj.amount + unwind == 0 {
-                    ops.deleteTxnIDs = [adjID]
+            for adj in outstandingAdjustments(book, month: month, categoryID: categoryID) {
+                if delta <= 0 { break }
+                let unwind = min(delta, -adj.amount)
+                if adj.amount + unwind == 0 {
+                    ops.deleteTxnIDs.append(adj.id)
                 } else {
-                    var updated = existingAdj
+                    var updated = adj
                     updated.amount += unwind
-                    ops.updateTxns = [updated]
+                    ops.updateTxns.append(updated)
                 }
                 delta -= unwind
             }

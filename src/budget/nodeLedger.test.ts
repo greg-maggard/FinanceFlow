@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Account, BudgetBook, Category, Txn } from "../state/schema";
 import { RTA_CATEGORY_ID, emptyBudgetBook } from "../state/schema";
-import { snapshot } from "./ledger";
+import { bookIntegrity, snapshot } from "./ledger";
 import type { BookOps } from "./nodeLedger";
 import {
   ADJUST_ACCOUNT_ID,
@@ -208,6 +208,49 @@ describe("planBalanceEdit", () => {
     expect(book.transactions.filter((t) => t.accountId === ADJUST_ACCOUNT_ID)).toHaveLength(0);
     expect(book.assignments[MONTH]["BigEF:b1"]).toBe(250);
     expect(snapshot(book, MONTH).categories["BigEF:b1"].available).toBe(250);
+  });
+
+  it("raising the next day unwinds the write-off instead of burning RTA", () => {
+    const before = efBook();
+    const rtaBefore = snapshot(before, MONTH).readyToAssign;
+    // Day 10: fat-finger the balance down past the assignment. Day 11: fix it.
+    let book = apply(before, planBalanceEdit(before, MONTH, "BigEF:b1", -300, `${MONTH}-10`));
+    book = apply(book, planBalanceEdit(book, MONTH, "BigEF:b1", 1200, `${MONTH}-11`));
+
+    expect(book.transactions.filter((t) => t.accountId === ADJUST_ACCOUNT_ID)).toHaveLength(0);
+    expect(book.assignments).toEqual(before.assignments);
+    const snap = snapshot(book, MONTH);
+    expect(snap.categories["BigEF:b1"].available).toBe(1200);
+    expect(snap.readyToAssign).toBe(rtaBefore);
+    expect(bookIntegrity(book, MONTH).drift).toBe(0);
+  });
+
+  it("raising past the write-offs clears them, then assigns the residual", () => {
+    let book = efBook();
+    book = apply(book, planBalanceEdit(book, MONTH, "BigEF:b1", -300, `${MONTH}-10`));
+    book = apply(book, planBalanceEdit(book, MONTH, "BigEF:b1", 500, `${MONTH}-11`));
+
+    expect(book.transactions.filter((t) => t.accountId === ADJUST_ACCOUNT_ID)).toHaveLength(0);
+    expect(book.assignments[MONTH]["BigEF:b1"]).toBe(500);
+    expect(snapshot(book, MONTH).categories["BigEF:b1"].available).toBe(500);
+    expect(bookIntegrity(book, MONTH).drift).toBe(0);
+  });
+
+  it("a partial raise unwinds the NEWEST write-off first", () => {
+    let book = efBook();
+    book = apply(book, planBalanceEdit(book, MONTH, "BigEF:b1", -300, `${MONTH}-10`));
+    book = apply(book, planBalanceEdit(book, MONTH, "BigEF:b1", -800, `${MONTH}-12`));
+    book = apply(book, planBalanceEdit(book, MONTH, "BigEF:b1", -600, `${MONTH}-13`));
+
+    const byDate = Object.fromEntries(
+      book.transactions
+        .filter((t) => t.accountId === ADJUST_ACCOUNT_ID)
+        .map((t) => [t.date, t.amount]),
+    );
+    // The 12th's −500 absorbs the whole +200; the 10th's −300 is untouched.
+    expect(byDate).toEqual({ [`${MONTH}-10`]: -300, [`${MONTH}-12`]: -300 });
+    expect(snapshot(book, MONTH).categories["BigEF:b1"].available).toBe(-600);
+    expect(bookIntegrity(book, MONTH).drift).toBe(0);
   });
 });
 

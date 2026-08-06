@@ -9,7 +9,7 @@ import type {
 } from "../state/schema";
 import { newId } from "../state/schema";
 import type { MonthSnapshot } from "./ledger";
-import { accountBalance, fromCents, snapshot, toCents } from "./ledger";
+import { accountBalance, fromCents, monthOf, snapshot, toCents } from "./ledger";
 import { RECURRING } from "../theme/identity";
 
 /**
@@ -248,14 +248,40 @@ export function ensureCollegeAccount(book: BudgetBook): Account | null {
 }
 
 /**
+ * The envelope's outstanding write-offs for a month, newest first.
+ *
+ * Total order is `(date DESC, id DESC)` and must be implemented identically
+ * here and in `NodeLedger.swift`: the two engines have to unwind the SAME row
+ * or a book that round-trips through export/import diverges between platforms.
+ */
+function outstandingAdjustments(book: BudgetBook, month: MonthKey, categoryId: string): Txn[] {
+  return book.transactions
+    .filter(
+      (t) =>
+        t.accountId === ADJUST_ACCOUNT_ID &&
+        t.categoryId === categoryId &&
+        monthOf(t.date) === month &&
+        toCents(t.amount) < 0,
+    )
+    .sort((a, b) => {
+      if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+      if (a.id !== b.id) return a.id < b.id ? 1 : -1;
+      return 0;
+    });
+}
+
+/**
  * Make an envelope's available equal `newAvailable`, expressed in honest
- * ledger operations. Raising first unwinds any same-day adjustment toward
- * zero, then assigns more this month (RTA may go negative — visible on the
- * Budget screen by design). Lowering un-assigns toward zero first; whatever
- * that can't express becomes ONE coalesced same-day "Balance adjustment"
- * transaction on the Adjustments account. Absolute-targeted and keyed by
- * deterministic txn id, so per-keystroke edits self-correct instead of
- * compounding.
+ * ledger operations. Raising first unwinds this month's outstanding
+ * write-offs newest-first — correcting yesterday's typo today must give the
+ * money back, not burn a second helping of Ready to Assign — and only the
+ * residual assigns more this month (RTA may go negative — visible on the
+ * Budget screen by design). Unwinding stops at the month boundary: a
+ * prior-month write-off crosses the carry clamp, where the effect on this
+ * month's available is no longer 1:1. Lowering un-assigns toward zero first;
+ * whatever that can't express becomes ONE coalesced same-day "Balance
+ * adjustment" transaction on the Adjustments account, keyed by deterministic
+ * txn id so per-keystroke edits self-correct instead of compounding.
  */
 export function planBalanceEdit(
   book: BudgetBook,
@@ -275,11 +301,12 @@ export function planBalanceEdit(
   const assignedC = toCents(entry.assigned);
 
   if (deltaC > 0) {
-    if (existingAdj && existingAdj.amount < 0) {
-      const adjC = toCents(existingAdj.amount);
+    for (const adj of outstandingAdjustments(book, month, categoryId)) {
+      if (deltaC <= 0) break;
+      const adjC = toCents(adj.amount);
       const unwindC = Math.min(deltaC, -adjC);
-      if (adjC + unwindC === 0) ops.deleteTxnIds = [adjId];
-      else ops.updateTxns = [{ ...existingAdj, amount: fromCents(adjC + unwindC) }];
+      if (adjC + unwindC === 0) (ops.deleteTxnIds ??= []).push(adj.id);
+      else (ops.updateTxns ??= []).push({ ...adj, amount: fromCents(adjC + unwindC) });
       deltaC -= unwindC;
     }
     if (deltaC > 0) {

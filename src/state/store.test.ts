@@ -221,4 +221,31 @@ describe("applyBookOps", () => {
     expect(snapshot(after, month).categories[catId].available).toBe(-25);
     expect(bookIntegrity(after, month).drift).toBe(0);
   });
+
+  it("correcting the balance a day later unwinds the write-off, leaving RTA whole", () => {
+    const s = useStore.getState();
+    s.reset();
+    const month = ymKey();
+    s.addGroup("Emergency Fund");
+    const groupId = useStore.getState().budget.groups[0].id;
+    s.addCategory(groupId, "Medical");
+    const catId = useStore.getState().budget.categories[0].id;
+    s.assign(month, catId, 100);
+
+    const before = useStore.getState().budget;
+    const rtaBefore = snapshot(before, month).readyToAssign;
+
+    // Day 10 typo: available driven below zero, writing off 25 dollars.
+    s.applyBookOps(planBalanceEdit(before, month, catId, -25, `${month}-10`));
+    // Day 11 correction back to where it started.
+    s.applyBookOps(planBalanceEdit(useStore.getState().budget, month, catId, 100, `${month}-11`));
+
+    const after = useStore.getState().budget;
+    expect(after.transactions.filter((t) => t.accountId === ADJUST_ACCOUNT_ID)).toHaveLength(0);
+    expect(after.assignments).toEqual(before.assignments);
+    const snap = snapshot(after, month);
+    expect(snap.categories[catId].available).toBe(100);
+    expect(snap.readyToAssign).toBe(rtaBefore);
+    expect(bookIntegrity(after, month).drift).toBe(0);
+  });
 });

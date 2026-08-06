@@ -242,6 +242,33 @@ struct AppStoreTests {
         #expect(Ledger.bookIntegrity(store.state.budget, month: month).drift == 0)
     }
 
+    @Test("correcting the balance a day later unwinds the write-off, leaving RTA whole")
+    func balanceCorrectionUnwindsWriteOff() {
+        let store = AppStore(storage: MemoryStorageAdapter())
+        let month = Recurring.ymKey()
+        store.addGroup(name: "Emergency Fund")
+        let groupID = store.state.budget.groups[0].id
+        store.addCategory(groupID: groupID, name: "Medical")
+        let catID = store.state.budget.categories[0].id
+        store.assign(month: month, categoryID: catID, amount: 100)
+
+        let before = store.state.budget
+        let rtaBefore = Ledger.snapshot(before, month: month).readyToAssign
+
+        // Day 10 typo: available driven below zero, writing off 25 dollars.
+        store.apply(NodeLedger.planBalanceEdit(before, month: month, categoryID: catID, newAvailable: -25, today: "\(month)-10"))
+        // Day 11 correction back to where it started.
+        store.apply(NodeLedger.planBalanceEdit(store.state.budget, month: month, categoryID: catID, newAvailable: 100, today: "\(month)-11"))
+
+        let after = store.state.budget
+        #expect(after.transactions.filter { $0.accountId == NodeLedger.adjustAccountID }.isEmpty)
+        #expect(after.assignments == before.assignments)
+        let snap = Ledger.snapshot(after, month: month)
+        #expect(snap.categories[catID]?.available == 100)
+        #expect(snap.readyToAssign == rtaBefore)
+        #expect(Ledger.bookIntegrity(after, month: month).drift == 0)
+    }
+
     @Test("addGroup and addCategory assign sequential orders")
     func groupAndCategoryOrders() {
         let store = AppStore(storage: MemoryStorageAdapter())
