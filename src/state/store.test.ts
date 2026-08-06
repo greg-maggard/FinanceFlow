@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { adapter, flushSave, useStore } from "./store";
+import { useUI } from "./uiStore";
 import { bookIntegrity, snapshot } from "../budget/ledger";
 import { ADJUST_ACCOUNT_ID, planBalanceEdit } from "../budget/nodeLedger";
 import { ymKey } from "./recurring";
@@ -56,6 +57,42 @@ describe("persistence debounce", () => {
     vi.advanceTimersByTime(1000);
     expect(spy).not.toHaveBeenCalled();
     expect(bookIntegrity(useStore.getState().budget, "2026-06").drift).toBe(0);
+  });
+});
+
+describe("a failed save surfaces in the UI", () => {
+  afterEach(() => {
+    useStore.getState().reset();
+    useUI.setState({ saveError: null, lastSavedAt: null });
+    vi.restoreAllMocks();
+  });
+
+  it("sets saveError on a quota-exceeded write, and a later successful save clears it", async () => {
+    useStore.getState().reset();
+    // The test env's localStorage stand-in (see src/test/setup.ts) is a
+    // plain object, not a Storage instance — spy on the instance directly.
+    const setItemSpy = vi.spyOn(localStorage, "setItem").mockImplementation(() => {
+      throw new DOMException("quota exceeded", "QuotaExceededError");
+    });
+
+    useStore.getState().setNotes("Start", "this write will fail");
+    flushSave();
+
+    await vi.waitFor(() => {
+      expect(useUI.getState().saveError).not.toBeNull();
+    });
+    expect(useUI.getState().saveError).toMatch(/couldn't save/i);
+
+    // Storage recovers (e.g. the browser freed up space) — the very next
+    // mutation should retry rather than staying skipped as already-durable.
+    setItemSpy.mockRestore();
+    useStore.getState().setNotes("Start", "this write will succeed");
+    flushSave();
+
+    await vi.waitFor(() => {
+      expect(useUI.getState().saveError).toBeNull();
+    });
+    expect(useUI.getState().lastSavedAt).not.toBeNull();
   });
 });
 

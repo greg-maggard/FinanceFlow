@@ -18,6 +18,16 @@ type UIStore = {
   pendingMedal: number | null;
   /** Pending one-shot scroll/pulse request; BudgetScreen consumes it. */
   budgetFocus: BudgetFocus | null;
+  /**
+   * Non-null when the most recent persistence write failed (quota exceeded,
+   * Safari private mode, storage eviction, ...). Drives the persistent
+   * banner in TopBar; cleared automatically by the next successful save, or
+   * manually by dismissing the banner.
+   */
+  saveError: string | null;
+  /** Epoch ms of the most recent successful persistence write, for the
+   *  "Last saved" read-out in SettingsModal. */
+  lastSavedAt: number | null;
   setView: (v: ViewMode) => void;
   setFocus: (id: NodeId | null, direction?: Direction) => void;
   openInBudget: (target: BudgetFocus) => void;
@@ -27,6 +37,9 @@ type UIStore = {
   clearCelebration: () => void;
   triggerMedal: (phase: number) => void;
   clearMedal: () => void;
+  setSaveError: (message: string | null) => void;
+  clearSaveError: () => void;
+  setLastSaved: (at: number) => void;
 };
 
 export const useUI = create<UIStore>((set) => ({
@@ -37,6 +50,8 @@ export const useUI = create<UIStore>((set) => ({
   pendingCelebration: null,
   pendingMedal: null,
   budgetFocus: null,
+  saveError: null,
+  lastSavedAt: null,
   setView: (v) => set({ view: v }),
   setFocus: (id, direction = "none") => set({ focusedId: id, direction, view: "focus" }),
   openInBudget: (target) => set({ view: "budget", budgetFocus: target }),
@@ -46,4 +61,7 @@ export const useUI = create<UIStore>((set) => ({
   clearCelebration: () => set({ pendingCelebration: null }),
   triggerMedal: (phase) => set({ pendingMedal: phase }),
   clearMedal: () => set({ pendingMedal: null }),
+  setSaveError: (message) => set({ saveError: message }),
+  clearSaveError: () => set({ saveError: null }),
+  setLastSaved: (at) => set({ lastSavedAt: at }),
 }));

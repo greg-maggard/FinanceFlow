@@ -1,5 +1,7 @@
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useStore } from "../state/store";
+import { useUI } from "../state/uiStore";
 import { bookIntegrity } from "../budget/ledger";
 import { ymKey } from "../state/recurring";
 import { GlassCard } from "./glass/GlassCard";
@@ -8,6 +10,45 @@ import { NumberField } from "./glass/NumberField";
 
 const money = (n: number) =>
   n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+
+function relativeTime(from: number, now: number): string {
+  const seconds = Math.max(0, Math.round((now - from) / 1000));
+  if (seconds < 5) return "just now";
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return `${days}d ago`;
+}
+
+/**
+ * "Last saved" read-out, fed by the same successful-save path as the
+ * persist-failure banner (see store.ts writeNow / uiStore.ts lastSavedAt) —
+ * a corroborating, human-visible signal that saves are actually landing,
+ * visible even before a failure would surface the banner.
+ */
+function LastSaved() {
+  const lastSavedAt = useUI((s) => s.lastSavedAt);
+  const [now, setNow] = useState(() => Date.now());
+
+  // Ticks while the modal is open so the relative label ("5s ago" -> "1m
+  // ago") advances even without a fresh save.
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 5000);
+    return () => clearInterval(id);
+  }, []);
+
+  return (
+    <div className="flex items-baseline justify-between gap-4 text-[11px] text-white/45">
+      <span>Last saved</span>
+      <span className="tabular-nums">
+        {lastSavedAt ? relativeTime(lastSavedAt, now) : "not yet"}
+      </span>
+    </div>
+  );
+}
 
 /**
  * Conservation-of-money read-out. Every dollar in an on-budget account must be
@@ -149,6 +190,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                   </div>
                 </div>
                 <IntegrityCheck />
+                <LastSaved />
               </div>
             </GlassCard>
           </motion.div>
