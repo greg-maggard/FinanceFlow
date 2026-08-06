@@ -336,7 +336,13 @@ describe("planFundMonth", () => {
   it("funds every targeted envelope, matching hand-assigned figures to the cent", () => {
     const book = targetBook(5000);
     const plan = planFundMonth(book, MONTH);
-    expect(plan).toMatchObject({ targeted: 3, funded: 3, underfunded: [], shortfall: 0 });
+    expect(plan).toMatchObject({
+      targeted: 3,
+      funding: 3,
+      total: 2433.33,
+      underfunded: [],
+      shortfall: 0,
+    });
 
     const next = apply(book, plan.ops);
     const byHand = {
@@ -354,7 +360,7 @@ describe("planFundMonth", () => {
     const once = apply(book, planFundMonth(book, MONTH).ops);
     const twice = planFundMonth(once, MONTH);
     expect(twice.ops).toEqual({});
-    expect(twice).toMatchObject({ targeted: 3, funded: 3, shortfall: 0 });
+    expect(twice).toMatchObject({ targeted: 3, funding: 0, total: 0, shortfall: 0 });
     expect(apply(once, twice.ops)).toEqual(once);
     expect(snapshot(once, MONTH).readyToAssign).toBeGreaterThanOrEqual(0);
     expect(bookIntegrity(once, MONTH).drift).toBe(0);
@@ -373,7 +379,7 @@ describe("planFundMonth", () => {
       { categoryId: "Food", name: "Food", short: 400 },
       { categoryId: "Utilities", name: "Utilities", short: 33.33 },
     ]);
-    expect(plan).toMatchObject({ targeted: 3, funded: 1, shortfall: 433.33 });
+    expect(plan).toMatchObject({ targeted: 3, funding: 2, total: 2000, shortfall: 433.33 });
 
     const next = apply(book, plan.ops);
     expect(snapshot(next, MONTH).readyToAssign).toBe(0);
@@ -397,7 +403,7 @@ describe("planFundMonth", () => {
       { month: MONTH, categoryId: "Food", amount: 600 },
       { month: MONTH, categoryId: "Utilities", amount: 33.33 },
     ]);
-    expect(plan).toMatchObject({ targeted: 3, funded: 3, shortfall: 0 });
+    expect(plan).toMatchObject({ targeted: 3, funding: 2, total: 333.33, shortfall: 0 });
 
     const next = apply(book, plan.ops);
     const snap = snapshot(next, MONTH);
@@ -412,7 +418,7 @@ describe("planFundMonth", () => {
     const book = targetBook(0);
     const plan = planFundMonth(book, MONTH);
     expect(plan.ops).toEqual({});
-    expect(plan).toMatchObject({ targeted: 3, funded: 0, shortfall: 2433.33 });
+    expect(plan).toMatchObject({ targeted: 3, funding: 0, total: 0, shortfall: 2433.33 });
     expect(snapshot(apply(book, plan.ops), MONTH).readyToAssign).toBe(0);
   });
 
@@ -426,8 +432,87 @@ describe("planFundMonth", () => {
     expect(snapshot(book, MONTH).readyToAssign).toBe(-400);
     const plan = planFundMonth(book, MONTH);
     expect(plan.ops).toEqual({});
-    expect(plan).toMatchObject({ targeted: 3, funded: 0, shortfall: 1533.33 });
+    expect(plan).toMatchObject({ targeted: 3, funding: 0, total: 0, shortfall: 1533.33 });
     expect(snapshot(book, MONTH).readyToAssign).toBe(-400);
+  });
+
+  // The three semantics tests below all turn on one rule: need is measured
+  // against what the envelope HELD this month (available − activity), the same
+  // quantity `recurringTotals` calls funded — never against available, which
+  // in-month spending drags back down.
+
+  it("spending a funded envelope down to zero does not re-arm the plan", () => {
+    const book = targetBook(5000);
+    const funded = apply(book, planFundMonth(book, MONTH).ops);
+    const spent: BudgetBook = {
+      ...funded,
+      transactions: [
+        ...funded.transactions,
+        txn({ accountId: "checking", date: `${MONTH}-25`, amount: -600, categoryId: "Food" }),
+      ],
+    };
+    // Fund on the 1st, spend the whole grocery target by the 25th…
+    expect(snapshot(spent, MONTH).categories.Food.available).toBe(0);
+
+    // …and the button has nothing left to offer. The old rule handed over
+    // another $600, every month, for as long as the user kept tapping.
+    const again = planFundMonth(spent, MONTH);
+    expect(again.ops).toEqual({});
+    expect(again).toMatchObject({ targeted: 3, funding: 0, total: 0, shortfall: 0 });
+    expect(snapshot(spent, MONTH).readyToAssign).toBe(2566.67);
+    expect(bookIntegrity(spent, MONTH).drift).toBe(0);
+  });
+
+  it("a month pre-funded from the prior month reads funded and asks for nothing", () => {
+    // The month-ahead user: August's rent assigned in July, August's bill paid.
+    const book: BudgetBook = {
+      ...emptyBudgetBook(),
+      accounts: [acct({ id: "checking", kind: "checking" })],
+      transactions: [
+        txn({ accountId: "checking", date: "2026-05-01", amount: 1800, categoryId: RTA_CATEGORY_ID }),
+        txn({ accountId: "checking", date: `${MONTH}-03`, amount: -1800, categoryId: "Rent" }),
+      ],
+      categories: [cat({ id: "Rent", nodeId: "Rent", monthlyTarget: 1800 })],
+      assignments: { "2026-05": { Rent: 1800 } },
+    };
+    const snap = snapshot(book, MONTH);
+    expect(snap.categories.Rent).toEqual({ assigned: 0, activity: -1800, available: 0 });
+
+    // Focus card and Budget screen, one book, one answer.
+    expect(recurringTotals(book, snap, "Rent")).toEqual({ target: 1800, funded: 1800 });
+    const plan = planFundMonth(book, MONTH);
+    expect(plan.ops).toEqual({});
+    expect(plan).toMatchObject({ targeted: 1, funding: 0, total: 0, underfunded: [], shortfall: 0 });
+  });
+
+  it("an overspent envelope is filled to its target, not past it", () => {
+    const base = targetBook(5000);
+    const book: BudgetBook = {
+      ...base,
+      transactions: [
+        ...base.transactions,
+        txn({ accountId: "checking", date: `${MONTH}-08`, amount: -250, categoryId: "Food" }),
+      ],
+    };
+    expect(snapshot(book, MONTH).categories.Food).toEqual({
+      assigned: 0,
+      activity: -250,
+      available: -250,
+    });
+
+    // 600, not 850: the $250 hole is the month-end sweep's business, not
+    // something to quietly top up out of Ready to Assign.
+    const plan = planFundMonth(book, MONTH);
+    expect(plan.ops.setAssignments).toContainEqual({
+      month: MONTH,
+      categoryId: "Food",
+      amount: 600,
+    });
+    expect(plan).toMatchObject({ targeted: 3, funding: 3, total: 2433.33, shortfall: 0 });
+
+    const next = apply(book, plan.ops);
+    expect(snapshot(next, MONTH).categories.Food.available).toBe(350);
+    expect(bookIntegrity(next, MONTH).drift).toBe(0);
   });
 });
 

@@ -364,13 +364,19 @@ public enum NodeLedger {
         }
     }
 
+    /// What one tap of "Fund this month" would do — described as a *plan*,
+    /// before anything is applied. Every count here answers "what is about to
+    /// happen", which is what a confirmation dialog has to state out loud.
     public struct FundMonthPlan: Equatable, Sendable {
         public var ops: BookOps
         /// Envelopes carrying a positive monthly target.
         public var targeted: Int
-        /// Of those, how many stand at or above target once `ops` are applied.
-        public var funded: Int
-        /// The rest, in book order — what the UI reports.
+        /// Of those, how many this plan actually moves money into.
+        public var funding: Int
+        /// Dollars this plan moves out of Ready to Assign — Σ of the ops'
+        /// increases.
+        public var total: Decimal
+        /// Envelopes the money ran out before filling, in book order.
         public var underfunded: [FundShortfall]
         /// Σ of `underfunded[].short`.
         public var shortfall: Decimal
@@ -382,10 +388,20 @@ public enum NodeLedger {
     /// Assigned field at zero — without this, funding ~15 envelopes is ~15
     /// manual number entries on the 1st of every month, forever.
     ///
-    /// The need is measured against AVAILABLE, not assigned: money carried
-    /// over from last month already covers the target, so a month-ahead user
-    /// is never asked to fund the same envelope twice, and an envelope holding
-    /// half its target is topped up by exactly the difference.
+    /// The need is measured against what the envelope HELD for the month —
+    /// `available - activity`, i.e. carryover + assigned — which is the same
+    /// quantity `recurringTotals` calls funded. One definition of "funded for
+    /// month M", used by both, so the Focus card and this button can never
+    /// disagree:
+    ///
+    /// - Money carried in from last month already covers the target, so a
+    ///   month-ahead user is never asked to fund the same envelope twice.
+    /// - Spending *from* an envelope during the month does not re-open its
+    ///   need. This is a once-a-month contribution, not a refill-to-target
+    ///   that stays armed all month and quietly re-funds every dollar spent.
+    /// - An envelope overspent this month asks for its target and no more; the
+    ///   overspend is the sweep's business (a negative available never
+    ///   carries), not something to top up past target out of Ready to Assign.
     ///
     /// Categories are walked in the book's declared order — `book.categories`
     /// as stored, which is a deterministic total order on both platforms —
@@ -395,9 +411,9 @@ public enum NodeLedger {
     /// drive it negative. Whatever the money ran out before reaching is
     /// reported, not silently skipped.
     ///
-    /// Idempotent: once an envelope's available equals its target its need is
-    /// 0 and it emits no op, so running this twice does nothing the second
-    /// time.
+    /// Idempotent for the rest of the month: once an envelope has held its
+    /// target, its need is 0 and it emits no op — running this again does
+    /// nothing, whatever has been spent since.
     public static func planFundMonth(_ book: BudgetBook, month: String) -> FundMonthPlan {
         let snap = Ledger.snapshot(book, month: month)
         var remaining = max(0, snap.readyToAssign)
@@ -406,6 +422,7 @@ public enum NodeLedger {
         var underfunded: [FundShortfall] = []
         var targeted = 0
         var shortfall: Decimal = 0
+        var total: Decimal = 0
 
         for cat in book.categories {
             let target = cat.monthlyTarget ?? 0
@@ -413,7 +430,12 @@ public enum NodeLedger {
             targeted += 1
             let m = snap.categories[cat.id]
                 ?? Ledger.CategoryMonth(assigned: 0, activity: 0, available: 0)
-            let need = max(0, target - m.available)
+            // What the envelope held for the month: carryover + assigned.
+            // Carryover is never negative (`snapshot` sweeps a month-end hole
+            // into Ready to Assign instead of carrying it), so this is >= 0
+            // and needs no clamp.
+            let held = m.available - m.activity
+            let need = max(0, target - held)
             if need == 0 { continue }
             let give = min(need, remaining)
             if give > 0 {
@@ -421,6 +443,7 @@ public enum NodeLedger {
                     AssignmentSet(month: month, categoryID: cat.id, amount: m.assigned + give)
                 )
                 remaining -= give
+                total += give
             }
             if give < need {
                 underfunded.append(
@@ -433,7 +456,8 @@ public enum NodeLedger {
         return FundMonthPlan(
             ops: ops,
             targeted: targeted,
-            funded: targeted - underfunded.count,
+            funding: ops.setAssignments.count,
+            total: total,
             underfunded: underfunded,
             shortfall: shortfall
         )

@@ -341,7 +341,8 @@ struct NodeLedgerTests {
         let book = targetBook(income: 5000)
         let plan = NodeLedger.planFundMonth(book, month: month)
         #expect(plan.targeted == 3)
-        #expect(plan.funded == 3)
+        #expect(plan.funding == 3)
+        #expect(plan.total == Decimal(string: "2433.33")!)
         #expect(plan.underfunded.isEmpty)
         #expect(plan.shortfall == 0)
 
@@ -361,7 +362,8 @@ struct NodeLedgerTests {
         let twice = NodeLedger.planFundMonth(once, month: month)
         #expect(twice.ops == NodeLedger.BookOps())
         #expect(twice.targeted == 3)
-        #expect(twice.funded == 3)
+        #expect(twice.funding == 0)
+        #expect(twice.total == 0)
         #expect(twice.shortfall == 0)
         #expect(apply(once, twice.ops) == once)
         #expect(Ledger.snapshot(once, month: month).readyToAssign >= 0)
@@ -383,7 +385,8 @@ struct NodeLedgerTests {
             NodeLedger.FundShortfall(categoryID: "Utilities", name: "Utilities", short: utilities),
         ])
         #expect(plan.targeted == 3)
-        #expect(plan.funded == 1)
+        #expect(plan.funding == 2)
+        #expect(plan.total == 2000)
         #expect(plan.shortfall == Decimal(string: "433.33")!)
 
         let next = apply(book, plan.ops)
@@ -405,7 +408,8 @@ struct NodeLedgerTests {
             NodeLedger.AssignmentSet(month: month, categoryID: "Utilities", amount: utilities),
         ])
         #expect(plan.targeted == 3)
-        #expect(plan.funded == 3)
+        #expect(plan.funding == 2)
+        #expect(plan.total == Decimal(string: "333.33")!)
         #expect(plan.shortfall == 0)
 
         let next = apply(book, plan.ops)
@@ -423,7 +427,8 @@ struct NodeLedgerTests {
         let plan = NodeLedger.planFundMonth(book, month: month)
         #expect(plan.ops == NodeLedger.BookOps())
         #expect(plan.targeted == 3)
-        #expect(plan.funded == 0)
+        #expect(plan.funding == 0)
+        #expect(plan.total == 0)
         #expect(plan.shortfall == Decimal(string: "2433.33")!)
         #expect(Ledger.snapshot(apply(book, plan.ops), month: month).readyToAssign == 0)
     }
@@ -438,9 +443,90 @@ struct NodeLedgerTests {
         let plan = NodeLedger.planFundMonth(book, month: month)
         #expect(plan.ops == NodeLedger.BookOps())
         #expect(plan.targeted == 3)
-        #expect(plan.funded == 0)
+        #expect(plan.funding == 0)
+        #expect(plan.total == 0)
         #expect(plan.shortfall == Decimal(string: "1533.33")!)
         #expect(Ledger.snapshot(book, month: month).readyToAssign == -400)
+    }
+
+    // The three semantics tests below all turn on one rule: need is measured
+    // against what the envelope HELD this month (available − activity), the
+    // same quantity `recurringTotals` calls funded — never against available,
+    // which in-month spending drags back down.
+
+    @Test("spending a funded envelope down to zero does not re-arm the plan")
+    func fundIgnoresInMonthSpending() {
+        let book = targetBook(income: 5000)
+        var spent = apply(book, NodeLedger.planFundMonth(book, month: month).ops)
+        // Fund on the 1st, spend the whole grocery target by the 25th…
+        spent.transactions.append(txn("checking", "\(month)-25", -600, category: "Food"))
+        #expect(Ledger.snapshot(spent, month: month).categories["Food"]?.available == 0)
+
+        // …and the button has nothing left to offer. The old rule handed over
+        // another 600, every month, for as long as the user kept tapping.
+        let again = NodeLedger.planFundMonth(spent, month: month)
+        #expect(again.ops == NodeLedger.BookOps())
+        #expect(again.targeted == 3)
+        #expect(again.funding == 0)
+        #expect(again.total == 0)
+        #expect(again.shortfall == 0)
+        #expect(Ledger.snapshot(spent, month: month).readyToAssign == Decimal(string: "2566.67")!)
+        #expect(Ledger.bookIntegrity(spent, month: month).drift == 0)
+    }
+
+    @Test("a month pre-funded from the prior month reads funded and asks for nothing")
+    func fundAgreesWithRecurringTotals() {
+        // The month-ahead user: this month's rent assigned last month, and
+        // this month's bill already paid.
+        var book = BudgetBook()
+        book.accounts = [Account(id: "checking", name: "checking", kind: .checking)]
+        book.transactions = [
+            txn("checking", "2026-05-01", 1800, category: Ledger.rtaCategoryID),
+            txn("checking", "\(month)-03", -1800, category: "Rent"),
+        ]
+        book.categories = [cat("Rent", .Rent, monthlyTarget: 1800)]
+        book.assignments = ["2026-05": ["Rent": 1800]]
+
+        let snap = Ledger.snapshot(book, month: month)
+        #expect(snap.categories["Rent"] == Ledger.CategoryMonth(assigned: 0, activity: -1800, available: 0))
+
+        // Focus card and Budget screen, one book, one answer.
+        let totals = NodeLedger.recurringTotals(book, snap, .Rent)
+        #expect(totals.target == 1800)
+        #expect(totals.funded == 1800)
+
+        let plan = NodeLedger.planFundMonth(book, month: month)
+        #expect(plan.ops == NodeLedger.BookOps())
+        #expect(plan.targeted == 1)
+        #expect(plan.funding == 0)
+        #expect(plan.total == 0)
+        #expect(plan.underfunded.isEmpty)
+        #expect(plan.shortfall == 0)
+    }
+
+    @Test("an overspent envelope is filled to its target, not past it")
+    func fundDoesNotCoverOverspend() {
+        var book = targetBook(income: 5000)
+        book.transactions.append(txn("checking", "\(month)-08", -250, category: "Food"))
+        #expect(
+            Ledger.snapshot(book, month: month).categories["Food"]
+                == Ledger.CategoryMonth(assigned: 0, activity: -250, available: -250)
+        )
+
+        // 600, not 850: the 250 hole is the month-end sweep's business, not
+        // something to quietly top up out of Ready to Assign.
+        let plan = NodeLedger.planFundMonth(book, month: month)
+        #expect(plan.ops.setAssignments.contains(
+            NodeLedger.AssignmentSet(month: month, categoryID: "Food", amount: 600)
+        ))
+        #expect(plan.targeted == 3)
+        #expect(plan.funding == 3)
+        #expect(plan.total == Decimal(string: "2433.33")!)
+        #expect(plan.shortfall == 0)
+
+        let next = apply(book, plan.ops)
+        #expect(Ledger.snapshot(next, month: month).categories["Food"]?.available == 350)
+        #expect(Ledger.bookIntegrity(next, month: month).drift == 0)
     }
 
     // MARK: - Account planners
