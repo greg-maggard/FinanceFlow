@@ -173,12 +173,19 @@ export const useStore = create<Store>((set) => ({
       return { budget: { ...book, transactions: [...book.transactions, txn] } };
     }),
   updateTxn: (txn) =>
-    set((s) => ({
-      budget: {
-        ...s.budget,
-        transactions: s.budget.transactions.map((t) => (t.id === txn.id ? txn : t)),
-      },
-    })),
+    set((s) => {
+      // Same rule as addTxn: an edit can retarget a row onto the catch-all
+      // envelope too (CategorySelect offers it), so it has to be able to
+      // materialize the envelope just like a fresh entry would.
+      const book =
+        txn.categoryId === UNCATEGORIZED_CATEGORY_ID ? ensureUncategorized(s.budget) : s.budget;
+      return {
+        budget: {
+          ...book,
+          transactions: book.transactions.map((t) => (t.id === txn.id ? txn : t)),
+        },
+      };
+    }),
   deleteTxn: (id) =>
     set((s) => {
       const txn = s.budget.transactions.find((t) => t.id === id);

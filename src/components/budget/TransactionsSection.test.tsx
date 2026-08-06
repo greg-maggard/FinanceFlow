@@ -135,6 +135,64 @@ describe("TransactionsSection", () => {
     expect(integrity.drift).toBe(0);
   });
 
+  it("edits a transaction's amount in place, adding no new row", () => {
+    seedAccount();
+    useStore.getState().addTxn({
+      id: "t1",
+      accountId: "checking",
+      date: "2024-01-05",
+      payee: "Grocery run",
+      amount: -42.5,
+      categoryId: UNCATEGORIZED_CATEGORY_ID,
+      source: "manual",
+    });
+    render(<TransactionsSection />);
+
+    // Tapping the row — not the kebab — opens the same form pre-filled.
+    fireEvent.click(screen.getByRole("button", { name: "Edit Grocery run" }));
+    expect(screen.getByRole("heading", { name: "Edit transaction" })).toBeInTheDocument();
+    const amountInput = screen.getByDisplayValue("42.5");
+    fireEvent.change(amountInput, { target: { value: "50" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    const budget = useStore.getState().budget;
+    expect(budget.transactions).toHaveLength(1);
+    expect(budget.transactions[0].id).toBe("t1");
+    expect(budget.transactions[0].amount).toBe(-50);
+    expect(bookIntegrity(budget, "2024-01").drift).toBe(0);
+    // The editor closes once the save lands.
+    expect(screen.queryByRole("heading", { name: "Edit transaction" })).toBeNull();
+  });
+
+  it("refuses to open the editor on a transfer leg, with a clear explanation", () => {
+    seedAccount();
+    useStore.getState().addAccount({
+      id: "savings",
+      name: "Savings",
+      kind: "savings",
+      source: "manual",
+    });
+    render(<TransactionsSection />);
+    fireEvent.click(screen.getByRole("button", { name: "Transfer" }));
+    // [0] From (pre-selected Checking), [1] To.
+    fireEvent.change(screen.getAllByRole("combobox")[1], { target: { value: "savings" } });
+    fireEvent.change(screen.getByPlaceholderText("0"), { target: { value: "100" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add transfer" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit Transfer → Savings" }));
+    expect(screen.getByText(/Transfers can't be edited here/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Got it" }));
+    expect(screen.queryByText(/Transfers can't be edited here/)).toBeNull();
+
+    // Neither leg was touched.
+    const budget = useStore.getState().budget;
+    expect(budget.transactions).toHaveLength(2);
+    expect(budget.transactions.every((t) => Math.abs(t.amount) === 100)).toBe(true);
+    expect(bookIntegrity(budget, isoDay().slice(0, 7)).drift).toBe(0);
+  });
+
   it("renders the empty state with no transactions", () => {
     seedAccount();
     render(<TransactionsSection />);
