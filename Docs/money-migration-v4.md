@@ -223,7 +223,7 @@ This test is the single most important deliverable after the migration itself.
 
 ## 8. Rollout sequencing
 
-Single user (Greg), two apps, document shared via export/import — sequencing is easy
+Single user, two apps, document shared via export/import — sequencing is easy
 but strict:
 
 1. Implement web + iOS **on one branch**; neither merges alone.

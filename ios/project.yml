@@ -5,6 +5,8 @@ options:
     iOS: "17.0"
   createIntermediateGroups: true
   groupSortPosition: top
+  # Local.xcconfig is optional (git-ignored); see README "Run on a device".
+  disabledValidations: [missingConfigFiles]
 
 packages:
   FinanceFlowKit:
@@ -20,6 +22,9 @@ targets:
     dependencies:
       - package: FinanceFlowKit
         product: FinanceFlowKit
+    configFiles:
+      Debug: Local.xcconfig
+      Release: Local.xcconfig
     info:
       path: FinanceFlow/Generated-Info.plist
       properties:
@@ -42,4 +47,5 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         CODE_SIGN_STYLE: Automatic
-        DEVELOPMENT_TEAM: GJ3G9V9Q8Z   # Greg's Personal Team (free Apple ID)
+        # DEVELOPMENT_TEAM is not committed; set it in ios/Local.xcconfig
+        # (copy Local.xcconfig.example) to sign for a physical device.

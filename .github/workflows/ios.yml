@@ -1,7 +1,8 @@
 # FinanceFlowKit is a pure Swift package (no UIKit/SwiftUI, no simulator),
 # so `swift test` on a bare macOS runner covers the whole domain layer.
-# macOS runners bill at 10x on private repos — hence the ios/** path filter,
-# the concurrency cancellation, and the tight timeout.
+# The ios/** path filter, concurrency cancellation, and tight timeout keep
+# macOS runner time minimal (macOS minutes are metered at 10x while a repo
+# is private; public repos run free).
 name: iOS CI
 
 on:

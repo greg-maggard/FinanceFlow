@@ -15,6 +15,8 @@ ios/**/.build/
 ios/**/xcuserdata/
 ios/**/*.xcworkspace/xcuserdata/
 ios/DerivedData/
+# per-developer signing (see ios/Local.xcconfig.example)
+ios/Local.xcconfig
 .swiftpm/
 
 # Claude Code local working files (hot memory, local settings, worktrees)

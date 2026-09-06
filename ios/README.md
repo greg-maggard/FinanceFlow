@@ -21,6 +21,20 @@ open FinanceFlow.xcodeproj  # build & run on an iOS 17 simulator (e.g. iPhone 15
 `FinanceFlow.xcodeproj` is generated and git-ignored — never edit it by hand.
 Change `project.yml` and re-run `xcodegen generate` instead.
 
+## Run on a device
+
+Simulator builds need no signing. To install on a physical iPhone, give Xcode
+your Apple Developer Team ID via a local, git-ignored xcconfig:
+
+```bash
+cd ios
+cp Local.xcconfig.example Local.xcconfig   # then set DEVELOPMENT_TEAM
+xcodegen generate
+```
+
+A free Personal Team works; its signatures expire after 7 days, so rebuild
+from Xcode to refresh.
+
 ## Run the domain tests
 
 The graph traversal, progress, persistence, and store logic live in a pure Swift

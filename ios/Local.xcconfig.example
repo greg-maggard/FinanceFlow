@@ -1,0 +1,6 @@
+// Local, git-ignored signing settings. Copy to Local.xcconfig and fill in,
+// then re-run `xcodegen generate`. Not needed for simulator builds.
+//
+// Your Team ID: Xcode > Settings > Accounts > (your Apple ID) > Team, or
+// https://developer.apple.com/account -> Membership details.
+DEVELOPMENT_TEAM = YOUR_TEAM_ID
