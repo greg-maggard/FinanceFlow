@@ -145,8 +145,10 @@ struct AppStoreTests {
         store.assign(month: month, categoryID: catID, amount: 100)
 
         // Lower past the assignment: un-assign + one coalesced adjustment txn.
+        // Date the adjustment inside the month under test — a fixed date only
+        // passes while the calendar agrees (the web twin was fixed the same way).
         let plan = NodeLedger.planBalanceEdit(
-            store.state.budget, month: month, categoryID: catID, newAvailable: -25, today: "2026-06-10"
+            store.state.budget, month: month, categoryID: catID, newAvailable: -25, today: "\(month)-10"
         )
         store.apply(plan)
 
