@@ -158,7 +158,9 @@ describe("w3-perf: keystroke cost on a big book", () => {
 
     console.log("=".repeat(70));
     expect(true).toBe(true);
-  });
+    // 3 book sizes x 7 renders of a 20k-txn BudgetScreen takes ~7-10s on a
+    // CI runner; the default 5s test timeout is the only way this can fail.
+  }, 60_000);
 });
 
 function getMedian(nums: number[]): number {

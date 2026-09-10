@@ -70,9 +70,14 @@ describe("a failed save surfaces in the UI", () => {
 
   it("sets saveError on a quota-exceeded write, and a later successful save clears it", async () => {
     useStore.getState().reset();
-    // The test env's localStorage stand-in (see src/test/setup.ts) is a
-    // plain object, not a Storage instance — spy on the instance directly.
-    const setItemSpy = vi.spyOn(localStorage, "setItem").mockImplementation(() => {
+    // Under Node >=25 the test env's localStorage is the plain-object stand-in
+    // from src/test/setup.ts, so spying on the instance works. Under Node <25
+    // it is jsdom's Storage, whose named-property setter turns an own-property
+    // assignment into a stored "setItem" key instead of replacing the method —
+    // the spy must go on the prototype there or the write silently succeeds.
+    const setItemTarget =
+      typeof Storage !== "undefined" && localStorage instanceof Storage ? Storage.prototype : localStorage;
+    const setItemSpy = vi.spyOn(setItemTarget, "setItem").mockImplementation(() => {
       throw new DOMException("quota exceeded", "QuotaExceededError");
     });
 
