@@ -1,17 +1,10 @@
-import type { Account, AccountKind, BudgetBook, MonthKey, Txn } from "../state/schema";
-import { RTA_CATEGORY_ID, newId } from "../state/schema";
+import type { Account, AccountKind, BudgetBook, Cents, MonthKey, Txn } from "../state/schema";
+import { RTA_CATEGORY_ID, cents, newId } from "../state/schema";
 
-// All arithmetic happens in integer cents: every dollars-as-`number` operand
-// is rounded to the cent exactly once on the way in, summed exactly, and
-// converted back at the boundary — float drift can never accumulate.
-
-export function toCents(n: number): number {
-  return Math.round(n * 100);
-}
-
-export function fromCents(c: number): number {
-  return c / 100;
-}
+// Every amount here is already integer `Cents` (schema v4), so all arithmetic
+// below is exact integer arithmetic. There is no rounding step: the old
+// `toCents`/`fromCents` round-trips are gone, and with them the per-site
+// discipline that used to be the only thing keeping float drift out.
 
 /** Month bucket of a "YYYY-MM-DD" transaction date. */
 export function monthOf(date: string): MonthKey {
@@ -38,13 +31,13 @@ export function isoDay(d: Date = new Date()): string {
  */
 export function pairTransfer(
   accounts: Account[],
-  args: { from: string; to: string; amount: number; date: string; payee?: string; categoryId?: string },
+  args: { from: string; to: string; amount: Cents; date: string; payee?: string; categoryId?: string },
 ): [Txn, Txn] {
   const kindOf = (id: string): AccountKind =>
     accounts.find((a) => a.id === id)?.kind ?? "tracking";
   const fromOn = isOnBudget(kindOf(args.from));
   const toOn = isOnBudget(kindOf(args.to));
-  const magnitude = Math.abs(args.amount);
+  const magnitude = cents(Math.abs(args.amount));
   const outId = newId();
   const inId = newId();
   const out: Txn = {
@@ -52,7 +45,7 @@ export function pairTransfer(
     accountId: args.from,
     date: args.date,
     payee: args.payee,
-    amount: -magnitude,
+    amount: cents(-magnitude),
     categoryId: fromOn && !toOn ? args.categoryId : undefined,
     transferAccountId: args.to,
     transferPairId: inId,
@@ -72,35 +65,33 @@ export function pairTransfer(
   return [out, inflow];
 }
 
-export function accountBalance(book: BudgetBook, accountId: string): number {
-  let cents = 0;
+export function accountBalance(book: BudgetBook, accountId: string): Cents {
+  let total = 0;
   for (const t of book.transactions) {
-    if (t.accountId === accountId) cents += toCents(t.amount);
+    if (t.accountId === accountId) total += t.amount;
   }
-  return fromCents(cents);
+  return cents(total);
 }
 
 /** Every account's balance in one pass over `book.transactions`. */
-export function accountBalances(book: BudgetBook): Map<string, number> {
-  const centsByAccount = new Map<string, number>();
-  for (const a of book.accounts) centsByAccount.set(a.id, 0);
+export function accountBalances(book: BudgetBook): Map<string, Cents> {
+  const balances = new Map<string, Cents>();
+  for (const a of book.accounts) balances.set(a.id, cents(0));
   for (const t of book.transactions) {
-    centsByAccount.set(t.accountId, (centsByAccount.get(t.accountId) ?? 0) + toCents(t.amount));
+    balances.set(t.accountId, cents((balances.get(t.accountId) ?? 0) + t.amount));
   }
-  const balances = new Map<string, number>();
-  for (const [id, cents] of centsByAccount) balances.set(id, fromCents(cents));
   return balances;
 }
 
 export type CategoryMonth = {
-  assigned: number;
-  activity: number;
-  available: number;
+  assigned: Cents;
+  activity: Cents;
+  available: Cents;
 };
 
 export type MonthSnapshot = {
   month: MonthKey;
-  readyToAssign: number;
+  readyToAssign: Cents;
   categories: Record<string, CategoryMonth>;
 };
 
@@ -113,80 +104,166 @@ export type MonthSnapshot = {
  * - available = positive carryover from the prior month + assigned + activity.
  * - A month-end *negative* available does not follow the category: it resets
  *   to zero and debits the next month's Ready-to-Assign instead.
- * - Ready-to-Assign = RTA inflows through this month, minus dollars assigned
- *   in ANY month (assigning ahead can't double-spend a dollar), minus
- *   overspending swept from earlier months.
+ * - Ready-to-Assign is cumulative *through the viewed month*: RTA inflows
+ *   through this month, minus dollars assigned in this month and every month
+ *   before it, minus overspending swept from earlier months. All three terms
+ *   run through `month` and no further, so viewing a past month reports the
+ *   number that month actually had. Dollars parked in future months are not
+ *   subtracted here — see `assignedAfter`.
  */
 export function snapshot(book: BudgetBook, month: MonthKey): MonthSnapshot {
   const onBudget = new Set(
     book.accounts.filter((a) => isOnBudget(a.kind)).map((a) => a.id),
   );
 
-  // Cents tables per month: category activity, RTA inflows.
-  const activityC = new Map<MonthKey, Map<string, number>>();
-  const inflowC = new Map<MonthKey, number>();
+  // Per-month tables: category activity, RTA inflows.
+  const activity = new Map<MonthKey, Map<string, number>>();
+  const inflow = new Map<MonthKey, number>();
   const monthSet = new Set<MonthKey>([month, ...Object.keys(book.assignments)]);
   for (const t of book.transactions) {
     if (!onBudget.has(t.accountId)) continue;
     const m = monthOf(t.date);
     monthSet.add(m);
     if (t.categoryId === RTA_CATEGORY_ID) {
-      inflowC.set(m, (inflowC.get(m) ?? 0) + toCents(t.amount));
+      inflow.set(m, (inflow.get(m) ?? 0) + t.amount);
     } else if (t.categoryId) {
-      let table = activityC.get(m);
-      if (!table) activityC.set(m, (table = new Map()));
-      table.set(t.categoryId, (table.get(t.categoryId) ?? 0) + toCents(t.amount));
+      let table = activity.get(m);
+      if (!table) activity.set(m, (table = new Map()));
+      table.set(t.categoryId, (table.get(t.categoryId) ?? 0) + t.amount);
     }
   }
 
-  let inflowToDateC = 0;
-  let sweptOverspendC = 0;
-  let assignedAllC = 0;
-  for (const table of Object.values(book.assignments)) {
-    for (const v of Object.values(table)) assignedAllC += toCents(v);
-  }
+  let inflowToDate = 0;
+  let sweptOverspend = 0;
+  let assignedAll = 0;
 
-  const carryC = new Map<string, number>();
+  const carry = new Map<string, number>();
   let categories: Record<string, CategoryMonth> = {};
 
   for (const m of [...monthSet].sort()) {
     if (m > month) break;
     const assignedM = book.assignments[m] ?? {};
-    const activityM = activityC.get(m) ?? new Map<string, number>();
+    const activityM = activity.get(m) ?? new Map<string, number>();
     const catIds = new Set([
       ...book.categories.map((c) => c.id),
       ...Object.keys(assignedM),
       ...activityM.keys(),
-      ...carryC.keys(),
+      ...carry.keys(),
     ]);
 
     const snap: Record<string, CategoryMonth> = {};
     let overspendM = 0;
     for (const id of catIds) {
-      const assigned = toCents(assignedM[id] ?? 0);
-      const activity = activityM.get(id) ?? 0;
-      const available = (carryC.get(id) ?? 0) + assigned + activity;
+      const assigned = assignedM[id] ?? 0;
+      const activityId = activityM.get(id) ?? 0;
+      const available = (carry.get(id) ?? 0) + assigned + activityId;
       snap[id] = {
-        assigned: fromCents(assigned),
-        activity: fromCents(activity),
-        available: fromCents(available),
+        assigned: cents(assigned),
+        activity: cents(activityId),
+        available: cents(available),
       };
       if (available >= 0) {
-        carryC.set(id, available);
+        carry.set(id, available);
       } else {
-        carryC.set(id, 0);
+        carry.set(id, 0);
         overspendM += -available;
       }
     }
 
-    inflowToDateC += inflowC.get(m) ?? 0;
+    inflowToDate += inflow.get(m) ?? 0;
+    for (const v of Object.values(assignedM)) assignedAll += v;
     if (m === month) categories = snap;
-    else sweptOverspendC += overspendM;
+    else sweptOverspend += overspendM;
   }
 
   return {
     month,
-    readyToAssign: fromCents(inflowToDateC - assignedAllC - sweptOverspendC),
+    readyToAssign: cents(inflowToDate - assignedAll - sweptOverspend),
     categories,
+  };
+}
+
+/**
+ * Dollars assigned in months strictly after `month` — money already parked in
+ * the future. Ready-to-Assign deliberately ignores it (it belongs to those
+ * months, not this one), so surface it beside the RTA figure to keep
+ * assigning-ahead visible rather than silently double-spendable.
+ */
+export function assignedAfter(book: BudgetBook, month: MonthKey): Cents {
+  let total = 0;
+  for (const [m, table] of Object.entries(book.assignments)) {
+    if (m <= month) continue;
+    for (const v of Object.values(table)) total += v;
+  }
+  return cents(total);
+}
+
+export type BookIntegrity = {
+  onBudgetCash: Cents;
+  sumAvailable: Cents;
+  readyToAssign: Cents;
+  unbudgetedSpending: Cents;
+  drift: Cents;
+};
+
+/**
+ * The conservation-of-money invariant, made machine-checkable.
+ *
+ * `snapshot()` builds each category's `available` from assignments plus
+ * categorized activity, and Ready-to-Assign from inflows minus assignments
+ * minus swept overspending — every term cumulative through the viewed month.
+ * Summing those definitions across all
+ * categories collapses to:
+ *
+ *   Sigma available + readyToAssign + unbudgetedSpending === Sigma on-budget
+ *   cash through the viewed month
+ *
+ * where `unbudgetedSpending` is the on-budget money that never entered an
+ * envelope (no `categoryId`, and not an RTA inflow), including the on-budget
+ * leg of a transfer OUT of the budget — only on-budget-to-on-budget pairs
+ * cancel in the cash total and are skipped. Every dollar in an on-budget
+ * account is therefore accounted for exactly once, and any
+ * non-zero `drift` is money the book conjured or destroyed — a bug, not a
+ * rounding artifact: every amount is an integer number of cents, so a healthy
+ * book reports exactly 0 rather than 1e-13.
+ *
+ * From v4 forward `unbudgetedSpending` is permanently 0 for on-budget spending:
+ * `migrateV3` back-filled every categoryless on-budget non-transfer row onto
+ * `cat:uncategorized`, and every write path materializes that envelope rather
+ * than leaving a row uncategorized. What remains is the on-budget leg of a
+ * transfer OUT of the budget, which is money genuinely leaving.
+ */
+export function bookIntegrity(book: BudgetBook, month: MonthKey): BookIntegrity {
+  const onBudget = new Set(
+    book.accounts.filter((a) => isOnBudget(a.kind)).map((a) => a.id),
+  );
+
+  let onBudgetCash = 0;
+  let unbudgetedSpending = 0;
+  for (const t of book.transactions) {
+    if (!onBudget.has(t.accountId)) continue;
+    // Every term of the identity is cumulative THROUGH the viewed month, so the
+    // cash side must be too — a future-dated transaction is not yet in the book
+    // the user is looking at.
+    if (monthOf(t.date) > month) continue;
+    onBudgetCash += t.amount;
+    // Only an on-budget -> on-budget pair cancels inside `onBudgetCash`; skip
+    // just that leg. An on-budget -> off-budget transfer really does leave the
+    // budget, so it has to land somewhere in the identity.
+    if (t.transferAccountId && onBudget.has(t.transferAccountId)) continue;
+    if (t.categoryId) continue; // categorized (incl. RTA) money is already counted
+    unbudgetedSpending += t.amount;
+  }
+
+  const snap = snapshot(book, month);
+  let sumAvailable = 0;
+  for (const c of Object.values(snap.categories)) sumAvailable += c.available;
+
+  return {
+    onBudgetCash: cents(onBudgetCash),
+    sumAvailable: cents(sumAvailable),
+    readyToAssign: snap.readyToAssign,
+    unbudgetedSpending: cents(unbudgetedSpending),
+    drift: cents(onBudgetCash - (sumAvailable + snap.readyToAssign + unbudgetedSpending)),
   };
 }

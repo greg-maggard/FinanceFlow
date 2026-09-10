@@ -27,7 +27,10 @@ struct BudgetScreen: View {
             ScrollView {
                 VStack(spacing: theme.spacing.xl) {
                     monthHeader
-                    readyToAssignCard(snapshot.readyToAssign)
+                    readyToAssignCard(
+                        snapshot.readyToAssign,
+                        assignedAhead: Ledger.assignedAfter(book, month: month)
+                    )
                     CategoriesSection(
                         book: book,
                         month: month,
@@ -88,10 +91,15 @@ struct BudgetScreen: View {
 
     // MARK: - Ready to Assign
 
-    private func readyToAssignCard(_ rta: Decimal) -> some View {
+    /// `assignedAhead` is what `Ledger.assignedAfter` reports for months
+    /// strictly after the one on display. Ready-to-Assign deliberately ignores
+    /// those dollars, so name them here — otherwise money parked in September
+    /// looks unspent from August and gets assigned twice. Mirrors the sub-label
+    /// under the web RTA pill (`src/components/budget/BudgetScreen.tsx`).
+    private func readyToAssignCard(_ rta: Money, assignedAhead: Money) -> some View {
         let (color, caption): (Color, String) = {
-            if rta > 0 { return (theme.colors.success, "Ready to assign — fund your envelopes") }
-            if rta < 0 { return (theme.colors.danger, "Overassigned — pull money back from a category") }
+            if rta > .zero { return (theme.colors.success, "Ready to assign — fund your envelopes") }
+            if rta < .zero { return (theme.colors.danger, "Overassigned — pull money back from a category") }
             return (theme.colors.textSecondary, "All assigned")
         }()
         return GlassCard {
@@ -103,6 +111,11 @@ struct BudgetScreen: View {
                 Text(caption)
                     .font(theme.typography.caption)
                     .foregroundStyle(color)
+                if assignedAhead != .zero {
+                    Text("\(CurrencyFormat.string(assignedAhead)) assigned in future months")
+                        .font(theme.typography.caption)
+                        .foregroundStyle(theme.colors.textSecondary)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }

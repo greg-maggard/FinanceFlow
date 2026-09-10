@@ -5,7 +5,7 @@ import { useStore } from "../../state/store";
 import type { Account, Category, NodeId } from "../../state/schema";
 import { emergencyFundTarget, bigEmergencyFundTarget } from "../../state/schema";
 import { motion } from "framer-motion";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ymKey } from "../../state/recurring";
 import { isoDay, snapshot } from "../../budget/ledger";
 import {
@@ -25,7 +25,7 @@ import {
 } from "../../budget/nodeLedger";
 import { useUI, type BudgetFocus } from "../../state/uiStore";
 import { ConfirmDelete } from "../budget/CategoryGroups";
-import { InlineAdd } from "../budget/bits";
+import { InlineAdd, dollars } from "../budget/bits";
 
 /**
  * Node forms edit the envelope ledger directly — every dollar field here is
@@ -199,7 +199,9 @@ const RECURRING_LABEL: Record<RecurringNodeId, string> = {
 export function RecurringEditor({ nodeId }: { nodeId: RecurringNodeId }) {
   const budget = useStore((s) => s.budget);
   const [draftId, setDraftId] = useState<string | null>(null);
-  const rows = nodeRows(budget, snapshot(budget, ymKey()), nodeId);
+  const month = ymKey();
+  const snap = useMemo(() => snapshot(budget, month), [budget, month]);
+  const rows = nodeRows(budget, snap, nodeId);
   const label = RECURRING_LABEL[nodeId] ?? nodeId;
 
   /** First edit on a bare node materializes its single envelope, named for the node. */
@@ -253,10 +255,7 @@ export function RecurringEditor({ nodeId }: { nodeId: RecurringNodeId }) {
               budgetTarget={{ categoryId: row.category.id }}
               drop={i === 0 ? "down" : "up"}
               menu={
-                <ConfirmDelete
-                  name={row.category.name || "item"}
-                  onDelete={() => useStore.getState().deleteCategory(row.category.id)}
-                />
+                <ConfirmDelete cat={row.category} name={row.category.name || "item"} />
               }
             >
               <div className="grid grid-cols-2 gap-2">
@@ -299,17 +298,20 @@ export function RecurringEditor({ nodeId }: { nodeId: RecurringNodeId }) {
 // Emergency fund — both milestones edit the same SmallEF/BigEF envelope union
 
 export function EFEditor({ nodeId }: { nodeId: "SmallEF" | "BigEF" }) {
-  const state = useStore();
-  const budget = state.budget;
+  const budget = useStore((s) => s.budget);
+  const nodes = useStore((s) => s.nodes);
+  const settings = useStore((s) => s.settings);
   const [draftId, setDraftId] = useState<string | null>(null);
-  const rows = nodeRows(budget, snapshot(budget, ymKey()), nodeId);
+  const month = ymKey();
+  const snap = useMemo(() => snapshot(budget, month), [budget, month]);
+  const rows = nodeRows(budget, snap, nodeId);
 
   const targetMonths =
-    (state.nodes.BigEF.data as { targetMonths?: 3 | 4 | 5 | 6 } | undefined)?.targetMonths ?? 3;
+    (nodes.BigEF.data as { targetMonths?: 3 | 4 | 5 | 6 } | undefined)?.targetMonths ?? 3;
   const computed =
     nodeId === "SmallEF"
-      ? emergencyFundTarget(state.settings.monthlyExpenses)
-      : bigEmergencyFundTarget(targetMonths, state.settings.monthlyExpenses);
+      ? emergencyFundTarget(settings.monthlyExpenses)
+      : bigEmergencyFundTarget(targetMonths, settings.monthlyExpenses);
   const target = efTarget(budget, nodeId, computed);
 
   /** First edit on an empty fund materializes the single v1-style envelope. */
@@ -340,7 +342,7 @@ export function EFEditor({ nodeId }: { nodeId: "SmallEF" | "BigEF" }) {
     <div className="text-xs text-white/55">
       {target > 0 ? (
         <>
-          Target: <span className="font-semibold text-white/85">${target.toLocaleString()}</span>
+          Target: <span className="font-semibold text-white/85">{dollars(target)}</span>
         </>
       ) : (
         "Set monthly expenses in Settings to compute target."
@@ -419,10 +421,7 @@ export function EFEditor({ nodeId }: { nodeId: "SmallEF" | "BigEF" }) {
             budgetTarget={{ categoryId: row.category.id }}
             drop={i === 0 ? "down" : "up"}
             menu={
-              <ConfirmDelete
-                name={row.category.name || "bucket"}
-                onDelete={() => useStore.getState().deleteCategory(row.category.id)}
-              />
+              <ConfirmDelete cat={row.category} name={row.category.name || "bucket"} />
             }
           >
             <div className="grid grid-cols-2 gap-2">
@@ -457,9 +456,9 @@ export function EFEditor({ nodeId }: { nodeId: "SmallEF" | "BigEF" }) {
 // Payload-only nodes — percent and limit fields with no ledger meaning
 
 export function MatchFields() {
-  const state = useStore();
+  const nodes = useStore((s) => s.nodes);
   const data =
-    (state.nodes.Match.data as { matchPct: number; currentContribPct: number } | undefined) ?? {
+    (nodes.Match.data as { matchPct: number; currentContribPct: number } | undefined) ?? {
       matchPct: 0,
       currentContribPct: 0,
     };
@@ -488,8 +487,9 @@ export function MatchFields() {
 }
 
 export function IRAFields() {
-  const state = useStore();
-  const data = (state.nodes.IRA.data as
+  const nodes = useStore((s) => s.nodes);
+  const settings = useStore((s) => s.settings);
+  const data = (nodes.IRA.data as
     | {
         type: "roth" | "traditional";
         ytdContribution: { value: number; source: "manual" };
@@ -498,7 +498,7 @@ export function IRAFields() {
     | undefined) ?? {
     type: "roth" as const,
     ytdContribution: { value: 0, source: "manual" as const },
-    annualLimit: state.settings.iraAnnualLimit,
+    annualLimit: settings.iraAnnualLimit,
   };
   return (
     <div className="space-y-3">
@@ -540,8 +540,9 @@ export function IRAFields() {
 }
 
 export function HSAFields() {
-  const state = useStore();
-  const data = (state.nodes.HSA.data as
+  const nodes = useStore((s) => s.nodes);
+  const settings = useStore((s) => s.settings);
+  const data = (nodes.HSA.data as
     | {
         coverage: "self" | "family";
         ytdContribution: { value: number; source: "manual" };
@@ -550,7 +551,7 @@ export function HSAFields() {
     | undefined) ?? {
     coverage: "self" as const,
     ytdContribution: { value: 0, source: "manual" as const },
-    annualLimit: state.settings.hsaSelfLimit,
+    annualLimit: settings.hsaSelfLimit,
   };
   return (
     <div className="space-y-3">
@@ -561,8 +562,7 @@ export function HSAFields() {
             const cov = e.target.value as "self" | "family";
             useStore.getState().patchNodeData("HSA", {
               coverage: cov,
-              annualLimit:
-                cov === "self" ? state.settings.hsaSelfLimit : state.settings.hsaFamilyLimit,
+              annualLimit: cov === "self" ? settings.hsaSelfLimit : settings.hsaFamilyLimit,
             });
           }}
         >
@@ -595,8 +595,8 @@ export function HSAFields() {
 }
 
 export function Increase401kFields() {
-  const state = useStore();
-  const data = (state.nodes.Increase401k.data as
+  const nodes = useStore((s) => s.nodes);
+  const data = (nodes.Increase401k.data as
     | { currentPct: number; targetPct: number }
     | undefined) ?? { currentPct: 0, targetPct: 15 };
   return (
@@ -628,7 +628,9 @@ export function Increase401kFields() {
 
 export function GoalEditor({ nodeId }: { nodeId: "SavePurchase" | "Goals" }) {
   const budget = useStore((s) => s.budget);
-  const rows = nodeRows(budget, snapshot(budget, ymKey()), nodeId);
+  const month = ymKey();
+  const snap = useMemo(() => snapshot(budget, month), [budget, month]);
+  const rows = nodeRows(budget, snap, nodeId);
   return (
     <div className="space-y-2">
       {rows.length === 0 && (
@@ -643,10 +645,7 @@ export function GoalEditor({ nodeId }: { nodeId: "SavePurchase" | "Goals" }) {
           budgetTarget={{ categoryId: row.category.id }}
           drop={i === 0 ? "down" : "up"}
           menu={
-            <ConfirmDelete
-              name={row.category.name || "goal"}
-              onDelete={() => useStore.getState().deleteCategory(row.category.id)}
-            />
+            <ConfirmDelete cat={row.category} name={row.category.name || "goal"} />
           }
         >
           <div className="grid grid-cols-2 gap-2">
@@ -686,13 +685,14 @@ export function GoalEditor({ nodeId }: { nodeId: "SavePurchase" | "Goals" }) {
 }
 
 export function CollegeFields() {
-  const state = useStore();
-  const data = (state.nodes.College.data as
+  const nodes = useStore((s) => s.nodes);
+  const budget = useStore((s) => s.budget);
+  const data = (nodes.College.data as
     | { monthlyContribution: number; targetAge?: number }
     | undefined) ?? { monthlyContribution: 0 };
   // The 529 account materializes on the first balance edit; the chip only
   // shows once there's an account row on the Budget screen to jump to.
-  const hasCollegeAccount = state.budget.accounts.some(
+  const hasCollegeAccount = budget.accounts.some(
     (a) => a.id === COLLEGE_ACCOUNT_ID && !a.closed,
   );
   return (
@@ -708,7 +708,7 @@ export function CollegeFields() {
       <div className="space-y-1.5">
         <Field label="Balance $">
           <NumberField
-            value={collegeBalance(state.budget)}
+            value={collegeBalance(budget)}
             onChange={(v) => {
               const s = useStore.getState();
               s.applyBookOps(planCollegeBalanceEdit(s.budget, v, isoDay()));

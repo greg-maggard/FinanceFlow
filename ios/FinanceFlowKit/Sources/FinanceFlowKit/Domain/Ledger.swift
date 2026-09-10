@@ -37,7 +37,7 @@ public enum Ledger {
         accounts: [Account],
         from: String,
         to: String,
-        amount: Decimal,
+        amount: Money,
         date: String,
         payee: String? = nil,
         categoryID: String? = nil
@@ -47,7 +47,7 @@ public enum Ledger {
         }
         let fromOn = isOnBudget(kindOf(from))
         let toOn = isOnBudget(kindOf(to))
-        let magnitude = abs(amount)
+        let magnitude = amount.magnitude
         let outID = ShortID.make()
         let inID = ShortID.make()
         let out = Txn(
@@ -73,8 +73,8 @@ public enum Ledger {
         return (out, inflow)
     }
 
-    public static func accountBalance(_ book: BudgetBook, _ accountID: String) -> Decimal {
-        var total: Decimal = 0
+    public static func accountBalance(_ book: BudgetBook, _ accountID: String) -> Money {
+        var total = Money.zero
         for t in book.transactions where t.accountId == accountID {
             total += t.amount
         }
@@ -82,11 +82,14 @@ public enum Ledger {
     }
 
     public struct CategoryMonth: Equatable, Sendable {
-        public var assigned: Decimal
-        public var activity: Decimal
-        public var available: Decimal
+        public var assigned: Money
+        public var activity: Money
+        public var available: Money
 
-        public init(assigned: Decimal, activity: Decimal, available: Decimal) {
+        /// The month entry of an envelope the snapshot has never heard of.
+        public static let zero = CategoryMonth(assigned: .zero, activity: .zero, available: .zero)
+
+        public init(assigned: Money, activity: Money, available: Money) {
             self.assigned = assigned
             self.activity = activity
             self.available = available
@@ -95,10 +98,10 @@ public enum Ledger {
 
     public struct MonthSnapshot: Equatable, Sendable {
         public var month: String
-        public var readyToAssign: Decimal
+        public var readyToAssign: Money
         public var categories: [String: CategoryMonth]
 
-        public init(month: String, readyToAssign: Decimal, categories: [String: CategoryMonth]) {
+        public init(month: String, readyToAssign: Money, categories: [String: CategoryMonth]) {
             self.month = month
             self.readyToAssign = readyToAssign
             self.categories = categories
@@ -111,34 +114,33 @@ public enum Ledger {
     /// - available = positive carryover from the prior month + assigned + activity.
     /// - A month-end *negative* available does not follow the category: it
     ///   resets to zero and debits the next month's Ready-to-Assign instead.
-    /// - Ready-to-Assign = RTA inflows through this month, minus dollars
-    ///   assigned in ANY month (assigning ahead can't double-spend a dollar),
-    ///   minus overspending swept from earlier months.
+    /// - Ready-to-Assign is cumulative *through the viewed month*: RTA inflows
+    ///   through this month, minus dollars assigned in this month and every
+    ///   month before it, minus overspending swept from earlier months. All
+    ///   three terms run through `month` and no further, so viewing a past
+    ///   month reports the number that month actually had. Dollars parked in
+    ///   future months are not subtracted here — see `assignedAfter`.
     public static func snapshot(_ book: BudgetBook, month: String) -> MonthSnapshot {
         let onBudget = Set(book.accounts.filter { isOnBudget($0.kind) }.map(\.id))
 
-        var activityByMonth: [String: [String: Decimal]] = [:]
-        var inflowByMonth: [String: Decimal] = [:]
+        var activityByMonth: [String: [String: Money]] = [:]
+        var inflowByMonth: [String: Money] = [:]
         var monthSet: Set<String> = [month]
         monthSet.formUnion(book.assignments.keys)
         for t in book.transactions where onBudget.contains(t.accountId) {
             let m = monthOf(date: t.date)
             monthSet.insert(m)
             if t.categoryId == rtaCategoryID {
-                inflowByMonth[m, default: 0] += t.amount
+                inflowByMonth[m, default: .zero] += t.amount
             } else if let category = t.categoryId {
-                activityByMonth[m, default: [:]][category, default: 0] += t.amount
+                activityByMonth[m, default: [:]][category, default: .zero] += t.amount
             }
         }
 
-        var assignedAll: Decimal = 0
-        for table in book.assignments.values {
-            for value in table.values { assignedAll += value }
-        }
-
-        var inflowToDate: Decimal = 0
-        var sweptOverspend: Decimal = 0
-        var carry: [String: Decimal] = [:]
+        var assignedAll = Money.zero
+        var inflowToDate = Money.zero
+        var sweptOverspend = Money.zero
+        var carry: [String: Money] = [:]
         var categories: [String: CategoryMonth] = [:]
 
         for m in monthSet.sorted() {
@@ -151,21 +153,22 @@ public enum Ledger {
             ids.formUnion(carry.keys)
 
             var snap: [String: CategoryMonth] = [:]
-            var overspendM: Decimal = 0
+            var overspendM = Money.zero
             for id in ids {
-                let assigned = assignedM[id] ?? 0
-                let activity = activityM[id] ?? 0
-                let available = (carry[id] ?? 0) + assigned + activity
+                let assigned = assignedM[id] ?? .zero
+                let activity = activityM[id] ?? .zero
+                let available = (carry[id] ?? .zero) + assigned + activity
                 snap[id] = CategoryMonth(assigned: assigned, activity: activity, available: available)
-                if available >= 0 {
+                if available >= .zero {
                     carry[id] = available
                 } else {
-                    carry[id] = 0
+                    carry[id] = .zero
                     overspendM += -available
                 }
             }
 
-            inflowToDate += inflowByMonth[m] ?? 0
+            inflowToDate += inflowByMonth[m] ?? .zero
+            for value in assignedM.values { assignedAll += value }
             if m == month {
                 categories = snap
             } else {
@@ -177,6 +180,101 @@ public enum Ledger {
             month: month,
             readyToAssign: inflowToDate - assignedAll - sweptOverspend,
             categories: categories
+        )
+    }
+
+    /// Dollars assigned in months strictly after `month` — money already
+    /// parked in the future. Ready-to-Assign deliberately ignores it (it
+    /// belongs to those months, not this one), so surface it beside the RTA
+    /// figure to keep assigning-ahead visible rather than silently
+    /// double-spendable. Mirrors `assignedAfter` in `src/budget/ledger.ts`.
+    public static func assignedAfter(_ book: BudgetBook, month: String) -> Money {
+        var total = Money.zero
+        for (m, table) in book.assignments where m > month {
+            for value in table.values { total += value }
+        }
+        return total
+    }
+
+    public struct BookIntegrity: Equatable, Sendable {
+        public var onBudgetCash: Money
+        public var sumAvailable: Money
+        public var readyToAssign: Money
+        public var unbudgetedSpending: Money
+        public var drift: Money
+
+        public init(
+            onBudgetCash: Money,
+            sumAvailable: Money,
+            readyToAssign: Money,
+            unbudgetedSpending: Money,
+            drift: Money
+        ) {
+            self.onBudgetCash = onBudgetCash
+            self.sumAvailable = sumAvailable
+            self.readyToAssign = readyToAssign
+            self.unbudgetedSpending = unbudgetedSpending
+            self.drift = drift
+        }
+    }
+
+    /// The conservation-of-money invariant, made machine-checkable.
+    ///
+    /// `snapshot` builds each category's `available` from assignments plus
+    /// categorized activity, and Ready-to-Assign from inflows minus
+    /// assignments minus swept overspending — every term cumulative through
+    /// the viewed month. Summing those definitions across all
+    /// categories collapses to:
+    ///
+    ///     Sigma available + readyToAssign + unbudgetedSpending == Sigma
+    ///     on-budget cash through the viewed month
+    ///
+    /// where `unbudgetedSpending` is the on-budget money that never entered an
+    /// envelope (no `categoryId`, and not an RTA inflow), including the
+    /// on-budget leg of a transfer OUT of the budget — only
+    /// on-budget-to-on-budget pairs cancel in the cash total and are skipped.
+    /// Every dollar in an on-budget account is therefore accounted for exactly
+    /// once, and any non-zero `drift` is money the book conjured or destroyed —
+    /// a bug, not a rounding artifact: every amount is an integer number of
+    /// cents.
+    ///
+    /// From v4 forward `unbudgetedSpending` is permanently 0 for on-budget
+    /// spending: `Migration.v3ToV4` back-filled every categoryless on-budget
+    /// non-transfer row onto `cat:uncategorized`, and every write path
+    /// materializes that envelope rather than leaving a row uncategorized. What
+    /// remains is the on-budget leg of a transfer OUT of the budget, which is
+    /// money genuinely leaving. Mirrors `bookIntegrity` in
+    /// `src/budget/ledger.ts`.
+    public static func bookIntegrity(_ book: BudgetBook, month: String) -> BookIntegrity {
+        let onBudget = Set(book.accounts.filter { isOnBudget($0.kind) }.map(\.id))
+
+        var onBudgetCash = Money.zero
+        var unbudgetedSpending = Money.zero
+        for t in book.transactions where onBudget.contains(t.accountId) {
+            // Every term of the identity is cumulative THROUGH the viewed
+            // month, so the cash side must be too — a future-dated transaction
+            // is not yet in the book the user is looking at.
+            if monthOf(date: t.date) > month { continue }
+            onBudgetCash += t.amount
+            // Only an on-budget -> on-budget pair cancels inside
+            // `onBudgetCash`; skip just that leg. An on-budget -> off-budget
+            // transfer really does leave the budget, so it has to land
+            // somewhere in the identity.
+            if let other = t.transferAccountId, onBudget.contains(other) { continue }
+            if t.categoryId != nil { continue }   // categorized (incl. RTA) money is already counted
+            unbudgetedSpending += t.amount
+        }
+
+        let snap = snapshot(book, month: month)
+        var sumAvailable = Money.zero
+        for c in snap.categories.values { sumAvailable += c.available }
+
+        return BookIntegrity(
+            onBudgetCash: onBudgetCash,
+            sumAvailable: sumAvailable,
+            readyToAssign: snap.readyToAssign,
+            unbudgetedSpending: unbudgetedSpending,
+            drift: onBudgetCash - (sumAvailable + snap.readyToAssign + unbudgetedSpending)
         )
     }
 }

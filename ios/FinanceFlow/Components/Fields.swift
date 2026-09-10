@@ -59,10 +59,16 @@ private func parseNumericField(_ s: String) -> Decimal? {
 }
 
 /// Currency entry. Mirrors the web's `NumberField`; shows a leading `$`.
+///
+/// The user types DOLLARS; the store holds `Money` (integer cents). This is one
+/// of the two places the v4 rounding rule is applied (the other is the v3 -> v4
+/// migration) — typing "33.333" commits 3333 cents, so a sub-cent amount can
+/// never reach the document and can never make the two platforms disagree about
+/// a `>=` comparison. See money-migration-v4.md §4.
 struct NumberField: View {
     @Environment(\.theme) private var theme
-    let value: Decimal
-    let onChange: (Decimal) -> Void
+    let value: Money
+    let onChange: (Money) -> Void
     var prompt: String = "0"
 
     @State private var text: String = ""
@@ -77,7 +83,8 @@ struct NumberField: View {
                 .foregroundStyle(theme.colors.textPrimary)
                 .onChange(of: text) { _, new in
                     guard let parsed = parseNumericField(new) else { return }   // unparseable → keep prior value
-                    if parsed != value { onChange(parsed) }
+                    let money = Money.fromUserInput(parsed)
+                    if money != value { onChange(money) }
                 }
         }
         .font(theme.typography.body)
@@ -85,11 +92,11 @@ struct NumberField: View {
         .padding(.vertical, theme.spacing.sm + 2)
         .background(theme.colors.surface, in: RoundedRectangle(cornerRadius: theme.radii.md, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: theme.radii.md, style: .continuous).strokeBorder(theme.colors.stroke, lineWidth: 1))
-        .onAppear { text = numericFieldDisplay(value) }
+        .onAppear { text = numericFieldDisplay(value.decimalDollars) }
         .onChange(of: value) { _, newValue in
             // Reflect external changes (e.g. a recomputed limit) without fighting
             // the user while they're actively editing.
-            if !focused { text = numericFieldDisplay(newValue) }
+            if !focused { text = numericFieldDisplay(newValue.decimalDollars) }
         }
     }
 }

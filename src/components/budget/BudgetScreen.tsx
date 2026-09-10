@@ -1,13 +1,16 @@
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
 import { useStore } from "../../state/store";
 import { useUI } from "../../state/uiStore";
-import type { MonthKey } from "../../state/schema";
-import { snapshot } from "../../budget/ledger";
+import type { Cents, MonthKey } from "../../state/schema";
+import { UNCATEGORIZED_CATEGORY_ID, cents } from "../../state/schema";
+import { assignedAfter, snapshot } from "../../budget/ledger";
+import { planFundMonth, type FundMonthPlan } from "../../budget/nodeLedger";
 import { ymKey } from "../../state/recurring";
 import { M } from "../../theme/motion";
+import { GlassButton } from "../glass/GlassButton";
 import { GlassCard } from "../glass/GlassCard";
-import { dollars } from "./bits";
+import { FundMonthButton, dollars } from "./bits";
 import { CategoryGroups, FUND_GLOW } from "./CategoryGroups";
 import { AccountsSection } from "./AccountsSection";
 import { TransactionsSection } from "./TransactionsSection";
@@ -48,17 +51,16 @@ function MonthArrow({
   );
 }
 
-function RtaPill({ amount }: { amount: number }) {
-  const cents = Math.round(amount * 100);
+function RtaPill({ amount }: { amount: Cents }) {
   const palette =
-    cents > 0
+    amount > 0
       ? {
           background: "rgba(52, 211, 153, 0.14)",
           border: "1px solid rgba(52, 211, 153, 0.38)",
           color: "#a7f3d0",
           boxShadow: "0 0 24px rgba(52, 211, 153, 0.22)",
         }
-      : cents < 0
+      : amount < 0
         ? {
             background: "rgba(248, 113, 113, 0.12)",
             border: "1px solid rgba(248, 113, 113, 0.38)",
@@ -76,18 +78,221 @@ function RtaPill({ amount }: { amount: number }) {
         Ready to Assign
       </span>
       <span className="text-xl font-semibold tabular-nums">
-        {cents === 0 ? "All assigned" : dollars(amount)}
+        {amount === 0 ? "All assigned" : dollars(amount)}
       </span>
     </div>
+  );
+}
+
+/**
+ * The compact "how much can I spend right now" row (w2-today-strip): Ready
+ * to Assign, total on-budget cash, and the balance of whichever envelope
+ * was last used, so the answer costs zero taps on cold open. `onBudgetCash`
+ * and `category.available` are both derived from the `snap` the caller
+ * already computed — no second `snapshot()` call. Grid, not flex-wrap, so
+ * labels truncate instead of wrapping to a second line on a phone.
+ *
+ * `category` is null when the fallback envelope (last-used, or Uncategorized)
+ * doesn't actually exist in `book.categories` yet — Uncategorized is created
+ * lazily (see `ensureUncategorized`), so a fresh book has no third envelope to
+ * report. Rather than render a dud "Uncategorized $0.00" (finding 9), the
+ * strip falls back to a two-tile layout until a real envelope exists.
+ */
+function TodayStrip({
+  readyToAssign,
+  onBudgetCash,
+  category,
+  ahead,
+}: {
+  readyToAssign: number;
+  onBudgetCash: number;
+  category: { name: string; available: number } | null;
+  ahead: number;
+}) {
+  return (
+    <GlassCard intensity="subtle" className="px-4 py-3">
+      <div className={`grid gap-3 ${category ? "grid-cols-3" : "grid-cols-2"}`}>
+        <StripStat label="Ready to Assign" value={readyToAssign} />
+        <StripStat label="On-budget cash" value={onBudgetCash} />
+        {category && <StripStat label={category.name} value={category.available} />}
+      </div>
+      {ahead !== 0 && (
+        <div className="mt-2 truncate border-t border-white/5 pt-2 text-[11px] tabular-nums text-white/50">
+          {dollars(ahead)} assigned in future months
+        </div>
+      )}
+    </GlassCard>
+  );
+}
+
+function StripStat({ label, value }: { label: string; value: Cents }) {
+  const negative = value < 0;
+  return (
+    <div className="min-w-0">
+      <div className="truncate text-[10px] font-medium uppercase tracking-[0.14em] text-white/50">
+        {label}
+      </div>
+      <div
+        className={`truncate text-sm font-semibold tabular-nums ${
+          negative ? "text-rose-300" : "text-white/90"
+        }`}
+      >
+        {dollars(value)}
+      </div>
+    </div>
+  );
+}
+
+function envelopes(n: number): string {
+  return `${n} ${n === 1 ? "envelope" : "envelopes"}`;
+}
+
+/**
+ * What the fund actually did, in one line — rendered on every tap, success
+ * included. A one-tap action that moves money silently is the thing the user
+ * cannot check afterwards; this is the receipt.
+ */
+function fundReport(plan: FundMonthPlan): string {
+  if (plan.funding === 0) {
+    return plan.shortfall > 0
+      ? `Nothing to move — Ready to Assign is empty, ${dollars(plan.shortfall)} still short`
+      : "Every target is already funded — nothing to move";
+  }
+  const moved = `Funded ${envelopes(plan.funding)}, ${dollars(plan.total)} moved`;
+  return plan.shortfall > 0 ? `${moved} — ${dollars(plan.shortfall)} still short` : moved;
+}
+
+/**
+ * Say what is about to move before it moves. Shared by both Fund buttons (the
+ * month header's and the untouched-month prompt's) so the confirmation is not
+ * a property of which button you happened to tap.
+ */
+function FundMonthDialog({
+  plan,
+  onConfirm,
+  onCancel,
+}: {
+  plan: FundMonthPlan;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <AnimatePresence>
+      <motion.div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-md"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={onCancel}
+      >
+        <motion.div
+          className="w-full max-w-sm"
+          initial={{ scale: 0.94, y: 20, opacity: 0 }}
+          animate={{ scale: 1, y: 0, opacity: 1 }}
+          exit={{ scale: 0.94, y: 20, opacity: 0 }}
+          transition={{ type: "spring", stiffness: 240, damping: 24 }}
+          onClick={(e) => e.stopPropagation()}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Fund this month"
+        >
+          <GlassCard intensity="strong" className="space-y-4 p-6">
+            <h2 className="text-lg font-semibold tracking-tight text-white/95">
+              Fund this month
+            </h2>
+            <p className="text-sm text-white/75">
+              Move {dollars(plan.total)} into {envelopes(plan.funding)}?
+            </p>
+            {plan.shortfall > 0 && (
+              <p className="text-xs text-white/55">
+                Ready to Assign runs out first — {dollars(plan.shortfall)} of this
+                month's targets stays unfunded.
+              </p>
+            )}
+            <div className="flex justify-end gap-2">
+              <GlassButton size="sm" variant="secondary" onClick={onCancel}>
+                Cancel
+              </GlassButton>
+              <GlassButton size="sm" variant="yes" onClick={onConfirm}>
+                Move {dollars(plan.total)}
+              </GlassButton>
+            </div>
+          </GlassCard>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
   );
 }
 
 export function BudgetScreen() {
   const budget = useStore((s) => s.budget);
   const budgetFocus = useUI((s) => s.budgetFocus);
+  const lastUsedTxn = useUI((s) => s.lastUsedTxn);
   const [month, setMonth] = useState<MonthKey>(() => ymKey());
   // Live-derived: any edit to the book lands here on the next render.
   const snap = useMemo(() => snapshot(budget, month), [budget, month]);
+  // Ready-to-Assign stops at the viewed month, so dollars parked further out
+  // are invisible to it — call them out rather than let them look unspent.
+  const ahead = useMemo(() => assignedAfter(budget, month), [budget, month]);
+
+  // Same fallback the fast-entry FAB uses (w2-fastentry): the last category
+  // used for the last-used account, or Uncategorized if that pointer is
+  // stale/missing/hidden — never blank *when a real envelope exists*.
+  // Uncategorized itself is created lazily (`ensureUncategorized`), so on a
+  // fresh book this id can point at a category that doesn't exist yet —
+  // `stripCategory` below is null in that case rather than a dud tile
+  // (finding 9). Both figures come from `snap`, already computed above, so
+  // this adds no snapshot() call.
+  const stripCategoryId = useMemo(() => {
+    const remembered = lastUsedTxn?.categoryByAccount[lastUsedTxn.accountId];
+    if (remembered && budget.categories.some((c) => c.id === remembered && !c.hidden)) {
+      return remembered;
+    }
+    return UNCATEGORIZED_CATEGORY_ID;
+  }, [lastUsedTxn, budget.categories]);
+  const stripCategory = useMemo(() => {
+    const cat = budget.categories.find((c) => c.id === stripCategoryId);
+    if (!cat) return null;
+    return { name: cat.name, available: snap.categories[stripCategoryId]?.available ?? 0 };
+  }, [budget.categories, stripCategoryId, snap]);
+  // "Cash on budget" = every dollar still sitting in an envelope plus what's
+  // unassigned — the two terms `snap` already carries. Both are integer cents,
+  // so the sum is exact.
+  const onBudgetCash = useMemo(() => {
+    let total: number = snap.readyToAssign;
+    for (const c of Object.values(snap.categories)) total += c.available;
+    return cents(total);
+  }, [snap]);
+
+  // Assignments are keyed per month, so every month opens with every envelope
+  // back at zero. The plan is re-derived on each edit purely to answer "is
+  // anything still short of its monthly target?" — the tap itself re-plans
+  // against the freshest book. `snap` is passed through (finding 8) so this
+  // reuses the snapshot() already computed above instead of running a second
+  // full ledger pass on every keystroke.
+  const plan = useMemo(() => planFundMonth(budget, month, snap), [budget, month, snap]);
+  const unmet = plan.underfunded.length > 0 || plan.funding > 0;
+  // An untouched month is the real cliff: not a wall of failed goal bars, just
+  // a month nobody has funded yet.
+  const untouched = Object.keys(budget.assignments[month] ?? {}).length === 0;
+  const [report, setReport] = useState<{ month: MonthKey; text: string } | null>(null);
+  // The plan the confirmation dialog is describing — re-planned at tap time,
+  // so what the dialog states is exactly what Confirm will apply.
+  const [pending, setPending] = useState<FundMonthPlan | null>(null);
+
+  const applyFund = (fresh: FundMonthPlan) => {
+    if (fresh.ops.setAssignments?.length) useStore.getState().applyBookOps(fresh.ops);
+    setReport({ month, text: fundReport(fresh) });
+    setPending(null);
+  };
+
+  // Both Fund buttons land here. Nothing to move means nothing to confirm —
+  // go straight to the report rather than opening a "Move $0?" dialog.
+  const requestFund = () => {
+    const fresh = planFundMonth(useStore.getState().budget, month);
+    if (fresh.funding === 0) applyFund(fresh);
+    else setPending(fresh);
+  };
 
   // Cross-navigation landing: scroll the requested row into view and pulse it
   // in the funding green for ~2s. The request is consumed up front so the
@@ -141,17 +346,46 @@ export function BudgetScreen() {
                 onClick={() => setMonth(stepYm(month, 1))}
               />
             </div>
-            <RtaPill amount={snap.readyToAssign} />
+            <div className="flex flex-col items-end gap-1">
+              <RtaPill amount={snap.readyToAssign} />
+            </div>
           </div>
+          {/* The button retires the moment every target is met — it would do
+              nothing. The report does NOT: a successful fund empties the need
+              and would otherwise take its own receipt down with it, leaving a
+              tap that moved four figures with no trace on screen. */}
+          {(unmet || (report !== null && report.month === month)) && (
+            <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-white/5 pt-3">
+              {unmet && <FundMonthButton onClick={requestFund} />}
+              {report && report.month === month && (
+                <span className="text-xs tabular-nums text-white/55">{report.text}</span>
+              )}
+            </div>
+          )}
         </GlassCard>
       </motion.div>
+
+      {/* Zero-tap "can I afford this" strip (w2-today-strip): static, no
+          motion wrapper — this is read on every open and must render
+          instantly, not fade in. */}
+      <TodayStrip
+        readyToAssign={snap.readyToAssign}
+        onBudgetCash={onBudgetCash}
+        category={stripCategory}
+        ahead={ahead}
+      />
 
       <motion.section
         initial={{ opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ ...M.fade, delay: 0.1 }}
       >
-        <CategoryGroups month={month} snap={snap} />
+        <CategoryGroups
+          month={month}
+          snap={snap}
+          untouched={untouched && unmet}
+          onFundMonth={requestFund}
+        />
       </motion.section>
 
       <motion.section
@@ -169,6 +403,14 @@ export function BudgetScreen() {
       >
         <TransactionsSection />
       </motion.section>
+
+      {pending && (
+        <FundMonthDialog
+          plan={pending}
+          onConfirm={() => applyFund(pending)}
+          onCancel={() => setPending(null)}
+        />
+      )}
     </div>
   );
 }

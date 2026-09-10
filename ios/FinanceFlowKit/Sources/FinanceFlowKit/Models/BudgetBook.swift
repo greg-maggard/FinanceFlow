@@ -2,9 +2,11 @@ import Foundation
 
 // MARK: - Budget book (v2): the zero-based envelope core.
 //
-// Mirrors the `BudgetBook` types in `src/state/schema.ts`. Money is `Decimal`
-// in memory (see Values.swift for why) and a bare JSON number on the wire,
-// byte-compatible with the web. All envelope math lives in `Domain/Ledger.swift`.
+// Mirrors the `BudgetBook` types in `src/state/schema.ts`. Money is `Money`
+// (integer cents — see Money.swift for why) in memory and a bare JSON integer on
+// the wire, byte-compatible with the web. All envelope math lives in
+// `Domain/Ledger.swift`, and from v4 every bit of it is exact integer
+// arithmetic with no rounding step to forget.
 
 public enum AccountKind: String, Codable, Sendable {
     case checking
@@ -26,9 +28,9 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
     public var id: String
     public var name: String
     public var kind: AccountKind
-    /// Annual rate, for credit/loan accounts.
+    /// Annual rate, for credit/loan accounts. NOT money — never converted.
     public var apr: Decimal?
-    public var minPayment: Decimal?
+    public var minPayment: Money?
     public var closed: Bool?
     public var source: Source
     public var plaidAccountId: String?
@@ -40,7 +42,7 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
         name: String = "",
         kind: AccountKind,
         apr: Decimal? = nil,
-        minPayment: Decimal? = nil,
+        minPayment: Money? = nil,
         closed: Bool? = nil,
         source: Source = .manual,
         plaidAccountId: String? = nil,
@@ -69,7 +71,7 @@ public struct Txn: Codable, Equatable, Sendable, Identifiable {
     /// Local calendar date, "YYYY-MM-DD".
     public var date: String
     public var payee: String?
-    public var amount: Decimal
+    public var amount: Money
     public var categoryId: String?
     public var transferAccountId: String?
     /// The other row of a transfer pair, so the pair can be edited/deleted atomically.
@@ -83,7 +85,7 @@ public struct Txn: Codable, Equatable, Sendable, Identifiable {
         accountId: String,
         date: String,
         payee: String? = nil,
-        amount: Decimal,
+        amount: Money,
         categoryId: String? = nil,
         transferAccountId: String? = nil,
         transferPairId: String? = nil,
@@ -123,9 +125,9 @@ public struct BudgetCategory: Codable, Equatable, Sendable, Identifiable {
     public var name: String
     public var order: Int
     /// Needed-for-spending target per month.
-    public var monthlyTarget: Decimal?
+    public var monthlyTarget: Money?
     /// Save-a-total target (purchase goals, EF buckets).
-    public var balanceTarget: Decimal?
+    public var balanceTarget: Money?
     public var targetDate: String?
     public var hidden: Bool?
     /// Flowchart node this category reports into, if any.
@@ -136,8 +138,8 @@ public struct BudgetCategory: Codable, Equatable, Sendable, Identifiable {
         groupId: String,
         name: String = "",
         order: Int = 0,
-        monthlyTarget: Decimal? = nil,
-        balanceTarget: Decimal? = nil,
+        monthlyTarget: Money? = nil,
+        balanceTarget: Money? = nil,
         targetDate: String? = nil,
         hidden: Bool? = nil,
         nodeId: NodeId? = nil
@@ -159,21 +161,56 @@ public struct BudgetBook: Codable, Equatable, Sendable {
     public var transactions: [Txn]
     public var groups: [CategoryGroup]
     public var categories: [BudgetCategory]
-    /// assignments[month]["categoryId"] = dollars assigned to that envelope in
+    /// assignments[month]["categoryId"] = cents assigned to that envelope in
     /// that "YYYY-MM" month (the same key convention as `monthlyChecks`).
-    public var assignments: [String: [String: Decimal]]
+    public var assignments: [String: [String: Money]]
 
     public init(
         accounts: [Account] = [],
         transactions: [Txn] = [],
         groups: [CategoryGroup] = [],
         categories: [BudgetCategory] = [],
-        assignments: [String: [String: Decimal]] = [:]
+        assignments: [String: [String: Money]] = [:]
     ) {
         self.accounts = accounts
         self.transactions = transactions
         self.groups = groups
         self.categories = categories
         self.assignments = assignments
+    }
+}
+
+// MARK: - The system catch-all envelope (mirrors schema.ts)
+
+extension BudgetBook {
+    /// The group that holds envelopes the app owns rather than the user.
+    public static let systemGroupID = "g:system"
+    /// The catch-all envelope. Every on-budget outflow has to land somewhere:
+    /// money with no envelope leaves the accounts without leaving any category,
+    /// which is exactly the leak `Ledger.bookIntegrity`'s `unbudgetedSpending`
+    /// residual measures. This is a real, visible, assignable category — it
+    /// just carries no `nodeId`, so `NodeLedger.linkedCategories` keeps it out
+    /// of every flowchart node's math.
+    public static let uncategorizedCategoryID = "cat:uncategorized"
+    /// Sorts the system group and its envelope after anything the user makes.
+    public static let systemOrder = 999_999
+
+    /// Materialize the system group + Uncategorized envelope if they aren't
+    /// there yet, leaving the book alone when they are. Created lazily on first
+    /// need (a delete that reassigns into it, a transaction saved into it) so an
+    /// untouched book stays free of rows the user never asked for — which is
+    /// also why this needs no schema version bump or migration.
+    public mutating func ensureUncategorized() {
+        if !groups.contains(where: { $0.id == Self.systemGroupID }) {
+            groups.append(CategoryGroup(id: Self.systemGroupID, name: "System", order: Self.systemOrder))
+        }
+        if !categories.contains(where: { $0.id == Self.uncategorizedCategoryID }) {
+            categories.append(BudgetCategory(
+                id: Self.uncategorizedCategoryID,
+                groupId: Self.systemGroupID,
+                name: "Uncategorized",
+                order: Self.systemOrder
+            ))
+        }
     }
 }

@@ -20,6 +20,7 @@ struct SettingsScreen: View {
             ScrollView {
                 VStack(spacing: theme.spacing.xl) {
                     settingsCard
+                    integrityCard
                     backupCard
                     appearanceCard
                     dangerCard
@@ -52,13 +53,13 @@ struct SettingsScreen: View {
             VStack(alignment: .leading, spacing: theme.spacing.md) {
                 Text("Your numbers").font(theme.typography.headline).foregroundStyle(theme.colors.textPrimary)
                 LabeledField(label: "Monthly expenses") {
-                    NumberField(value: store.state.settings.monthlyExpenses ?? 0) { v in
-                        store.updateSettings { $0.monthlyExpenses = v > 0 ? v : nil }
+                    NumberField(value: store.state.settings.monthlyExpenses ?? .zero) { v in
+                        store.updateSettings { $0.monthlyExpenses = v > .zero ? v : nil }
                     }
                 }
                 LabeledField(label: "Pre-tax income (annual)") {
-                    NumberField(value: store.state.settings.preTaxIncome ?? 0) { v in
-                        store.updateSettings { $0.preTaxIncome = v > 0 ? v : nil }
+                    NumberField(value: store.state.settings.preTaxIncome ?? .zero) { v in
+                        store.updateSettings { $0.preTaxIncome = v > .zero ? v : nil }
                     }
                 }
                 HStack(spacing: theme.spacing.md) {
@@ -80,6 +81,41 @@ struct SettingsScreen: View {
                 }
             }
         }
+    }
+
+    /// Conservation-of-money read-out. Every dollar in an on-budget account
+    /// must be sitting in an envelope, waiting in Ready-to-Assign, or spent
+    /// outside the budget — a non-zero drift means the book invented or lost
+    /// money. Mirrors the web Settings row.
+    private var integrityCard: some View {
+        let integrity = Ledger.bookIntegrity(store.state.budget, month: Recurring.ymKey())
+        let ok = integrity.drift == .zero
+        return GlassCard {
+            VStack(alignment: .leading, spacing: theme.spacing.md) {
+                Text("Check integrity").font(theme.typography.headline).foregroundStyle(theme.colors.textPrimary)
+                integrityRow("On-budget cash", integrity.onBudgetCash)
+                integrityRow("Sum of available", integrity.sumAvailable)
+                integrityRow("Ready to assign", integrity.readyToAssign)
+                integrityRow("Unbudgeted spending", integrity.unbudgetedSpending)
+                integrityRow(ok ? "Balanced" : "Drift", integrity.drift,
+                             tint: ok ? theme.colors.success : theme.colors.danger)
+                Text(ok
+                     ? "Every dollar is accounted for."
+                     : "The books don't balance — this is a bug, not your data.")
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.textSecondary)
+            }
+        }
+    }
+
+    private func integrityRow(_ label: String, _ value: Money, tint: Color? = nil) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Text(value.decimalDollars, format: .currency(code: "USD")).monospacedDigit()
+        }
+        .font(theme.typography.callout)
+        .foregroundStyle(tint ?? theme.colors.textSecondary)
     }
 
     private var backupCard: some View {

@@ -10,32 +10,36 @@ struct ResilientDecodingTests {
     @Test("an unknown enum value decodes to a safe fallback, not a failure")
     func unknownEnumFallsBack() throws {
         var s = AppState.makeInitial()
-        s.nodes[.Rent]?.data = .recurring(RecurringData(target: SourcedNumber(value: 100, source: .manual)))
+        s.nodes[.IRA]?.data = .ira(IRAData(
+            type: .roth,
+            ytdContribution: SourcedNumber(value: 100, source: .manual),
+            annualLimit: 700_000
+        ))
         let data = try JSONCoder.encode(s)
 
         var obj = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         var nodes = try #require(obj["nodes"] as? [String: Any])
-        var rent = try #require(nodes["Rent"] as? [String: Any])
-        var dataObj = try #require(rent["data"] as? [String: Any])
-        var target = try #require(dataObj["target"] as? [String: Any])
-        target["source"] = "plaid_v2_unknown"        // a source this build doesn't know
-        dataObj["target"] = target
-        rent["data"] = dataObj
-        nodes["Rent"] = rent
+        var ira = try #require(nodes["IRA"] as? [String: Any])
+        var dataObj = try #require(ira["data"] as? [String: Any])
+        var ytd = try #require(dataObj["ytdContribution"] as? [String: Any])
+        ytd["source"] = "plaid_v2_unknown"           // a source this build doesn't know
+        dataObj["ytdContribution"] = ytd
+        ira["data"] = dataObj
+        nodes["IRA"] = ira
         obj["nodes"] = nodes
 
         let mutated = try JSONSerialization.data(withJSONObject: obj)
         let decoded = try JSONCoder.decode(mutated)   // must NOT throw
 
-        #expect(decoded.node(.Rent).data?.recurring?.target.source == .manual)   // fell back
-        #expect(decoded.node(.Rent).data?.recurring?.target.value == 100)        // value preserved
+        #expect(decoded.node(.IRA).data?.ira?.ytdContribution.source == .manual)   // fell back
+        #expect(decoded.node(.IRA).data?.ira?.ytdContribution.value == 100)        // value preserved
     }
 
     @Test("one structurally-corrupt node is isolated; the rest of the document survives")
     func corruptNodeIsolated() throws {
         var s = AppState.makeInitial()
         s.nodes[.Start]?.completed = true
-        s.nodes[.IRA]?.data = .ira(IRAData(type: .roth, ytdContribution: .manual(1000), annualLimit: 7000))
+        s.nodes[.IRA]?.data = .ira(IRAData(type: .roth, ytdContribution: .manual(100_000), annualLimit: 700_000))
         let data = try JSONCoder.encode(s)
 
         var obj = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -97,7 +101,7 @@ struct ResilientDecodingTests {
         }
         """
         let out = try IO.importString(v2JSON)
-        #expect(out.version == 3)
+        #expect(out.version == 4)
 
         // Every node's non-financial state survived the migration.
         #expect(out.node(.Start).completed == true)
@@ -116,15 +120,15 @@ struct ResilientDecodingTests {
         #expect(out.node(.BigEF).data == .bigEF(BigEFData(targetMonths: 6)))
         #expect(out.node(.IRA).data == .ira(IRAData(
             type: .roth,
-            ytdContribution: .manual(2500),
-            annualLimit: 7000
+            ytdContribution: .manual(250_000),
+            annualLimit: 700_000
         )))
 
         // The ledger was reconciled: existing rows kept, missing ones created.
         #expect(out.budget.categories.map(\.id) == ["Rent:r1", "BigEF:b1"])
         #expect(out.budget.accounts.contains { $0.id == "debt:d1" && $0.nodeId == .HighDebt })
-        #expect(Ledger.accountBalance(out.budget, "debt:d1") == -4200)
+        #expect(Ledger.accountBalance(out.budget, "debt:d1") == -420_000)
         // RTA is untouched by migration: 3000 - 1800 before, (3000+1200) - (1800+1200) after.
-        #expect(Ledger.snapshot(out.budget, month: "2099-12").readyToAssign == 1200)
+        #expect(Ledger.snapshot(out.budget, month: "2099-12").readyToAssign == 120_000)
     }
 }

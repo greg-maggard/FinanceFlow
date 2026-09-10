@@ -23,8 +23,8 @@ public enum DecisionId: String, Codable, Sendable, Hashable, CaseIterable {
 }
 
 /// Provenance for a numeric value. `manual` is the only producer in MVP;
-/// `plaid` / `ynab` exist so a future `BalanceProvider` can populate fields
-/// without a schema change. Mirrors `Source` in `src/state/schema.ts`.
+/// `plaid` / `ynab` are reserved for future integration providers.
+/// Mirrors `Source` in `src/state/schema.ts`.
 public enum Source: String, Codable, Sendable, Hashable {
     case manual
     case plaid

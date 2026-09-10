@@ -5,6 +5,7 @@ import { PHASE_COLORS } from "../../theme/phaseColors";
 import { IDENTITY, RECURRING } from "../../theme/identity";
 import { EASE_FLOW, M } from "../../theme/motion";
 import type { NodeId } from "../../state/schema";
+import { cents } from "../../state/schema";
 import { useStore } from "../../state/store";
 import { useUI } from "../../state/uiStore";
 import { deriveStatus } from "../../graph/derive";
@@ -18,10 +19,25 @@ import { StreakChip } from "./StreakBadge";
 import { advance, findCurrentNode } from "./advance";
 import { KebabMenu } from "../glass/KebabMenu";
 import { isCheckedThisMonth, ymKey } from "../../state/recurring";
+import { snapshot } from "../../budget/ledger";
+import { nodeRows } from "../../budget/nodeLedger";
+import { dollars } from "../budget/bits";
+
+function monthNameFor(key: string): string {
+  const [y, m] = key.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleString(undefined, { month: "long" });
+}
 
 export function FocusCard({ nodeId }: { nodeId: NodeId }) {
   const node = GRAPH_BY_ID[nodeId];
-  const state = useStore();
+  // Selector-scoped rather than a bare `useStore()`: the focus card is on
+  // screen for the whole time the user is editing it, so a whole-store
+  // subscription would re-render it (and re-run `progressOf`/`snapshot`) on
+  // every store mutation anywhere, not just edits that touch this node.
+  const budget = useStore((s) => s.budget);
+  const settings = useStore((s) => s.settings);
+  const nodes = useStore((s) => s.nodes);
+  const decisions = useStore((s) => s.decisions);
   const triggerCelebration = useUI((s) => s.triggerCelebration);
   const setFocus = useUI((s) => s.setFocus);
   const pendingCelebration = useUI((s) => s.pendingCelebration);
@@ -29,21 +45,37 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
   const [showForm, setShowForm] = useState(true);
   const [showNotes, setShowNotes] = useState(false);
 
-  const nodeState = state.nodes[nodeId];
+  const nodeState = nodes[nodeId];
   const Form = FORM_BY_NODE[nodeId];
   const Menu = MENU_BY_NODE[nodeId];
-  const progress = progressOf(state, nodeId);
+  const month = ymKey();
+  // Computed once per render and threaded through both `progressOf` and
+  // `leftThisMonth` below, instead of each calling `snapshot()` on its own —
+  // the whole point of this pass (w3-perf finding 2).
+  const snap = useMemo(() => snapshot(budget, month), [budget, month]);
+  const progress = progressOf({ budget, settings, nodes }, nodeId, month, snap);
   const recurring = RECURRING.has(nodeId);
   const identity = IDENTITY[nodeId];
 
-  const status = useMemo(() => deriveStatus(state), [state]);
+  /**
+   * What's still sitting in the node's envelopes. `funded` answers "is this
+   * month covered?" and counts money that has already gone out the door, so
+   * after any spending it disagrees with the Budget screen's available —
+   * showing both saves the user from reconciling the two.
+   */
+  const leftThisMonth = useMemo(() => {
+    if (!recurring) return cents(0);
+    const rows = nodeRows(budget, snap, nodeId);
+    return cents(rows.reduce((sum, r) => sum + r.available, 0));
+  }, [recurring, nodeId, budget, snap]);
+
+  const status = useMemo(() => deriveStatus({ nodes, decisions }), [nodes, decisions]);
   const isOnPath = status[nodeId] === "current";
   const isFreshCelebration = pendingCelebration?.id === nodeId;
   const fullCelebration = isFreshCelebration && (pendingCelebration?.onPath ?? false);
 
-  const isMarkedDone = recurring
-    ? isCheckedThisMonth(nodeState)
-    : nodeState.completed;
+  const isMarkedDone = nodeState.completed;
+  const checkedThisMonth = recurring && isCheckedThisMonth(nodeState);
 
   const upNextId = useMemo(() => {
     if (isOnPath || isMarkedDone) return null;
@@ -68,15 +100,17 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
   const onMarkComplete = () => {
     if (!canMarkComplete) return;
     const wasOnPath = isOnPath;
-    if (recurring) markRecurringDone(true);
-    else useStore.getState().toggleComplete(nodeId);
+    useStore.getState().toggleComplete(nodeId);
     triggerCelebration(nodeId, wasOnPath);
     advance(nodeId);
   };
 
   const onReopen = () => {
-    if (recurring) markRecurringDone(false);
-    else useStore.getState().toggleComplete(nodeId);
+    useStore.getState().toggleComplete(nodeId);
+  };
+
+  const onToggleCheckIn = () => {
+    markRecurringDone(!checkedThisMonth);
   };
 
   const onDecide = (answer: "yes" | "no") => {
@@ -145,7 +179,7 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
                     border: "1px solid rgba(52, 211, 153, 0.32)",
                   }}
                 >
-                  {recurring ? "Done this month" : "Complete"}
+                  Complete
                 </motion.span>
               )}
               {recurring && <StreakChip node={nodeState} glow={phaseColor.glow} />}
@@ -196,11 +230,11 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
                 No
               </GlassButton>
             </div>
-            {state.decisions[node.decisionId!] && (
+            {decisions[node.decisionId!] && (
               <p className="text-center text-xs text-white/45">
                 Currently:{" "}
                 <span className="font-semibold uppercase">
-                  {state.decisions[node.decisionId!]}
+                  {decisions[node.decisionId!]}
                 </span>
                 . Re-answer to change route.
               </p>
@@ -209,13 +243,22 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
         ) : (
           <div className="space-y-5">
             {progress.kind === "goal" && (
-              <GoalBar
-                value={progress.value}
-                max={progress.max}
-                tint={phaseColor.base}
-                glow={phaseColor.glow}
-                caption={nodeState.completed ? "Done" : "Toward target"}
-              />
+              <div className="space-y-2">
+                <GoalBar
+                  value={progress.value}
+                  max={progress.max}
+                  unit={progress.unit}
+                  tint={phaseColor.base}
+                  glow={phaseColor.glow}
+                  caption={nodeState.completed ? "Done" : "Toward target"}
+                />
+                {recurring && (
+                  <p className="text-[11px] tabular-nums text-white/55">
+                    Funded {dollars(cents(progress.value))} of {dollars(cents(progress.max))} ·{" "}
+                    {dollars(leftThisMonth)} left this month
+                  </p>
+                )}
+              </div>
             )}
 
             {Form && recurring && (
@@ -283,7 +326,28 @@ export function FocusCard({ nodeId }: { nodeId: NodeId }) {
               </AnimatePresence>
             </div>
 
-            <div className="flex min-h-[44px] items-center justify-end pt-2">
+            <div
+              className={`flex min-h-[44px] items-center gap-3 pt-2 ${
+                recurring ? "justify-between" : "justify-end"
+              }`}
+            >
+              {recurring && (
+                <button
+                  type="button"
+                  onClick={onToggleCheckIn}
+                  aria-pressed={checkedThisMonth}
+                  className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                    checkedThisMonth
+                      ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-200"
+                      : "border-white/15 bg-white/5 text-white/60 hover:text-white/85"
+                  }`}
+                >
+                  <span aria-hidden>{checkedThisMonth ? "✓" : "○"}</span>
+                  {checkedThisMonth
+                    ? `Checked in for ${monthNameFor(ymKey())}`
+                    : `Check in for ${monthNameFor(ymKey())}`}
+                </button>
+              )}
               <AnimatePresence mode="wait" initial={false}>
                 {isMarkedDone ? (
                   <motion.div

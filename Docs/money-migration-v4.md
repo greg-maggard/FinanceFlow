@@ -1,6 +1,9 @@
 # Schema v4: Integer Cents on the Wire
 
-**Status:** Spec — approved for implementation, not yet started.
+**Status:** IMPLEMENTED (both platforms, one branch). The §7 fixture pair lives at
+`fixtures/migration/{v3-nasty,v4-expected}.json` and is asserted by
+`src/state/io.test.ts` and `ios/.../SharedMigrationFixtureTests.swift`.
+One correction to this document was required during implementation — see §4.
 **Scope:** Both platforms (web `src/`, iOS `ios/`). One document format, one migration, shipped together.
 **Written:** 2026-07-06. Designed to be execution-ready without further design decisions.
 
@@ -57,7 +60,7 @@ construction, and the web's per-site rounding discipline is no longer load-beari
 | D4 | iOS in-memory type | `Money` struct wrapping `cents: Int`, Codable as a bare Int | Real type safety; formatting/parse helpers hang off it; synthesized Codable via `singleValueContainer` |
 | D5 | Rounding rule (migration + input parse) | `cents = floor(d × 100 + 0.5)` computed in **IEEE-754 double** on both platforms | See §4 — the only rule that is bit-identical across JS and Swift |
 | D6 | v1/v2 legacy migrations | Untouched — still run in dollars | Chain becomes v1→v2→v3→v4; the v4 step is one pure function over a v3 document |
-| D7 | Backup before first v4 write | Web: copy current store to `financeflow:backup:v3` (one-time). iOS: copy `state.json` → `state.v3-backup.json` before first v4 save | Consistent with the quarantine-never-clobber ethos; migration bugs stay recoverable |
+| D7 | Backup before first v4 write | Web: copy current store to `financeflow:premigration:v3` (one-time, its OWN key — the rolling `financeflow:backup:v<n>` snapshot would otherwise starve it). iOS: copy `state.json` → `state.v3-backup.json` before first v4 save. **A failed copy gates the migration** on both platforms: block and surface recovery rather than overwrite unbacked bytes | Consistent with the quarantine-never-clobber ethos; migration bugs stay recoverable |
 | D8 | Percentages and rates | **Not converted** — they are not money | `Account.apr`, `Match.matchPct`/`currentContribPct`, `Increase401k.currentPct`/`targetPct` stay as-is |
 
 **Non-goals:** field renames; multi-currency; `ShortID` changes; touching the v1/v2
@@ -112,17 +115,29 @@ cents(d) = floor(d * 100 + 0.5)        // evaluated in IEEE-754 double
 
 Why double, when iOS has exact `Decimal`? Because the *web* can only see the
 IEEE-double image of what's in the JSON, and JSON-number → nearest-double is
-identical everywhere. If iOS rounded the exact Decimal instead, a stored `33.335`
-would migrate to `3334` on iOS (Decimal sees the exact half, rounds away from zero)
-but `3333` on web (the nearest double to 33.335 is fractionally below the half).
-Routing both platforms through double makes migration **bit-identical by
-construction**. Sub-cent values are rare (typed-input edge case) but they are the
-entire reason this migration exists — the rule must be airtight for exactly those.
+identical everywhere. Routing both platforms through double makes migration
+**bit-identical by construction**, whatever that image happens to be. Sub-cent
+values are rare (typed-input edge case) but they are the entire reason this
+migration exists — the rule must be airtight for exactly those.
 
-Negative amounts (outflows) hit this too: the formula rounds `-1234.5` to `-1234` on
-both platforms. Do not substitute `NSDecimalRound(.plain)` (rounds half away from
-zero → `-1235`) or Swift's `.toNearestOrAwayFromZero`. The migration test fixture
-(§7) pins these cases.
+> **Correction (found during implementation).** The original text of this section
+> illustrated the rule with: "a stored `33.335` would migrate to `3334` on iOS
+> (Decimal sees the exact half, rounds away from zero) but `3333` on web (the
+> nearest double to 33.335 is fractionally below the half)." **The worked example
+> was wrong about the double.** The nearest double to `33.335` is
+> `33.33500000000000085265…`, which is fractionally *above* the decimal value, so
+> `d * 100` rounds to exactly `3333.5` and `floor(3333.5 + 0.5)` is **3334** — the
+> same answer exact `Decimal` would give, not a different one. The RULE (D5) is
+> unaffected and is what both platforms implement; only the illustration was
+> incorrect. `33.335 → 3334` is pinned in the §7 fixture and asserted by name on
+> both platforms.
+
+Negative amounts (outflows) hit this too: the formula rounds a scaled `-1234.5`
+(i.e. `-12.345` dollars) to `-1234` on both platforms. Do not substitute
+`NSDecimalRound(.plain)` (rounds half away from zero → `-1235`) or Swift's
+`.toNearestOrAwayFromZero`. The migration test fixture (§7) pins these cases,
+including the exactly-representable halves `±0.125` where the double is not an
+approximation at all.
 
 ---
 
@@ -166,7 +181,9 @@ Work through in order; each step compiles and passes tests before the next.
    `GoalBar.tsx:73-74` rounds `c / 100` for its compact labels.
 8. **Persistence bootstrap — `src/state/store.ts` `loadInitial()`**: before saving a
    freshly migrated v4 state, write the raw pre-migration string to
-   `financeflow:backup:v3` if that key is empty (D7).
+   `financeflow:premigration:v3` if that key is empty (D7). If that write fails,
+   do NOT adopt the migrated state — set `bootRecovery` so persistence stays
+   suspended and RecoveryScreen offers the original bytes for download.
 9. **Tests** — update fixtures (`0.1` → `10`, `1000` → `100_000`, …) in
    `ledger.test.ts`, `nodeLedger.test.ts`, `progressOf.test.ts`, `store.test.ts`;
    `io.test.ts` gains v3→v4 cases and keeps v1→v4 / v2→v4 chain tests. Add the
@@ -214,12 +231,34 @@ Commit two fixture files (suggest `fixtures/migration/v3-nasty.json` and
 - `v3-nasty.json`: a v3 document salted with the hostile cases — `0.1`/`0.2` sums,
   `33.333`, `33.335`, `-12.345`, `-1234.5`-style negative halves, a sub-cent
   assignment, large balances (`1234567.89`), zero and missing optionals.
-- `v4-expected.json`: its exact v4 image (generate once from the web implementation,
-  then **verify by hand against §4** before committing — this file is the contract).
+- `v4-expected.json`: its exact v4 image (generated once from the web
+  implementation, then **verified by hand against §4** before committing — this
+  file is the contract).
 
-Both vitest and XCTest assert: `migrate(v3-nasty) == v4-expected`, field-for-field.
-If both platforms match the same committed bytes, migration divergence is impossible.
-This test is the single most important deliverable after the migration itself.
+Both vitest and swift-testing assert: `migrate(v3-nasty) == v4-expected`,
+field-for-field. If both platforms match the same committed bytes, migration
+divergence is impossible. This test is the single most important deliverable
+after the migration itself.
+
+**Rider (implemented with v4): the uncategorized back-fill.** `migrateV3` (web)
+and `Migration.v3ToV4` (Swift) also move every on-budget row that never entered an
+envelope onto `cat:uncategorized`, creating `g:system` and the envelope in the same
+pass. The rows selected are exactly those `bookIntegrity` counts in its
+`unbudgetedSpending` residual: on an on-budget account, no `categoryId`, and not
+one leg of an on-budget → on-budget transfer (that pair cancels in the cash total,
+so giving it an envelope would invent activity that never happened). w1-bug3 made
+this state unreachable from the UI going forward but deliberately did not rewrite
+history; v4 is the one document rewrite, with one backup, where it gets fixed.
+
+**Consequence, stated plainly:** an uncategorized outflow that used to sit outside
+the envelope system now reads as overspending in Uncategorized, and a *past*
+month's overspend sweeps into Ready-to-Assign. So §8.3's "balances unchanged to
+the cent" holds for every envelope and account balance, but Ready-to-Assign
+legitimately drops by the total of any previously-uncategorized on-budget
+spending. That is the correction, not a regression — the money always left, the
+book just wasn't saying where from. After this pass `unbudgetedSpending` is 0 and
+stays 0, which is what makes `bookIntegrity().drift === 0` an unconditional
+invariant from v4 forward.
 
 ## 8. Rollout sequencing
 
@@ -231,7 +270,7 @@ but strict:
 3. Device-test iOS: install, confirm the v3→v4 migration of the real on-device
    document (backup file appears, balances/ready flags unchanged to the cent).
 4. Web: open with production localStorage copied into a dev profile first if
-   paranoid; the `financeflow:backup:v3` key is the safety net.
+   paranoid; the `financeflow:premigration:v3` key is the safety net.
 5. Merge. From then on, exports are v4; a stale v3 app refuses them loudly
    (`Unsupported FinanceFlow version`) rather than corrupting — re-update, done.
 

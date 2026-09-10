@@ -123,7 +123,7 @@ struct RootView: View {
         }
     }
 
-    private var showBudgetRow: Bool { store.budget.target > 0 }
+    private var showBudgetRow: Bool { store.budget.target > .zero }
 
     private var topBar: some View {
         let progress = store.progress
@@ -174,7 +174,11 @@ struct RootView: View {
 
     /// Compact dollar rollup of the monthly budget (the seven recurring nodes).
     private func budgetRow(_ budget: BudgetSummary) -> some View {
-        let fraction = budget.target > 0 ? min(1, (budget.funded / budget.target).displayDouble) : 0
+        // Both are integer cents, so the ratio is taken in Double purely to
+        // drive the bar — no money decision is made here.
+        let fraction = budget.target > .zero
+            ? min(1, Double(budget.funded.cents) / Double(budget.target.cents))
+            : 0
         return VStack(alignment: .leading, spacing: theme.spacing.xs) {
             HStack {
                 Text("Monthly budget")

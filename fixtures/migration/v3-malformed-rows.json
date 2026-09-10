@@ -1,0 +1,51 @@
+{
+  "_comment": "A damaged v3 document: budget.categories holds a bare number where a category record belongs. Neither platform may 'fix' this — web used to normalize it into a category with no id/groupId/order and write the result back over the original. Both must reject it so the file routes to recovery with its bytes intact.",
+  "version": 3,
+  "settings": {
+    "monthlyExpenses": 4000,
+    "preTaxIncome": 120000,
+    "iraAnnualLimit": 7000,
+    "hsaSelfLimit": 4300,
+    "hsaFamilyLimit": 8550
+  },
+  "decisions": {
+    "Q_Match": null,
+    "Q_HighDebt": null,
+    "Q_ModDebt": null,
+    "Q_Purchase": null,
+    "Q_15pct": null,
+    "Q_401k": null,
+    "Q_HSA": null,
+    "Q_College": null,
+    "Q_Early": null,
+    "Q_Goals": null
+  },
+  "nodes": {
+    "Start": {
+      "completed": true,
+      "notes": ""
+    }
+  },
+  "budget": {
+    "accounts": [
+      {
+        "id": "checking",
+        "name": "Checking",
+        "kind": "checking",
+        "source": "manual"
+      }
+    ],
+    "transactions": [],
+    "groups": [
+      {
+        "id": "g:bills",
+        "name": "Bills",
+        "order": 0
+      }
+    ],
+    "categories": [7],
+    "assignments": {}
+  },
+  "shownCelebrations": [],
+  "earnedMedals": []
+}

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { RTA_CATEGORY_ID, makeInitialState } from "../state/schema";
 import type { AppState, Category, NodeId } from "../state/schema";
-import { deriveStatus, monthlyBudgetSummary } from "./derive";
+import { deriveStatus, monthlyBudgetSummary, overallProgress } from "./derive";
+import { ymKey } from "../state/recurring";
 
 function complete(state: AppState, ids: NodeId[]): AppState {
   const next = structuredClone(state);
@@ -26,6 +27,24 @@ describe("deriveStatus", () => {
     const d = deriveStatus(s);
     expect(d.Start).toBe("done");
     expect(d.Rent).toBe("current");
+  });
+
+  it("marking a recurring node complete (toggleComplete) advances the graph to the next node", () => {
+    let s = makeInitialState();
+    s = complete(s, ["Start", "Rent"]);
+    const d = deriveStatus(s);
+    expect(d.Rent).toBe("done");
+    expect(d.Food).toBe("current");
+  });
+
+  it("setting monthlyChecks alone (monthly check-in) leaves overallProgress unchanged", () => {
+    const s = makeInitialState();
+    const before = overallProgress(s);
+    const withCheckIn = structuredClone(s);
+    withCheckIn.nodes.Rent.monthlyChecks = { [ymKey()]: true };
+    const after = overallProgress(withCheckIn);
+    expect(after).toEqual(before);
+    expect(deriveStatus(withCheckIn).Rent).toBe("upcoming");
   });
 
   it("walks through Step 0 linearly", () => {
@@ -145,14 +164,16 @@ describe("monthlyBudgetSummary", () => {
     expect(monthlyBudgetSummary(s, MONTH)).toEqual({ target: 1960, funded: 1930 });
   });
 
-  it("summary sums stay exact across fractional amounts and nodes", () => {
+  it("summary sums stay exact across cent-sized amounts and nodes", () => {
+    // 10c + 20c across two nodes: 0.1 + 0.2 in the old dollars representation,
+    // exactly 30 in v4's integer cents.
     const s = seeded(
       [
-        cat({ id: "Rent", nodeId: "Rent", monthlyTarget: 0.1 }),
-        cat({ id: "Food", nodeId: "Food", monthlyTarget: 0.2 }),
+        cat({ id: "Rent", nodeId: "Rent", monthlyTarget: 10 }),
+        cat({ id: "Food", nodeId: "Food", monthlyTarget: 20 }),
       ],
-      { Rent: 0.1, Food: 0.2 },
+      { Rent: 10, Food: 20 },
     );
-    expect(monthlyBudgetSummary(s, MONTH)).toEqual({ target: 0.3, funded: 0.3 });
+    expect(monthlyBudgetSummary(s, MONTH)).toEqual({ target: 30, funded: 30 });
   });
 });

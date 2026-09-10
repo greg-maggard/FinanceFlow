@@ -64,7 +64,6 @@ ios/
       Domain/                 # Progress, Recurring streaks, Identity/medals
       State/AppStore.swift    # @Observable store + debounced autosave
       Persistence/            # StorageAdapter, FileStorageAdapter, JSONCoder, IO/migrate
-      Integrations/           # BalanceProvider seam (+ ManualProvider)
     Tests/FinanceFlowKitTests/
   FinanceFlow/                # SwiftUI app target
     App/                      # entry point, RootView, CelebrationCenter
@@ -103,6 +102,5 @@ visual; nodes keep an `accessibilityAction` so VoiceOver can still open them.
 
 ## Deferred to v2 (seams already in place)
 
-- **YNAB / Plaid** — `BalanceProvider` protocol ships; only `ManualProvider` is wired.
 - **iCloud sync** — `StorageAdapter` lets a `CloudKitStorageAdapter` drop in later.
 - Accounts, Widgets, Live Activities, Shortcuts, notifications, snapshot tests.

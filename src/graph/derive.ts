@@ -1,6 +1,7 @@
-import type { AppState, MonthKey, NodeId } from "../state/schema";
+import type { AppState, Cents, MonthKey, NodeId } from "../state/schema";
+import { cents } from "../state/schema";
 import { RECURRING } from "../theme/identity";
-import { fromCents, snapshot, toCents } from "../budget/ledger";
+import { snapshot } from "../budget/ledger";
 import { recurringTotals } from "../budget/nodeLedger";
 import { ymKey } from "../state/recurring";
 import { GRAPH, GRAPH_BY_ID, type GraphNode } from "./flowchart";
@@ -9,7 +10,7 @@ export type Status = "done" | "current" | "upcoming" | "skipped";
 
 export type DerivedStatus = Record<NodeId, Status>;
 
-export function deriveStatus(state: AppState): DerivedStatus {
+export function deriveStatus(state: Pick<AppState, "nodes" | "decisions">): DerivedStatus {
   const status: Partial<Record<NodeId, Status>> = {};
   const visited = new Set<NodeId>();
   let frontier: NodeId[] = [];
@@ -89,7 +90,9 @@ export function deriveStatus(state: AppState): DerivedStatus {
   return status as DerivedStatus;
 }
 
-export function overallProgress(state: AppState): { done: number; total: number; pct: number } {
+export function overallProgress(
+  state: Pick<AppState, "nodes" | "decisions">,
+): { done: number; total: number; pct: number } {
   const status = deriveStatus(state);
   let done = 0;
   let total = 0;
@@ -102,21 +105,21 @@ export function overallProgress(state: AppState): { done: number; total: number;
   return { done, total, pct: total === 0 ? 0 : Math.round((done / total) * 100) };
 }
 
-export type BudgetSummary = { target: number; funded: number };
+export type BudgetSummary = { target: Cents; funded: Cents };
 
 /**
- * Dollar-denominated rollup of the monthly budget across the seven recurring
- * nodes' linked ledger categories: target = Σ monthly targets, funded = Σ
- * assigned this month. Mirrors `Derive.monthlyBudgetSummary` in FinanceFlowKit.
+ * Rollup of the monthly budget across the seven recurring nodes' linked ledger
+ * categories: target = Σ monthly targets, funded = Σ assigned this month.
+ * Mirrors `Derive.monthlyBudgetSummary` in FinanceFlowKit.
  */
 export function monthlyBudgetSummary(state: AppState, month: MonthKey = ymKey()): BudgetSummary {
   const snap = snapshot(state.budget, month);
-  let targetC = 0;
-  let fundedC = 0;
+  let target = 0;
+  let funded = 0;
   for (const id of RECURRING) {
     const totals = recurringTotals(state.budget, snap, id);
-    targetC += toCents(totals.target);
-    fundedC += toCents(totals.funded);
+    target += totals.target;
+    funded += totals.funded;
   }
-  return { target: fromCents(targetC), funded: fromCents(fundedC) };
+  return { target: cents(target), funded: cents(funded) };
 }

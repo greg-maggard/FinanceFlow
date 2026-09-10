@@ -2,8 +2,8 @@ import SwiftUI
 import FinanceFlowKit
 
 /// Edit a category: rename it, set or clear its goal, or delete it. Deleting
-/// uncategorizes the category's transactions and returns every month's
-/// assigned dollars to Ready-to-Assign, so the books stay balanced.
+/// hands the category's transactions and every month's assigned dollars to one
+/// other envelope, together, so no money is invented or lost.
 struct CategoryEditorSheet: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var theme
@@ -19,8 +19,7 @@ struct CategoryEditorSheet: View {
 
     @State private var name = ""
     @State private var goalKind: GoalKind = .none
-    @State private var goalAmount: Decimal = 0
-    @State private var confirmingDelete = false
+    @State private var goalAmount: Money = .zero
 
     var body: some View {
         NavigationStack {
@@ -46,15 +45,7 @@ struct CategoryEditorSheet: View {
                             .foregroundStyle(theme.colors.textSecondary)
                     }
 
-                    Button {
-                        confirmingDelete = true
-                    } label: {
-                        Label("Delete category", systemImage: "trash")
-                            .font(theme.typography.callout)
-                            .foregroundStyle(theme.colors.danger)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Delete \(category.name)")
+                    DeleteCategoryButton(category: category) { dismiss() }
                 }
                 .padding(theme.spacing.lg)
             }
@@ -72,18 +63,6 @@ struct CategoryEditorSheet: View {
                         .disabled(trimmedName.isEmpty)
                 }
             }
-            .confirmationDialog(
-                "Delete \(category.name)?",
-                isPresented: $confirmingDelete,
-                titleVisibility: .visible
-            ) {
-                Button("Delete", role: .destructive) {
-                    store.deleteCategory(category.id)
-                    dismiss()
-                }
-            } message: {
-                Text("Its transactions stay, uncategorized, and assigned dollars return to Ready to Assign.")
-            }
             .onAppear(perform: seed)
         }
     }
@@ -100,23 +79,23 @@ struct CategoryEditorSheet: View {
 
     private func seed() {
         name = category.name
-        if let monthly = category.monthlyTarget, monthly > 0 {
+        if let monthly = category.monthlyTarget, monthly > .zero {
             goalKind = .monthly
             goalAmount = monthly
-        } else if let total = category.balanceTarget, total > 0 {
+        } else if let total = category.balanceTarget, total > .zero {
             goalKind = .total
             goalAmount = total
         } else {
             goalKind = .none
-            goalAmount = 0
+            goalAmount = .zero
         }
     }
 
     private func commit() {
         var updated = category
         updated.name = trimmedName
-        updated.monthlyTarget = goalKind == .monthly && goalAmount > 0 ? goalAmount : nil
-        updated.balanceTarget = goalKind == .total && goalAmount > 0 ? goalAmount : nil
+        updated.monthlyTarget = goalKind == .monthly && goalAmount > .zero ? goalAmount : nil
+        updated.balanceTarget = goalKind == .total && goalAmount > .zero ? goalAmount : nil
         store.updateCategory(updated)
         dismiss()
     }

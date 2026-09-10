@@ -2,15 +2,16 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { useStore } from "../../state/store";
 import { useUI } from "../../state/uiStore";
-import type { Category, CategoryGroup, MonthKey, NodeId } from "../../state/schema";
+import type { Category, CategoryGroup, Cents, MonthKey, NodeId } from "../../state/schema";
+import { UNCATEGORIZED_CATEGORY_ID } from "../../state/schema";
 import type { MonthSnapshot } from "../../budget/ledger";
 import { IDENTITY } from "../../theme/identity";
 import { GlassCard } from "../glass/GlassCard";
-import { GlassInput } from "../glass/GlassInput";
+import { GlassInput, GlassSelect } from "../glass/GlassInput";
 import { NumberField } from "../glass/NumberField";
 import { GoalBar } from "../glass/GoalBar";
 import { KebabMenu } from "../glass/KebabMenu";
-import { Field, InlineAdd, SectionTitle, dollars } from "./bits";
+import { Field, FundMonthButton, InlineAdd, SectionTitle, dollars } from "./bits";
 
 // Funding green — envelopes glow when money lands in them, not when it leaves.
 const FUND_TINT = "#34d399";
@@ -28,16 +29,15 @@ const GOAL_KINDS: { kind: GoalKind; label: string; hint: string }[] = [
   { kind: "total", label: "Total", hint: "Save up to a total — the bar fills as the balance grows." },
 ];
 
-function availableChipStyle(amount: number): React.CSSProperties {
-  const cents = Math.round(amount * 100);
-  if (cents > 0) {
+function availableChipStyle(amount: Cents): React.CSSProperties {
+  if (amount > 0) {
     return {
       background: "rgba(52, 211, 153, 0.14)",
       color: "#a7f3d0",
       border: "1px solid rgba(52, 211, 153, 0.32)",
     };
   }
-  if (cents < 0) {
+  if (amount < 0) {
     return {
       background: "rgba(248, 113, 113, 0.12)",
       color: "#fca5a5",
@@ -75,11 +75,14 @@ function CategoryRow({
   month,
   snap,
   menuDrop,
+  hideMonthlyBar,
 }: {
   cat: Category;
   month: MonthKey;
   snap: MonthSnapshot;
   menuDrop: "down" | "up";
+  /** An untouched month: every monthly bar would read $0 of its target. */
+  hideMonthlyBar?: boolean;
 }) {
   const m = snap.categories[cat.id] ?? { assigned: 0, activity: 0, available: 0 };
   const [editing, setEditing] = useState(false);
@@ -200,11 +203,11 @@ function CategoryRow({
             >
               Edit name &amp; goal
             </button>
-            <ConfirmDelete name={cat.name} onDelete={() => useStore.getState().deleteCategory(cat.id)} />
+            <ConfirmDelete cat={cat} />
           </div>
         </KebabMenu>
       </div>
-      {target !== undefined && target > 0 && (
+      {target !== undefined && target > 0 && !(hideMonthlyBar && cat.monthlyTarget !== undefined) && (
         <GoalBar
           value={m.available}
           max={target}
@@ -217,22 +220,85 @@ function CategoryRow({
   );
 }
 
-/** Two-tap delete: arming explains where the money goes before committing. */
-export function ConfirmDelete({ name, onDelete }: { name: string; onDelete: () => void }) {
+/**
+ * Two-tap delete: arming says where the money goes before committing.
+ *
+ * An envelope with spending can't just be dropped — its transactions and its
+ * assigned dollars have to move together, or the delete conjures the spent
+ * money back into Ready to Assign. So arming asks which envelope receives
+ * both, defaulting to Uncategorized. An envelope no transaction ever touched
+ * has no activity to carry, so there is nothing to choose: it deletes outright
+ * and its assignments return to Ready to Assign — the common case of throwing
+ * away a mistake.
+ */
+export function ConfirmDelete({ cat, name }: { cat: Category; name?: string }) {
+  const transactions = useStore((s) => s.budget.transactions);
+  const categories = useStore((s) => s.budget.categories);
   const [armed, setArmed] = useState(false);
+  const [target, setTarget] = useState(UNCATEGORIZED_CATEGORY_ID);
+
+  // The catch-all holds what other envelopes hand off; it has nowhere to go.
+  if (cat.id === UNCATEGORIZED_CATEGORY_ID) return null;
+
+  const label = name || cat.name;
+  const hasTxns = transactions.some((t) => t.categoryId === cat.id);
+  const choices = [...categories]
+    .filter((c) => c.id !== cat.id && !c.hidden)
+    .sort((a, b) => a.order - b.order);
+  // Created lazily, so offer it even before it exists — picking it makes it.
+  const knowsUncategorized = choices.some((c) => c.id === UNCATEGORIZED_CATEGORY_ID);
+
   return (
     <div className="space-y-1.5">
-      {armed && (
-        <p className="text-[11px] text-white/45">
-          Transactions stay, uncategorized; assigned dollars return to Ready to Assign.
-        </p>
-      )}
+      {armed &&
+        (hasTxns ? (
+          <>
+            <p className="text-[11px] text-white/45">
+              Move {label}&rsquo;s transactions and money to…
+            </p>
+            <GlassSelect
+              aria-label={`Move ${label}'s transactions and money to`}
+              value={target}
+              onChange={(e) => setTarget(e.target.value)}
+            >
+              {!knowsUncategorized && (
+                <option value={UNCATEGORIZED_CATEGORY_ID}>Uncategorized</option>
+              )}
+              {choices.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </GlassSelect>
+          </>
+        ) : (
+          <p className="text-[11px] text-white/45">
+            Nothing was ever spent here — its assigned dollars return to Ready to Assign.
+          </p>
+        ))}
       <button
         type="button"
-        onClick={() => (armed ? onDelete() : setArmed(true))}
+        onClick={() => {
+          if (!armed) {
+            setArmed(true);
+            return;
+          }
+          const reassignTo = hasTxns ? target : UNCATEGORIZED_CATEGORY_ID;
+          // w3-search-undo: deleteCategory hands back an inverse patch, not a
+          // whole pre-delete book slice — undoDeleteCategory applies it over
+          // whatever the budget looks like when Undo is tapped, so edits made
+          // during the toast's five-second window survive (Finding 4).
+          const patch = useStore.getState().deleteCategory(cat.id, reassignTo);
+          if (!patch) return;
+          useUI.getState().setPendingUndo({
+            kind: "category",
+            message: `Deleted ${label}`,
+            patch,
+          });
+        }}
         className="w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-red-300 hover:bg-red-500/10"
       >
-        {armed ? "Tap again to confirm" : `Delete ${name}`}
+        {armed ? (hasTxns ? `Move & delete ${label}` : "Tap again to confirm") : `Delete ${label}`}
       </button>
     </div>
   );
@@ -243,11 +309,13 @@ function GroupCard({
   categories,
   month,
   snap,
+  hideMonthlyBars,
 }: {
   group: CategoryGroup;
   categories: Category[];
   month: MonthKey;
   snap: MonthSnapshot;
+  hideMonthlyBars?: boolean;
 }) {
   return (
     <GlassCard className="px-5 py-4">
@@ -268,6 +336,7 @@ function GroupCard({
               month={month}
               snap={snap}
               menuDrop={i === 0 ? "down" : "up"}
+              hideMonthlyBar={hideMonthlyBars}
             />
           ))}
           {categories.length === 0 && (
@@ -284,7 +353,18 @@ function GroupCard({
   );
 }
 
-export function CategoryGroups({ month, snap }: { month: MonthKey; snap: MonthSnapshot }) {
+export function CategoryGroups({
+  month,
+  snap,
+  untouched,
+  onFundMonth,
+}: {
+  month: MonthKey;
+  snap: MonthSnapshot;
+  /** Nothing assigned yet this month, and monthly targets still unmet. */
+  untouched?: boolean;
+  onFundMonth?: () => void;
+}) {
   const budget = useStore((s) => s.budget);
   const groups = [...budget.groups].sort((a, b) => a.order - b.order);
   const addGroup = (name: string) => useStore.getState().addGroup(name);
@@ -304,8 +384,19 @@ export function CategoryGroups({ month, snap }: { month: MonthKey; snap: MonthSn
     );
   }
 
+  // A new month starts with every assignment at zero, so its monthly bars all
+  // read $0 of their target — fifteen empty bars that look like fifteen
+  // failures. Say what actually happened and offer the one tap that fixes it.
   return (
     <div className="space-y-4">
+      {untouched && onFundMonth && (
+        <GlassCard className="px-5 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-white/70">Nothing assigned yet this month</p>
+            <FundMonthButton onClick={onFundMonth} />
+          </div>
+        </GlassCard>
+      )}
       {groups.map((g) => (
         <GroupCard
           key={g.id}
@@ -315,6 +406,7 @@ export function CategoryGroups({ month, snap }: { month: MonthKey; snap: MonthSn
             .sort((a, b) => a.order - b.order)}
           month={month}
           snap={snap}
+          hideMonthlyBars={untouched}
         />
       ))}
       <InlineAdd label="Add group" placeholder="Group name" onAdd={addGroup} />

@@ -23,57 +23,17 @@ const variants = {
   }),
 };
 
-function SideZone({
-  side,
-  onClick,
-  enabled,
-}: {
-  side: "left" | "right";
-  onClick: () => void;
-  enabled: boolean;
-}) {
-  if (!enabled) return null;
-  return (
-    <button
-      type="button"
-      aria-label={side === "left" ? "Previous step" : "Next step"}
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick();
-      }}
-      className={`absolute inset-y-0 ${side === "left" ? "left-0" : "right-0"} z-0 w-1/2 cursor-pointer bg-transparent focus:outline-none`}
-    />
-  );
-}
-
-function OverviewZone({
-  position,
-  onClick,
-}: {
-  position: "top" | "bottom";
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label="Open overview"
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick();
-      }}
-      className={`flex-1 cursor-pointer bg-transparent focus:outline-none ${position === "top" ? "min-h-[24px]" : "min-h-[24px]"}`}
-    />
-  );
-}
-
 export function FocusStage({ activeId }: { activeId: NodeId }) {
   const setFocus = useUI((s) => s.setFocus);
   const setView = useUI((s) => s.setView);
   const view = useUI((s) => s.view);
   const direction = useUI((s) => s.direction);
-  const state = useStore();
+  // `neighbors` only reads `decisions` — a bare `useStore()` here would
+  // re-render the stage (and re-walk the graph) on every store mutation
+  // anywhere, budget edits included.
+  const decisions = useStore((s) => s.decisions);
 
-  const { prev, next } = useMemo(() => neighbors(state, activeId), [state, activeId]);
+  const { prev, next } = useMemo(() => neighbors({ decisions }, activeId), [decisions, activeId]);
 
   const goPrev = useCallback(() => {
     if (prev) setFocus(prev, "backward");
@@ -82,8 +42,6 @@ export function FocusStage({ activeId }: { activeId: NodeId }) {
   const goNext = useCallback(() => {
     if (next) setFocus(next, "forward");
   }, [next, setFocus]);
-
-  const goOverview = useCallback(() => setView("overview"), [setView]);
 
   useEffect(() => {
     if (view !== "focus") return;
@@ -99,10 +57,7 @@ export function FocusStage({ activeId }: { activeId: NodeId }) {
 
   return (
     <div className="relative flex w-full flex-1 flex-col">
-      <OverviewZone position="top" onClick={goOverview} />
       <div className="relative flex w-full items-center justify-center">
-        <SideZone side="left" onClick={goPrev} enabled={Boolean(prev)} />
-        <SideZone side="right" onClick={goNext} enabled={Boolean(next)} />
         <div className="relative z-10 w-full max-w-xl px-3 sm:px-5">
           <AnimatePresence mode="popLayout" initial={false} custom={direction}>
             <motion.div
@@ -128,7 +83,6 @@ export function FocusStage({ activeId }: { activeId: NodeId }) {
           </AnimatePresence>
         </div>
       </div>
-      <OverviewZone position="bottom" onClick={goOverview} />
     </div>
   );
 }

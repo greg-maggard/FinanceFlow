@@ -22,8 +22,8 @@ struct SubGoalCard<Fields: View>: View {
     @Environment(\.theme) private var theme
     let namePlaceholder: String
     @Binding var name: String
-    let value: Decimal
-    let target: Decimal
+    let value: Money
+    let target: Money
     var color: Color
     /// Cross-navigation: jump to this row's envelope on the Budget screen.
     var onOpenBudget: (() -> Void)? = nil
@@ -52,8 +52,8 @@ struct SubGoalCard<Fields: View>: View {
                     .buttonStyle(.plain)
                 }
                 fields
-                if target > 0 {
-                    GoalBar(value: value.displayDouble, max: target.displayDouble, color: color)
+                if target > .zero {
+                    GoalBar(value: Double(value.cents), max: Double(target.cents), color: color)
                 }
             }
         }
@@ -91,9 +91,9 @@ struct DebtListEditor: View {
                     store.state.budget,
                     nodeId: nodeId,
                     name: "",
-                    balance: 0,
+                    balance: .zero,
                     apr: Decimal(aprThreshold),
-                    minPayment: 0,
+                    minPayment: .zero,
                     today: Ledger.isoDay()
                 ).ops)
             }
@@ -150,8 +150,8 @@ struct DebtListEditor: View {
                         }
                     }
                     LabeledField(label: "Min pay") {
-                        NumberField(value: row.account.minPayment ?? 0) { v in
-                            patchAccount(row.account.id) { $0.minPayment = v > 0 ? v : nil }
+                        NumberField(value: row.account.minPayment ?? .zero) { v in
+                            patchAccount(row.account.id) { $0.minPayment = v > .zero ? v : nil }
                         }
                     }
                 }
@@ -230,7 +230,7 @@ struct GoalCategoryEditor: View {
                     namePlaceholder: "Goal (e.g. New car)",
                     name: nameBinding(row.category),
                     value: row.available,
-                    target: row.category.balanceTarget ?? 0,
+                    target: row.category.balanceTarget ?? .zero,
                     color: color,
                     onOpenBudget: { nav.openBudget(categoryId: row.category.id) },
                     onDelete: { pendingDelete = row.category }
@@ -238,8 +238,8 @@ struct GoalCategoryEditor: View {
                     VStack(spacing: theme.spacing.sm) {
                         HStack(spacing: theme.spacing.sm) {
                             LabeledField(label: "Target") {
-                                NumberField(value: row.category.balanceTarget ?? 0) { v in
-                                    patchCategory(row.category.id) { $0.balanceTarget = v > 0 ? v : nil }
+                                NumberField(value: row.category.balanceTarget ?? .zero) { v in
+                                    patchCategory(row.category.id) { $0.balanceTarget = v > .zero ? v : nil }
                                 }
                             }
                             LabeledField(label: "Saved") {
@@ -276,9 +276,17 @@ struct GoalCategoryEditor: View {
             titleVisibility: .visible,
             presenting: pendingDelete
         ) { category in
-            Button("Delete", role: .destructive) { store.deleteCategory(category.id) }
-        } message: { _ in
-            Text("Its transactions stay, uncategorized, and assigned dollars return to Ready to Assign.")
+            Button("Delete", role: .destructive) {
+                store.deleteCategory(category.id, reassignTo: BudgetBook.uncategorizedCategoryID)
+            }
+        } message: { category in
+            // Spending and funding have to move together, or the delete
+            // conjures the spent dollars back into Ready to Assign.
+            Text(
+                store.state.budget.transactions.contains { $0.categoryId == category.id }
+                    ? "Its transactions and its assigned dollars both move to Uncategorized — Ready to Assign doesn't change."
+                    : "Nothing was ever spent here — its assigned dollars return to Ready to Assign."
+            )
         }
     }
 
